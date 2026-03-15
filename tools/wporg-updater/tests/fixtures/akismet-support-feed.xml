@@ -1,0 +1,953 @@
+<?xml version="1.0" encoding="UTF-8"?>
+	<rss version="2.0"
+		xmlns:content="http://purl.org/rss/1.0/modules/content/"
+		xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+		xmlns:dc="http://purl.org/dc/elements/1.1/"
+		xmlns:atom="http://www.w3.org/2005/Atom"
+
+			>
+
+	<channel>
+
+		<title>WordPress.org Forums &#187; [Akismet Anti-spam: Spam Protection] Support</title>
+		<atom:link href="https://wordpress.org/support/plugin/akismet/feed/" rel="self" type="application/rss+xml" />
+		<link>https://wordpress.org/support/plugin/akismet/feed/</link>
+		<description></description>		<lastBuildDate>Sat, 14 Mar 2026 11:25:19 +0000</lastBuildDate>
+		<generator>https://bbpress.org/?v=2.7.0-alpha-2</generator>
+		<language>en-US</language>
+
+		
+		
+			
+				<item>
+					<guid>https://wordpress.org/support/topic/akismet-flagging-gravity-forms-submissions-as-spam/</guid>
+					<title><![CDATA[Akismet Flagging Gravity Forms Submissions as Spam]]></title>
+					<link>https://wordpress.org/support/topic/akismet-flagging-gravity-forms-submissions-as-spam/</link>
+					<pubDate>Thu, 12 Mar 2026 11:00:14 +0000</pubDate>
+					<dc:creator>yashtiwari</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 1</p>
+						<p class="wp-block-paragraph">Hello Team,</p>
+
+
+
+<p class="wp-block-paragraph">We are currently using Akismet with Gravity Forms on our website and have noticed that some legitimate form submissions are being flagged as spam.</p>
+
+
+
+<p class="wp-block-paragraph">While reviewing the spam entries in Gravity Forms, we found that several submissions were automatically marked as spam by Akismet. Some of the email addresses used in those submissions include:</p>
+
+
+
+<ul>
+<li><a href="mailto:lilatucker@yopmail.com" rel="nofollow ugc">lilatucker@yopmail.com</a></li>
+
+
+
+<li><a href="mailto:test@abc.com" rel="nofollow ugc">test@abc.com</a></li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">These appear to be test submissions, but we would like to understand why they are being flagged as spam and whether this behavior is expected from Akismet.</p>
+
+
+
+<p class="wp-block-paragraph">Additionally, we would appreciate your guidance on the following:</p>
+
+
+
+<ol start="1">
+<li>What criteria does Akismet use to determine whether a form submission should be marked as spam?</li>
+
+
+
+<li>Is there any configuration or recommended setup for Akismet when used with Gravity Forms to reduce false positives?</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">For your reference, we have already reviewed some of the flagged entries and marked them as <strong>Not Spam</strong> within Gravity Forms.</p>
+
+
+
+<p class="wp-block-paragraph">We would appreciate your help in understanding this behavior so we can ensure legitimate submissions are not incorrectly filtered.</p>
+
+
+
+<p class="wp-block-paragraph">Thank you for your assistance.</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/question-about-checking-if-akismet-is-working/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Question about checking if Akismet is working]]></title>
+					<link>https://wordpress.org/support/topic/question-about-checking-if-akismet-is-working/</link>
+					<pubDate>Mon, 09 Mar 2026 05:08:10 +0000</pubDate>
+					<dc:creator>dashaun645</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 1</p>
+						<p class="wp-block-paragraph">Quick question. I installed Akismet and added the API key, and everything shows as active. Just wondering how you usually confirm it’s actually filtering spam correctly?</p>
+
+
+
+<p class="wp-block-paragraph">Do you normally wait for spam comments to appear in the spam folder or is there any simple way to test it?</p>
+
+
+
+<p class="wp-block-paragraph">Just want to be sure it’s running properly. tnkz!</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/activypub-comments-flagged-as-spam-when-they-should-not-be/</guid>
+					<title><![CDATA[ActivyPub comments flagged as spam when they should not be]]></title>
+					<link>https://wordpress.org/support/topic/activypub-comments-flagged-as-spam-when-they-should-not-be/</link>
+					<pubDate>Fri, 06 Mar 2026 15:54:22 +0000</pubDate>
+					<dc:creator>John Eckman</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 1</p>
+						<p class="wp-block-paragraph">Using Akismet with ActivityPub, users with previously approved comments still get flagged as spam </p>
+
+
+
+<p class="wp-block-paragraph">&#8220;Likes&#8221; coming in via ActivityPub protocol for some users get flagged as spam even when they have dozens of previously approved comments</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/cannot-reach-akismet-to-sign-up/</guid>
+					<title><![CDATA[cannot reach akismet to sign up]]></title>
+					<link>https://wordpress.org/support/topic/cannot-reach-akismet-to-sign-up/</link>
+					<pubDate>Sat, 07 Feb 2026 23:10:48 +0000</pubDate>
+					<dc:creator>wp223</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 1</p>
+						<p class="wp-block-paragraph">I am trying to ask Akismet about pricing and coverage, but when I try to send the form, I get a message saying I need to include my URL even though I have *already* included my URL.  In fact I have tried it with different formats (with and without www.) and on different browsers (Safari and Firefox) but it still won&#8217;t let me submit my pricing question.  How can I ask Akismet about pricing and coverage, before deciding whether to buy their service?</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/too-many-redirects-143/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Too Many Redirects Issue]]></title>
+					<link>https://wordpress.org/support/topic/too-many-redirects-143/</link>
+					<pubDate>Tue, 23 Dec 2025 04:17:14 +0000</pubDate>
+					<dc:creator>SomeRandomGuy</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 7</p>
+						<p class="wp-block-paragraph">As of recently, I can no longer access the plugin. Upon activation, I receive the &#8220;too many redirects&#8221; page.</p>
+
+
+
+<p class="wp-block-paragraph">The URL it&#8217;s trying to reach is wp-admin/options-general.php?page=akismet-key-config&amp;view=start</p>
+
+
+
+<p class="wp-block-paragraph">I&#8217;m running WordPress version 6.9 on NGINX. </p>
+
+
+<ul id="bbp-topic-revision-log-18765114" class="bbp-topic-revision-log">
+
+	<li id="bbp-topic-revision-log-18765114-item-18765117" class="bbp-topic-revision-log-item">
+		This topic was modified 2 months, 3 weeks ago by <a href="https://wordpress.org/support/users/cdizzie/" title="View SomeRandomGuy&#039;s profile" class="bbp-author-link"><span  class="bbp-author-name">SomeRandomGuy</span></a>.
+	</li>
+
+</ul>
+
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/bad-comment-submission-triggers-php-warnings/</guid>
+					<title><![CDATA[Bad comment submission triggers PHP warnings]]></title>
+					<link>https://wordpress.org/support/topic/bad-comment-submission-triggers-php-warnings/</link>
+					<pubDate>Mon, 22 Dec 2025 11:18:58 +0000</pubDate>
+					<dc:creator>leedxw</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 1</p>
+						<p class="wp-block-paragraph">An attacker is currently triggering PHP warnings in our logs with POSTs to <code>wp-comments-post.php</code></p>
+
+
+
+<pre class="wp-block-code"><code>PHP Warning:  Array to string conversion in /var/www/html/wp-includes/pluggable.php on line 2469</code></pre>
+
+
+
+<p class="wp-block-paragraph">This is likely someone testing for vulnerabilities.</p>
+
+
+
+<p class="wp-block-paragraph">I don&#8217;t have copies of the POST data but, on investigation, I believe this is happening because akismet is passing a (submitted) array to <code>wp_verify_nonce()</code> where it requires a string. A check using <code>is_string()</code> should avoid this &#8211; POST values can only be strings or arrays (of strings).</p>
+
+
+
+<pre class="wp-block-code"><code>diff --git a/class.akismet.php b/class.akismet.php<br />index caccd37..5b3a894 100644<br />--- a/class.akismet.php<br />+++ b/class.akismet.php<br />@@ -317,7 +317,7 @@ class Akismet {<br />                $comment&#091;'akismet_comment_nonce'] = 'inactive';<br />                if ( $akismet_nonce_option == 'true' || $akismet_nonce_option == '' ) {<br />                        $comment&#091;'akismet_comment_nonce'] = 'failed';<br />-                       if ( isset( $_POST&#091;'akismet_comment_nonce'] ) &amp;&amp; wp_verify_nonce( $_POST&#091;'akismet_comment_nonce'], 'akismet_comment_nonce_' . $comment&#091;'comment_post_ID'] ) ) {<br />+                       if ( isset( $_POST&#091;'akismet_comment_nonce'] ) &amp;&amp; is_string( $_POST&#091;'akismet_comment_nonce'] ) &amp;&amp; wp_verify_nonce( $_POST&#091;'akismet_comment_nonce'], 'akismet_comment_nonce_' . $comment&#091;'comment_post_ID'] ) ) {<br />                                $comment&#091;'akismet_comment_nonce'] = 'passed';<br />                        }</code></pre>
+
+
+
+<p class="wp-block-paragraph">Reproducing the warning requires identifying a post ID with comments enabled:</p>
+
+
+
+<pre class="wp-block-code"><code>curl -X POST \<br /> -d "comment=This should trigger an error&amp;author=Test&amp;email=example@example.com&amp;comment_post_ID=123&amp;akismet_comment_nonce&#091;]=" \<br /> http://localhost/wp-comments-post.php</code></pre>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/api-key-166/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>API key]]></title>
+					<link>https://wordpress.org/support/topic/api-key-166/</link>
+					<pubDate>Tue, 18 Nov 2025 06:02:31 +0000</pubDate>
+					<dc:creator>esmo53</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 1</p>
+						<p class="wp-block-paragraph">Hi, Provide an API key to activate the site</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/akismet-not-working-properly-need-assistance/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Akismet Not Working Properly — Need Assistance]]></title>
+					<link>https://wordpress.org/support/topic/akismet-not-working-properly-need-assistance/</link>
+					<pubDate>Mon, 17 Nov 2025 06:03:01 +0000</pubDate>
+					<dc:creator>asifshahzaad</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 0</p>
+						<p class="wp-block-paragraph">Hi Team,<br />I am using the Akismet plugin on my website <a href="https://aboutnames.co.uk" rel="nofollow ugc">https://aboutnames.co.uk</a>, and it seems that spam comments are still appearing even though the plugin is active and configured.</p>
+
+
+
+<p class="wp-block-paragraph">Here is what I have already tried:<br />– Reinstalled the plugin<br />– Verified the API key<br />– Cleared caches<br />– Disabled other plugins to check for conflicts</p>
+
+
+
+<p class="wp-block-paragraph">Despite this, spam comments are still getting through. Could you please guide me on how to properly configure Akismet to block all spam effectively?</p>
+
+
+
+<p class="wp-block-paragraph">Thank you!</p>
+
+
+
+<p class="wp-block-paragraph">Here is what I have already tried:<br />– Reinstalled the plugin<br />– Checked the API key<br />– Cleared cache<br />– Disabled other plugins to check for conflicts</p>
+
+
+
+<p class="wp-block-paragraph">But the problem is still not resolved.<br />Could you please help me diagnose and fix this issue?</p>
+
+
+
+<p class="wp-block-paragraph">Thank you!</p>
+
+
+<ul id="bbp-topic-revision-log-18721486" class="bbp-topic-revision-log">
+
+	<li id="bbp-topic-revision-log-18721486-item-18721524" class="bbp-topic-revision-log-item">
+		This topic was modified 3 months, 3 weeks ago by <a href="https://wordpress.org/support/users/asifshahzaad/" title="View asifshahzaad&#039;s profile" class="bbp-author-link"><span  class="bbp-author-name">asifshahzaad</span></a>.
+	</li>
+
+</ul>
+
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/multisite-and-network-activation/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Multisite and Network Activation]]></title>
+					<link>https://wordpress.org/support/topic/multisite-and-network-activation/</link>
+					<pubDate>Fri, 31 Oct 2025 23:35:37 +0000</pubDate>
+					<dc:creator>stemsrus</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">Hi all, I have a wp-multisite setup.  Each site is cloned from a parent site with its own sub-directory.  Is it recommended to network activate Akismet or should it be activated per site?</p>
+
+
+
+<p class="wp-block-paragraph">Thanks</p>
+
+
+
+<p class="wp-block-paragraph"></p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/legit-form-submissions-tag-as-spam/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Legit form submissions tag as spam]]></title>
+					<link>https://wordpress.org/support/topic/legit-form-submissions-tag-as-spam/</link>
+					<pubDate>Tue, 28 Oct 2025 06:02:23 +0000</pubDate>
+					<dc:creator>chem09</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 5</p>
+						<p class="wp-block-paragraph">Good day! Is there any way I can prevent Akismet from flagging some legit form submission as spam? Because it&#8217;s been happening for a while. </p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/will-akismet-block-mailchimp-from-access-to-rss-feed/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Will Akismet block Mailchimp from access to RSS feed]]></title>
+					<link>https://wordpress.org/support/topic/will-akismet-block-mailchimp-from-access-to-rss-feed/</link>
+					<pubDate>Thu, 04 Sep 2025 18:17:30 +0000</pubDate>
+					<dc:creator>winterstreet</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">I&#8217;ve been using a different plugin for anti-spam, and it blocks Mailchimp from accessing the RSS feed, which it needs to do for an auto blog post to email campaign. The only fix with that plugin is to add the IP addresses that get blocked, to a whitelist. Which kind of works, until Mailchimp uses a different IP address. So, if I switch/pay for Akismet, will I run into the same problem?</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/elementor-249/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Elementor]]></title>
+					<link>https://wordpress.org/support/topic/elementor-249/</link>
+					<pubDate>Sat, 30 Aug 2025 14:43:21 +0000</pubDate>
+					<dc:creator>ritacristinamagalhaes</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">I really need help with every pages like those above because i can&#8217;t edit anything&#8230; I really need that somebody could helping me please?!</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/i-have-a-question-about-using-akismet/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>I have a question about using Akismet]]></title>
+					<link>https://wordpress.org/support/topic/i-have-a-question-about-using-akismet/</link>
+					<pubDate>Thu, 28 Aug 2025 20:39:23 +0000</pubDate>
+					<dc:creator>ritacristinamagalhaes</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 1</p>
+						<p class="wp-block-paragraph"></p>
+
+
+
+<p class="wp-block-paragraph">Please follow the instructions there.</p>
+
+
+
+<p class="wp-block-paragraph">How do I do that?&nbsp;</p>
+
+
+<ul id="bbp-topic-revision-log-18618337" class="bbp-topic-revision-log">
+
+	<li id="bbp-topic-revision-log-18618337-item-18618386" class="bbp-topic-revision-log-item">
+		This topic was modified 6 months, 2 weeks ago by <a href="https://wordpress.org/support/users/jdembowski/" title="View Jan Dembowski&#039;s profile" class="bbp-author-link"><span  class="bbp-author-name">Jan Dembowski</span></a>. Reason: Removed URL from the topic title
+	</li>
+
+</ul>
+
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/askimet-and-other-antispam-plugin/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Askimet and other antispam plugin]]></title>
+					<link>https://wordpress.org/support/topic/askimet-and-other-antispam-plugin/</link>
+					<pubDate>Sat, 09 Aug 2025 21:37:56 +0000</pubDate>
+					<dc:creator>Ricsca2</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 4</p>
+						<p class="wp-block-paragraph">I installed a ping that inserts reCAPCHA into the registration form.<br />I wanted to know if Askimet will be added to the other security buses.</p>
+
+
+
+<p class="wp-block-paragraph">Thanks</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/way-to-hide-the-api-key-on-our-sites/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Way to hide the API key on our sites?]]></title>
+					<link>https://wordpress.org/support/topic/way-to-hide-the-api-key-on-our-sites/</link>
+					<pubDate>Fri, 08 Aug 2025 12:03:43 +0000</pubDate>
+					<dc:creator>dangrimes</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">Good morning! One thing I&#8217;ve noticed with the plugin is that it in pain view shows the API key in our settings meaning any user can go in and see that and copy it to use on their own sites.<br /><br />Most plugins hide this key with asterisks/etc. but for some reason the akismet plugin shows the key in plain site. Is this something we can change or maybe a possible feature request? I find it to be not very secure having this key available for anyone to see.<br /><br />I do know we can block access to URL&#8217;s in the settings on the akismet website in our account, but if we forgot to check this (for example), then another website can make use of our key (since it&#8217;s unlimited websites). <br /><br />Looking forward to your thoughts, thank you. </p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/php-deprecated-strtolower-passing-null-to-parameter-1-in-akismet/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>&#8220;PHP deprecated: &#8220;strtolower(): Passing null to parameter #1&#8221; in Akismet]]></title>
+					<link>https://wordpress.org/support/topic/php-deprecated-strtolower-passing-null-to-parameter-1-in-akismet/</link>
+					<pubDate>Mon, 28 Jul 2025 16:56:59 +0000</pubDate>
+					<dc:creator>Jer Clarke</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 4</p>
+						<p class="wp-block-paragraph">Hello to hopefully someone from the Akismet dev team. I couldn&#8217;t find a Github profile, so I&#8217;ll write here. </p>
+
+
+
+<p class="wp-block-paragraph">Strange scenario, but some bot is loading this url on my live site: <strong><code>/wp-json/akismet/v1/alert </code></strong></p>
+
+
+
+<p class="wp-block-paragraph">This results in the following deprecation notice in my error logs:</p>
+
+
+
+<pre class="wp-block-code"><code>&#091;28-Jul-2025 15:58:51] PHP deprecated: "strtolower(): Passing null to parameter #1 ($string) of type string is deprecated" file: &#091;...]/akismet/class.akismet-rest-api.php:391 url: &#091;site]/wp-json/akismet/v1/alert </code></pre>
+
+
+
+<p class="wp-block-paragraph">The code in question doesn&#8217;t do any checking of these values, so the error is understandable:</p>
+
+
+
+<pre class="wp-block-code"><code>public static function remote_call_permission_callback( $request ) {<br />	$local_key = Akismet::get_api_key();<br /><br />	return $local_key &amp;&amp; ( strtolower( $request-&gt;get_param( 'key' ) ) === strtolower( $local_key ) );<br />	}</code></pre>
+
+
+
+<p class="wp-block-paragraph">Of course this is something new in PHP8, just another case where we have to cast the input as <code>(string)</code> or else check it&#8217;s <code>!empty()</code>. </p>
+
+
+
+<p class="wp-block-paragraph">I know there&#8217;s no reason for anyone/thing to load that URL directly, or at least I don&#8217;t imagine there is, but it would be great if the code could be adjusted to avoid emitting the error. As we&#8217;ve learned, bots will probe every single URL avaliable to them 🫠</p>
+
+
+
+<p class="wp-block-paragraph">Thanks for taking a look!</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/unused-styles-queues-on-every-page-since/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Unused styles queues on every page since]]></title>
+					<link>https://wordpress.org/support/topic/unused-styles-queues-on-every-page-since/</link>
+					<pubDate>Mon, 02 Jun 2025 21:26:59 +0000</pubDate>
+					<dc:creator>Timo Tijhof</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">Since version 5.3.6 released in April 2025, there is a style tag <code>akismet-widget-style-inline-css</code> added on every page view on every site that has Akismet installed.</p>
+
+
+
+<p class="wp-block-paragraph">The styles appear to target a class name &#8220;a-stats&#8221; which is part of an optional widget that, as far as I kmnow, is not used anywhere by default.</p>
+
+
+
+<p class="wp-block-paragraph">Impact:</p>
+
+
+
+<ul>
+<li>Added 2kB of blocking styles, unused, in the critical path at a priority level even above any post content and theme layout. </li>
+
+
+
+<li>Triggers CSP reports on sites that enforce no inline styles, e.g. <code>Content-Security-Policy: The page’s settings blocked an inline style (style-src-elem) from being applied because it violates the following directive: style-src 'self'</code></li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Commit <a href="https://plugins.trac.wordpress.org/changeset/3232287/" rel="nofollow ugc">r3232287</a> appears to have lost a check to determine whether the widget is active. Perhaps this can be restored?</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/your-akismet-subscription-is-suspended/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Your Akismet subscription is suspended.]]></title>
+					<link>https://wordpress.org/support/topic/your-akismet-subscription-is-suspended/</link>
+					<pubDate>Mon, 12 May 2025 10:38:38 +0000</pubDate>
+					<dc:creator>The Choice</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 8</p>
+						<p class="wp-block-paragraph">Hello, I was wondering why I am getting the<strong> &#8216;Your Akismet subscription is suspended&#8217; </strong>message. I sent an email to support a few weeks ago stating that my site is non-commercial but haven&#8217;t received any reply as of yet. Please advise. Thanks.</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/internal-server-error-with-update-2/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Internal Server Error with update]]></title>
+					<link>https://wordpress.org/support/topic/internal-server-error-with-update-2/</link>
+					<pubDate>Fri, 09 May 2025 16:08:21 +0000</pubDate>
+					<dc:creator>ZLC</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 6</p>
+						<p class="wp-block-paragraph">The latest update caused an Internal Server Error on my partner&#8217;s site (The server encountered an internal error or misconfiguration and was unable to complete your request.Please contact the server administrator at <a href="mailto:cgiadmin@yourhostingaccount.com" rel="nofollow ugc">cgiadmin@yourhostingaccount.com</a> to inform them of the time this error occurred, and the actions you performed just before this error.More information about this error may be available in the server error log.Additionally, a 500 Internal Server Error error was encountered while trying to use an ErrorDocument to handle the request.) When enabled, the homepage was visible, but clicking on any link redirected to the error page. When I disabled the plugin, the errors disappeared and the links went to where they were supposed to. Any troubleshooting tips? Thank you so much! </p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/unable-to-access-akismet-settings/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Unable to access akismet settings]]></title>
+					<link>https://wordpress.org/support/topic/unable-to-access-akismet-settings/</link>
+					<pubDate>Sun, 27 Apr 2025 09:31:57 +0000</pubDate>
+					<dc:creator>sianianni</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 17</p>
+						<p class="wp-block-paragraph">I&#8217;ve just installed askismet, but when I click on settings I get an error message &#8220;Sorry, you are not allowed to access this page.&#8221;</p>
+
+
+
+<p class="wp-block-paragraph">What is the readon for this?</p>
+
+
+
+<p class="wp-block-paragraph">Thanks</p>
+
+
+
+<p class="wp-block-paragraph"></p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/gravity-form-redirect-with-aksimet/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Gravity Form redirect with Akismet]]></title>
+					<link>https://wordpress.org/support/topic/gravity-form-redirect-with-aksimet/</link>
+					<pubDate>Wed, 09 Apr 2025 20:14:17 +0000</pubDate>
+					<dc:creator>kornelije</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 3</p>
+						<p class="wp-block-paragraph">I have a redirect set on form submit, but it doesn&#8217;t work when Akismet is toggled on. <br /><br />While it&#8217;s toggled on, not still 100% sure, but redirect seems to be working fine when regular entry, but when detected as spam by Akismet, it stays on the same page and displays a generic message:<br />&#8220;Thanks for contacting us! We will get in touch with you shortly.&#8221;<br /><br />What&#8217;s the catch here?</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/mysql-8-4-and-php-8-3-support/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>MySQL 8.4 and PHP 8.3 support]]></title>
+					<link>https://wordpress.org/support/topic/mysql-8-4-and-php-8-3-support/</link>
+					<pubDate>Tue, 01 Apr 2025 20:01:52 +0000</pubDate>
+					<dc:creator>Bruno Martinez</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 3</p>
+						<p class="wp-block-paragraph">Please, can you confirm your plugin supporting MySQL 8.4 and PHP 8.3?</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/fatal-error-with-5-3-7/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Fatal error with 5.3.7]]></title>
+					<link>https://wordpress.org/support/topic/fatal-error-with-5-3-7/</link>
+					<pubDate>Mon, 10 Mar 2025 15:52:21 +0000</pubDate>
+					<dc:creator>Mark Windisch</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">Akismet caused fatal error.</p>
+
+
+
+<p class="wp-block-paragraph">WordPress 6.7.2<br />Theme: Aerin (1.0 verzió)<br />plugin: Akismet Anti-spam: Spam Protection (5.3.7 verzió)<br />PHP verzió: 7.4.33<br /><br /><br />Hiba részletei<br />===============<br />A(z) /home/***/public_html/wp-content/plugins/akismet/akismet.php fájl 51 sora egy E_COMPILE_ERROR típusú hibát okoz. Hibaüzenet: require_once(): Failed opening required &#8216;/home/***/public_html/wp-content/plugins/akismet/class.akismet-widget.php&#8217; (include_path=&#8217;.:/opt/alt/php74/usr/share/pear&#8217;)</p>
+
+
+
+<p class="wp-block-paragraph">Its already running for days, just caused the error now.</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/preprocess-comment-before-akismet/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Preprocess Comment before Akismet]]></title>
+					<link>https://wordpress.org/support/topic/preprocess-comment-before-akismet/</link>
+					<pubDate>Sun, 23 Feb 2025 16:58:09 +0000</pubDate>
+					<dc:creator>Mayhem30</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">In my functions.php file, I&#8217;m trying to preprocess comments before Akismet does. It doesn&#8217;t appear to be working.</p>
+
+
+
+<p class="wp-block-paragraph"><code>function comment_spam($commentdata) {<br />     $email_address = trim( strtolower($commentdata['comment_author_email']) );<br />     if ( $email_address == 'banned@home.com' ) {<br />         wp_die('Sorry, your email address has been banned from posting comments.', '', array('response' =&gt; 403));<br />     }<br />}<br />add_filter( 'preprocess_comment' , 'comment_spam', 1 );</code><br /></p>
+
+
+
+<p class="wp-block-paragraph">Looking at the plugin source code, it looks like Akismet also uses a priority of 1 on preprocess_comment filter &#8211; and is getting fired off before mine.</p>
+
+
+
+<p class="wp-block-paragraph">What can I do to fix this? <br /></p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/akismet-is-sending-spam/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Akismet is sending SPAM!]]></title>
+					<link>https://wordpress.org/support/topic/akismet-is-sending-spam/</link>
+					<pubDate>Tue, 03 Dec 2024 07:16:50 +0000</pubDate>
+					<dc:creator>aegirr</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 3</p>
+						<p class="wp-block-paragraph">Akismet is an anti-spam-filter, but paradoxically Akismet is sending the users spam in accosiation with Black Friday and Black Monday Sale. 50% off. I got three (3) e-mails. Are those e-mails from Akismet or are they not? If yes, is there any place in WordPress control panel to turn this off? Thank you</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/this-string-does-not-have-the-text-domain-and-is-not-translated-4/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>This string does not have the text domain and is not translated]]></title>
+					<link>https://wordpress.org/support/topic/this-string-does-not-have-the-text-domain-and-is-not-translated-4/</link>
+					<pubDate>Fri, 29 Nov 2024 12:57:01 +0000</pubDate>
+					<dc:creator>itapress</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">Hello.</p>
+
+
+
+<p class="wp-block-paragraph">This string (<strong>&#8216;Upgrade plan&#8217;</strong>) does not have the <strong>text domain</strong> (<strong>&#8216;akismet&#8217;</strong>) and is not translated:</p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://plugins.trac.wordpress.org/browser/akismet/tags/5.3.5/views/notice.php#L70" target="_blank" rel="noreferrer noopener nofollow ugc">https://plugins.trac.wordpress.org/browser/akismet/tags/5.3.5/views/notice.php#L70</a></p>
+
+
+
+<p class="wp-block-paragraph">Thanks.</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/unable-to-unsubscribe-and-no-one-answer/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Unable to unsubscribe]]></title>
+					<link>https://wordpress.org/support/topic/unable-to-unsubscribe-and-no-one-answer/</link>
+					<pubDate>Fri, 22 Nov 2024 11:39:43 +0000</pubDate>
+					<dc:creator>mstrangd</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">Hello,</p>
+
+
+
+<p class="wp-block-paragraph">I haven&#8217;t blogged&nbsp;and&nbsp;used&nbsp;Akismet anymore since 2022. And I&nbsp;remember that I&#8217;ve already unsubscribed. However, I still have a payment from Akismet in 2023 and 2024.&nbsp;</p>
+
+
+
+<p class="wp-block-paragraph">Because I don&#8217;t&nbsp;blog anymore, I don&#8217;t&nbsp;have access anymore to my wordpress/akismet account to&nbsp;check.</p>
+
+
+
+<p class="wp-block-paragraph">I&#8217;ve already contacted through a form via <a href="https://akismet.com/contact/" rel="nofollow ugc">https://akismet.com/contact/</a>. But I didn&#8217;t receive any email, even an automatic one to confirm that my demand is taken into consideration. Is that normal? I remember asking my self the same question last year after completing the form to ask for the unsubscription, because there was no trace of follow-up or anything. And then this year I find my self still be charged again !</p>
+
+
+
+<p class="wp-block-paragraph">What can I do to have an anwser/ support from Akismet to make sure that my unsubscription is valid ? Is that normal that after completing the form I don&#8217;t receive any confirmation email? How can I know if my demand reached the support team or not? </p>
+
+
+<ul id="bbp-topic-revision-log-18154049" class="bbp-topic-revision-log">
+
+	<li id="bbp-topic-revision-log-18154049-item-18154067" class="bbp-topic-revision-log-item">
+		This topic was modified 1 year, 3 months ago by <a href="https://wordpress.org/support/users/mstrangd/" title="View mstrangd&#039;s profile" class="bbp-author-link"><span  class="bbp-author-name">mstrangd</span></a>.
+	</li>
+
+</ul>
+
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/askimet-5-3-4-caused-critical-fatal-error-on-my-blogs/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Askimet 5.3.4 caused critical/fatal error on my blogs.]]></title>
+					<link>https://wordpress.org/support/topic/askimet-5-3-4-caused-critical-fatal-error-on-my-blogs/</link>
+					<pubDate>Mon, 18 Nov 2024 23:55:31 +0000</pubDate>
+					<dc:creator>ALDesigner</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 2</p>
+						<p class="wp-block-paragraph">I use ManageWP. It updated about 15 blogs tonight and I got email alerts that they all went offline. I rolled the Akismet plugin back to 5.3.3 and they&#8217;re back up. When I try to manually update in a given site&#8217;s dashboard it says it can&#8217;t. I tried deleting 5.3.3 and just installing the latest version from scratch and it just said &#8220;fatal error&#8221; and didn&#8217;t install.<br /><br />Server requirements listed on the page for WP version and PHP version are both met, so I&#8217;m starting off from the assumption that it&#8217;s not those. I use server logs instead of WP logs, and my server just keeps saying something about a possible syntax error on line 159 of class.akismet-admin.php, but when I look over the whole file nothing stands out to me. Figured I&#8217;d pass it along.</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/porn-spam-comments-please-help/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Porn Spam Comments Please Help!]]></title>
+					<link>https://wordpress.org/support/topic/porn-spam-comments-please-help/</link>
+					<pubDate>Wed, 06 Nov 2024 21:34:22 +0000</pubDate>
+					<dc:creator>boodlesmom</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 3</p>
+						<p class="wp-block-paragraph">Hi! I am suddenly getting spam comments on the blog post I&#8217;ve linked.  It&#8217;s an old post that I updated in September.  I don&#8217;t remember this post or any other post getting hit like this.  Before I started getting the spam comments I had changed the article a little bit by updating affiliate links, images and republished the post.  Since then I&#8217;ve noticed over the past few weeks that I&#8217;m getting several comments each day on this particular post that are from porn sites.  Each comment is super long with a massive list of links to porn stuff.  Luckily Akismet is catching it so I can delete them.  I just want to know if there&#8217;s a reason I&#8217;m getting them and if there is anything else that I can do.  I definitely don&#8217;t want my site to point to porn.  Thank you for your help!</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+				
+				<item>
+					<guid>https://wordpress.org/support/topic/strange-forwarding/</guid>
+					<title><![CDATA[<span class="resolved" aria-label="Resolved" title="Topic is resolved."></span>Strange forwarding]]></title>
+					<link>https://wordpress.org/support/topic/strange-forwarding/</link>
+					<pubDate>Wed, 06 Nov 2024 17:27:35 +0000</pubDate>
+					<dc:creator>mahmacc</dc:creator>
+
+					
+					<description>
+						<![CDATA[
+						<p>Replies: 3</p>
+						<p class="wp-block-paragraph">One of our email accounts is receiving forwarded spam email which apparently arrives via Akismet with a header such as</p>
+
+
+
+<p class="wp-block-paragraph">—–Original Message—– From: Jeffreyrop <a href="mailto:yasen.krasen.13+77049@mail.ru" rel="nofollow ugc">&lt;yasen.krasen.13+77049@mail.ru&gt;</a> Sent: 03 November 2024 08:09 To: <a href="mailto:tickets@festivalchorushackney.org.uk" rel="nofollow ugc">tickets@festivalchorushackney.org.uk</a> Subject: Akismet: Spam – Survey response Ofiefheufjwoidjwi hfjsfoiewhgifewhfjasifdj qwoifjwkawdkkwefuhfkwoapdfweh jfkewijfgrogr</p>
+
+
+
+<p class="wp-block-paragraph">Why would any such email get sent rather than intercepted by Akismet?</p>
+						]]>
+					</description>
+
+					
+					
+					
+				</item>
+
+							
+		
+	</channel>
+	</rss>
+
