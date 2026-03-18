@@ -43,5 +43,4 @@ jobs:
           WPORG_REPO_ROOT: ${{ github.workspace }}
           # For an initial rollout, you can temporarily add:
           # WPORG_UPDATE_DRY_RUN: 1
-        # Change vendor/wp-core-base if you keep wp-core-base in another path.
-        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync
+        run: __WPORG_SYNC_COMMAND__

@@ -342,7 +342,7 @@ final class CoreUpdater
                 throw new RuntimeException(sprintf('Failed to open core archive: %s', $archivePath));
             }
 
-            $zip->extractTo($extractPath);
+            ZipExtractor::extractValidated($zip, $extractPath);
             $zip->close();
 
             $sourceRoot = $extractPath . '/wordpress';

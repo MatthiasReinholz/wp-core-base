@@ -40,5 +40,5 @@ jobs:
       - name: Run updater
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_API_URL: https://api.github.com
+          GITHUB_API_URL: ${{ github.api_url }}
         run: php tools/wporg-updater/bin/wporg-updater.php sync

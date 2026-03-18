@@ -353,7 +353,7 @@ final class Updater
                 throw new RuntimeException(sprintf('Failed to open plugin archive: %s', $archivePath));
             }
 
-            $zip->extractTo($extractPath);
+            ZipExtractor::extractValidated($zip, $extractPath);
             $zip->close();
 
             $rootDirectories = $this->rootDirectories($extractPath);

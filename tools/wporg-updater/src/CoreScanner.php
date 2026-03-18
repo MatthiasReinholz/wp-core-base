@@ -25,7 +25,7 @@ final class CoreScanner
             throw new RuntimeException(sprintf('Failed to read WordPress core version file: %s', $versionFile));
         }
 
-        if (preg_match("/\\$wp_version\\s*=\\s*'([^']+)'\\s*;/", $contents, $matches) !== 1) {
+        if (preg_match('/\$wp_version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $contents, $matches) !== 1) {
             throw new RuntimeException('Failed to parse $wp_version from wp-includes/version.php.');
         }
 

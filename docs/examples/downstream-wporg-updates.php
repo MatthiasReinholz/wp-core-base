@@ -2,6 +2,10 @@
 
 declare(strict_types=1);
 
+// Copy this file into the downstream repository as .github/wporg-updates.php
+// and then adjust the managed plugins for that project.
+// GITHUB_API_URL is used automatically when the workflow runs on GitHub Enterprise.
+
 return [
     'base_branch' => null,
     'support_max_pages' => 30,
@@ -11,13 +15,6 @@ return [
         'enabled' => true,
     ],
     'plugins' => [
-        [
-            'slug' => 'akismet',
-            'path' => 'wp-content/plugins/akismet',
-            'main_file' => 'akismet.php',
-            'enabled' => false,
-            'extra_labels' => ['plugin:akismet'],
-        ],
         [
             'slug' => 'woocommerce',
             'path' => 'wp-content/plugins/woocommerce',
@@ -34,14 +31,5 @@ return [
             'support_max_pages' => 60,
             'extra_labels' => ['plugin:jetpack'],
         ],
-        // Copy this block for each managed wordpress.org plugin.
-        // [
-        //     'slug' => 'example-plugin',
-        //     'path' => 'wp-content/plugins/example-plugin',
-        //     'main_file' => 'example-plugin.php',
-        //     'enabled' => true,
-        //     'support_max_pages' => 30,
-        //     'extra_labels' => ['plugin:example-plugin'],
-        // ],
     ],
 ];

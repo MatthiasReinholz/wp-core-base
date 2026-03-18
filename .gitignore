@@ -1,9 +1,10 @@
+/wp-config.php
 /wp-content/uploads/
 /wp-content/cache/
 /wp-content/upgrade/
 /wp-content/backups/
 /wp-content/advanced-cache.php
+/.DS_Store
 /.env
 /.phpunit.result.cache
-/tools/wporg-plugin-updater/.tmp/
-
+/tools/wporg-updater/.tmp/

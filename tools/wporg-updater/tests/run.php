@@ -8,6 +8,9 @@ use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\WordPressCoreClient;
 use WpOrgPluginUpdater\WordPressOrgClient;
 use WpOrgPluginUpdater\Config;
+use WpOrgPluginUpdater\DownstreamScaffolder;
+use WpOrgPluginUpdater\ZipExtractor;
+use WpOrgPluginUpdater\CoreScanner;
 
 require dirname(__DIR__) . '/src/Autoload.php';
 
@@ -100,6 +103,42 @@ $config = Config::load(__DIR__, $tempConfigPath);
 $enabledPlugins = $config->enabledPlugins();
 $assert($enabledPlugins[0]['support_max_pages'] === 60, 'Expected plugin support_max_pages override to load from config.');
 unlink($tempConfigPath);
+
+ZipExtractor::assertSafeEntryName('wordpress/wp-includes/version.php');
+$zipTraversalRejected = false;
+
+try {
+    ZipExtractor::assertSafeEntryName('../escape.php');
+} catch (RuntimeException) {
+    $zipTraversalRejected = true;
+}
+
+$assert($zipTraversalRejected, 'Expected ZipExtractor to reject path traversal entries.');
+
+$tempCoreRoot = sys_get_temp_dir() . '/wporg-core-scanner-' . bin2hex(random_bytes(4));
+mkdir($tempCoreRoot . '/wp-includes', 0777, true);
+file_put_contents($tempCoreRoot . '/wp-includes/version.php', "<?php\n\$wp_version = '6.9.4';\n");
+$coreScan = (new CoreScanner())->inspect($tempCoreRoot);
+$assert($coreScan['version'] === '6.9.4', 'Expected CoreScanner to parse $wp_version correctly.');
+unlink($tempCoreRoot . '/wp-includes/version.php');
+rmdir($tempCoreRoot . '/wp-includes');
+rmdir($tempCoreRoot);
+
+$tempScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-' . bin2hex(random_bytes(4));
+mkdir($tempScaffoldRoot, 0777, true);
+(new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->scaffold('vendor/wp-core-base');
+$scaffoldedConfig = (string) file_get_contents($tempScaffoldRoot . '/.github/wporg-updates.php');
+$scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+$scaffoldedBlocker = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
+$assert(str_contains($scaffoldedConfig, "'slug' => 'woocommerce'"), 'Expected scaffolded config to include the example plugin entries.');
+$assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
+$assert(str_contains($scaffoldedBlocker, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php pr-blocker'), 'Expected scaffolded blocker workflow to target the configured tool path.');
+unlink($tempScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+unlink($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
+unlink($tempScaffoldRoot . '/.github/wporg-updates.php');
+rmdir($tempScaffoldRoot . '/.github/workflows');
+rmdir($tempScaffoldRoot . '/.github');
+rmdir($tempScaffoldRoot);
 
 $corePayload = json_decode((string) file_get_contents($fixtureDir . '/wp-core-version-check.json'), true, 512, JSON_THROW_ON_ERROR);
 $coreOffer = $coreClient->parseLatestStableOffer($corePayload);

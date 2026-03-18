@@ -1,3 +1,6 @@
+# This file belongs in the downstream repository, not in wp-core-base itself.
+# It keeps later WordPress core and plugin update PRs blocked until earlier ones are resolved.
+
 name: WordPress.org Update PR Blocker
 
 on:
@@ -17,7 +20,7 @@ jobs:
   blocker:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out downstream repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.ref }}
@@ -32,4 +35,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
-        run: php tools/wporg-updater/bin/wporg-updater.php pr-blocker
+          WPORG_REPO_ROOT: ${{ github.workspace }}
+        # Change vendor/wp-core-base if you keep wp-core-base in another path.
+        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php pr-blocker
