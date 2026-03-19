@@ -56,10 +56,13 @@ That path keeps the learning curve manageable and works for both fresh projects 
 
 The current bundled baseline in this repository is:
 
+- the exact WordPress core and plugin versions currently committed to this Git repository
 - WordPress core `6.9.4`
-- Akismet
+- Akismet `5.6`
 - WooCommerce `10.6.1`
 - Jetpack `15.6`
+- Contact Form 7 `6.1.5`
+- Redirection `5.7.5`
 
 ## Documentation Map
 

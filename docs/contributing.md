@@ -90,6 +90,7 @@ Recommended discipline:
 - tag curated plugin baseline changes only when they are intentionally part of the reusable base
 - use tags that reflect the bundled core version, for example `v6.9.4.0`
 - publish release notes that explain what downstream users are adopting
+- keep the `Current Baseline` section in `README.md` aligned with the exact bundled plugin and core versions in the repository
 
 Use [release-process.md](release-process.md) as the actual maintainer checklist when cutting a release.
 

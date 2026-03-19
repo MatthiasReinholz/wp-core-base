@@ -31,5 +31,19 @@ return [
             'support_max_pages' => 60,
             'extra_labels' => ['plugin:jetpack'],
         ],
+        [
+            'slug' => 'contact-form-7',
+            'path' => 'wp-content/plugins/contact-form-7',
+            'main_file' => 'wp-contact-form-7.php',
+            'enabled' => true,
+            'extra_labels' => ['plugin:contact-form-7'],
+        ],
+        [
+            'slug' => 'redirection',
+            'path' => 'wp-content/plugins/redirection',
+            'main_file' => 'redirection.php',
+            'enabled' => true,
+            'extra_labels' => ['plugin:redirection'],
+        ],
     ],
 ];
