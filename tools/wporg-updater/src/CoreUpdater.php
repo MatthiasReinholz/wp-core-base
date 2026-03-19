@@ -163,7 +163,7 @@ final class CoreUpdater
         }
 
         $releaseForTarget = $this->coreClient->releaseForVersion($targetVersion, $release);
-        $labels = $this->releaseClassifier->deriveLabels($scope, (string) $releaseForTarget['release_text'], []);
+        $labels = $this->releaseClassifier->deriveLabels('source:wordpress.org', $scope, (string) $releaseForTarget['release_text'], []);
         $labels[] = 'component:wordpress-core';
 
         if ($blockedBy !== []) {
@@ -218,7 +218,7 @@ final class CoreUpdater
             return;
         }
 
-        $labels = $this->releaseClassifier->deriveLabels($scope, (string) $release['release_text'], []);
+        $labels = $this->releaseClassifier->deriveLabels('source:wordpress.org', $scope, (string) $release['release_text'], []);
         $labels[] = 'component:wordpress-core';
 
         if ($blockedBy !== []) {

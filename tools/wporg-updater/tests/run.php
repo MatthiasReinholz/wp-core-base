@@ -9,6 +9,7 @@ use WpOrgPluginUpdater\WordPressCoreClient;
 use WpOrgPluginUpdater\WordPressOrgClient;
 use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\DownstreamScaffolder;
+use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\ZipExtractor;
 use WpOrgPluginUpdater\CoreScanner;
 
@@ -17,6 +18,7 @@ require dirname(__DIR__) . '/src/Autoload.php';
 $fixtureDir = __DIR__ . '/fixtures';
 $classifier = new ReleaseClassifier();
 $wpClient = new WordPressOrgClient(new WpOrgPluginUpdater\HttpClient());
+$gitHubReleaseClient = new GitHubReleaseClient(new WpOrgPluginUpdater\HttpClient());
 $coreClient = new WordPressCoreClient(new WpOrgPluginUpdater\HttpClient());
 $supportClient = new SupportForumClient(new WpOrgPluginUpdater\HttpClient(), 30);
 $renderer = new PrBodyRenderer();
@@ -31,7 +33,7 @@ $assert($classifier->classifyScope('5.3.6', '5.3.7') === 'patch', 'Expected patc
 $assert($classifier->classifyScope('5.3.7', '5.4.0') === 'minor', 'Expected minor classification.');
 $assert($classifier->classifyScope('5.4.0', '6.0.0') === 'major', 'Expected major classification.');
 
-$labels = $classifier->deriveLabels('patch', 'Security fix for comment validation.', []);
+$labels = $classifier->deriveLabels('source:wordpress.org', 'patch', 'Security fix for comment validation.', []);
 $assert(in_array('type:security-bugfix', $labels, true), 'Patch releases must be labeled as security-bugfix.');
 
 $pluginInfo = json_decode((string) file_get_contents($fixtureDir . '/akismet-plugin-info.json'), true, 512, JSON_THROW_ON_ERROR);
@@ -78,6 +80,57 @@ $supportTopicsFromBody = PrBodyRenderer::extractSupportTopics($body);
 $assert(count($supportTopicsFromBody) === 1, 'Expected PR body support topics to round-trip.');
 $assert($supportTopicsFromBody[0]['url'] === $feedItems[0]['url'], 'Expected support topic parser to extract the topic URL.');
 
+$gitHubRelease = [
+    'tag_name' => 'v2.3.4',
+    'published_at' => '2026-03-18T12:45:00Z',
+    'html_url' => 'https://github.com/example/example-plugin/releases/tag/v2.3.4',
+    'zipball_url' => 'https://api.github.com/repos/example/example-plugin/zipball/v2.3.4',
+    'body' => "## Changes\n\n- Fix fatal error on PHP 8.4\n- Add new shortcode option",
+    'assets' => [
+        [
+            'name' => 'example-plugin.zip',
+            'browser_download_url' => 'https://github.com/example/example-plugin/releases/download/v2.3.4/example-plugin.zip',
+        ],
+    ],
+];
+$assert($gitHubReleaseClient->latestVersion($gitHubRelease, ['github_repository' => 'example/example-plugin']) === '2.3.4', 'Expected GitHub release tags to normalize into semver-like versions.');
+$assert($gitHubReleaseClient->downloadUrl($gitHubRelease, [
+    'slug' => 'example-plugin',
+    'github_repository' => 'example/example-plugin',
+    'github_release_asset_pattern' => '*.zip',
+]) === 'https://github.com/example/example-plugin/releases/download/v2.3.4/example-plugin.zip', 'Expected GitHub asset pattern matching to select the release asset.');
+$gitHubLabels = $classifier->deriveLabels('source:github', 'minor', $gitHubReleaseClient->markdownToText((string) $gitHubRelease['body']), []);
+$assert(in_array('source:github', $gitHubLabels, true), 'Expected GitHub plugin labels to include the GitHub source label.');
+$assert(in_array('type:security-bugfix', $gitHubLabels, true), 'Expected GitHub release notes with fix language to set the bugfix label.');
+$assert(in_array('type:feature', $gitHubLabels, true), 'Expected GitHub release notes with add language to set the feature label.');
+
+$gitHubBody = $renderer->renderGitHubPluginUpdate(
+    pluginName: 'Example Plugin',
+    pluginSlug: 'example-plugin',
+    pluginPath: 'wp-content/plugins/example-plugin',
+    currentVersion: '2.3.3',
+    targetVersion: '2.3.4',
+    releaseScope: 'patch',
+    releaseAt: '2026-03-18T12:45:00+00:00',
+    labels: ['automation:plugin-update', 'source:github', 'release:patch', 'type:security-bugfix'],
+    repository: 'example/example-plugin',
+    releaseUrl: 'https://github.com/example/example-plugin/releases/tag/v2.3.4',
+    issuesUrl: 'https://github.com/example/example-plugin/issues',
+    downloadUrl: 'https://github.com/example/example-plugin/releases/download/v2.3.4/example-plugin.zip',
+    releaseNotesMarkdown: (string) $gitHubRelease['body'],
+    metadata: [
+        'source' => 'github',
+        'slug' => 'example-plugin',
+        'target_version' => '2.3.4',
+        'release_at' => '2026-03-18T12:45:00+00:00',
+        'scope' => 'patch',
+        'branch' => 'codex/wporg-example-plugin-2-3-4',
+        'blocked_by' => [],
+    ],
+);
+$gitHubMetadata = PrBodyRenderer::extractMetadata($gitHubBody);
+$assert(is_array($gitHubMetadata) && $gitHubMetadata['source'] === 'github', 'Expected GitHub plugin PR body metadata round-trip to work.');
+
 $tempConfigPath = sys_get_temp_dir() . '/wporg-updater-config-' . bin2hex(random_bytes(4)) . '.php';
 file_put_contents($tempConfigPath, <<<'PHP'
 <?php
@@ -96,12 +149,23 @@ return [
             'support_max_pages' => 60,
             'extra_labels' => ['plugin:woocommerce'],
         ],
+        [
+            'source' => 'github',
+            'slug' => 'example-plugin',
+            'path' => 'wp-content/plugins/example-plugin',
+            'main_file' => 'example-plugin.php',
+            'enabled' => true,
+            'github_repository' => 'example/example-plugin',
+            'github_release_asset_pattern' => '*.zip',
+        ],
     ],
 ];
 PHP);
 $config = Config::load(__DIR__, $tempConfigPath);
 $enabledPlugins = $config->enabledPlugins();
 $assert($enabledPlugins[0]['support_max_pages'] === 60, 'Expected plugin support_max_pages override to load from config.');
+$assert($enabledPlugins[1]['source'] === 'github', 'Expected GitHub plugin source to load from config.');
+$assert($enabledPlugins[1]['github_repository'] === 'example/example-plugin', 'Expected GitHub repository config to load.');
 unlink($tempConfigPath);
 
 ZipExtractor::assertSafeEntryName('wordpress/wp-includes/version.php');

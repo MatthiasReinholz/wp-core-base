@@ -48,13 +48,25 @@ return [
             'enabled' => true,
             'extra_labels' => ['plugin:redirection'],
         ],
-        // Copy this block for each managed wordpress.org plugin.
+        // Copy this block for each managed plugin.
         // [
         //     'slug' => 'example-plugin',
         //     'path' => 'wp-content/plugins/example-plugin',
         //     'main_file' => 'example-plugin.php',
         //     'enabled' => true,
         //     'support_max_pages' => 30,
+        //     'extra_labels' => ['plugin:example-plugin'],
+        // ],
+        // GitHub release-backed plugins can use:
+        // [
+        //     'source' => 'github',
+        //     'slug' => 'example-plugin',
+        //     'path' => 'wp-content/plugins/example-plugin',
+        //     'main_file' => 'example-plugin.php',
+        //     'enabled' => true,
+        //     'github_repository' => 'owner/repo',
+        //     'github_release_asset_pattern' => '*.zip',
+        //     'github_archive_subdir' => '',
         //     'extra_labels' => ['plugin:example-plugin'],
         // ],
     ],

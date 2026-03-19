@@ -69,6 +69,15 @@ final class Config
                 }
             }
 
+            $plugin['source'] = self::string($plugin['source'] ?? 'wordpress.org', sprintf('plugins[%s].source', (string) $plugin['slug']));
+
+            if (! in_array($plugin['source'], ['wordpress.org', 'github'], true)) {
+                throw new RuntimeException(sprintf(
+                    'Plugin config source for "%s" must be either "wordpress.org" or "github".',
+                    (string) $plugin['slug']
+                ));
+            }
+
             $plugin['extra_labels'] = array_values(array_filter(
                 is_array($plugin['extra_labels'] ?? null) ? $plugin['extra_labels'] : [],
                 static fn (mixed $value): bool => is_string($value) && $value !== ''
@@ -76,6 +85,17 @@ final class Config
             $plugin['support_max_pages'] = array_key_exists('support_max_pages', $plugin)
                 ? self::positiveInt($plugin['support_max_pages'], sprintf('plugins[%s].support_max_pages', (string) $plugin['slug']))
                 : null;
+            $plugin['github_repository'] = self::nullableString($plugin['github_repository'] ?? null);
+            $plugin['github_release_asset_pattern'] = self::nullableString($plugin['github_release_asset_pattern'] ?? null);
+            $plugin['github_archive_subdir'] = self::nullableString($plugin['github_archive_subdir'] ?? null);
+            $plugin['github_token'] = self::nullableString($plugin['github_token'] ?? null);
+
+            if ($plugin['source'] === 'github' && $plugin['github_repository'] === null) {
+                throw new RuntimeException(sprintf(
+                    'GitHub plugin config for "%s" must define github_repository.',
+                    (string) $plugin['slug']
+                ));
+            }
 
             return $plugin;
         }, $this->plugins);

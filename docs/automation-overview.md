@@ -9,7 +9,7 @@ If you only want to use the repository as a dependency, start with [../README.md
 `wp-core-base` combines three things:
 
 - a WordPress core mirror that can be versioned and released
-- a curated baseline of selected wordpress.org plugins
+- a curated baseline of selected plugins
 - automation that raises GitHub pull requests when WordPress core or managed plugins have upstream updates
 
 ## Repository Model
@@ -44,14 +44,16 @@ The configuration currently covers:
 
 Each managed plugin entry provides:
 
-- wordpress.org slug
+- source type
+- plugin slug
 - repository path
 - main plugin file
 - enabled state
 - optional plugin-specific support-forum crawl limit
+- optional GitHub release repository and archive settings
 - optional extra labels
 
-Managed plugins are explicit. The updater does not try to guess which folders in `wp-content/plugins` should be treated as managed wordpress.org dependencies.
+Managed plugins are explicit. The updater does not try to guess which folders in `wp-content/plugins` should be treated as managed dependencies.
 
 ## Downstream Scaffolding
 
@@ -70,9 +72,9 @@ The rendered files come from `tools/wporg-updater/templates/` and `docs/examples
 For plugin updates, the updater:
 
 - reads the installed plugin version from the repository
-- queries wordpress.org for the latest version and metadata
-- collects the relevant changelog section
-- collects support topics opened after the release timestamp
+- queries the configured source for release metadata
+- collects the relevant changelog section or release notes
+- collects support topics opened after the release timestamp for wordpress.org plugins
 - classifies the release and applies labels
 - opens or refreshes a GitHub pull request
 
@@ -101,6 +103,7 @@ The automation maintains these shared labels:
 - `automation:plugin-update`
 - `component:wordpress-core`
 - `source:wordpress.org`
+- `source:github`
 - `release:patch`
 - `release:minor`
 - `release:major`
@@ -111,6 +114,19 @@ The automation maintains these shared labels:
 - `status:blocked`
 
 Plugins can also define extra labels such as `plugin:woocommerce` or `plugin:jetpack`.
+
+## GitHub Plugin Sources
+
+GitHub plugin support is release-backed.
+
+The intended model is:
+
+- the plugin lives in a GitHub repository
+- the repository publishes stable GitHub Releases
+- the release either exposes a public `.zip` asset or a public source archive that contains the plugin code
+- if the plugin code is not at the repository root, `github_archive_subdir` points to the plugin subdirectory inside the extracted archive
+
+The current implementation does not try to infer changelogs from raw commits or tags. It uses GitHub Release metadata as the source of truth.
 
 ## Support-Forum Scanning
 
@@ -130,7 +146,7 @@ The automation assumes this repository remains a clean base repository.
 Important consequences:
 
 - WordPress core replacement is only safe when the repository stays close to an upstream core mirror
-- managed plugin updates replace the full plugin directory from the official wordpress.org package
+- managed plugin updates replace the full plugin directory from the configured source archive
 - local patches inside managed plugin directories are therefore unsafe unless you intentionally accept that tradeoff
 
 ## Verification

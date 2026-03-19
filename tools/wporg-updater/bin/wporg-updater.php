@@ -9,6 +9,7 @@ use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\EnvironmentDoctor;
 use WpOrgPluginUpdater\GitCommandRunner;
 use WpOrgPluginUpdater\GitHubClient;
+use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\PluginScanner;
 use WpOrgPluginUpdater\PrBodyRenderer;
@@ -99,6 +100,7 @@ TEXT);
             config: $config,
             pluginScanner: new PluginScanner(),
             wordPressOrgClient: new WordPressOrgClient($httpClient),
+            gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase),
             supportForumClient: new SupportForumClient($httpClient, $config->supportMaxPages),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),

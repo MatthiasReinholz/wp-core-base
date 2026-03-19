@@ -14,6 +14,7 @@ final class Updater
         private readonly Config $config,
         private readonly PluginScanner $pluginScanner,
         private readonly WordPressOrgClient $wordPressOrgClient,
+        private readonly GitHubReleaseClient $gitHubReleaseClient,
         private readonly SupportForumClient $supportForumClient,
         private readonly ReleaseClassifier $releaseClassifier,
         private readonly PrBodyRenderer $prBodyRenderer,
@@ -31,7 +32,7 @@ final class Updater
 
         foreach ($this->config->enabledPlugins() as $pluginConfig) {
             try {
-                $this->syncPlugin($pluginConfig, $openPrs[$pluginConfig['slug']] ?? [], $defaultBranch);
+                $this->syncPlugin($pluginConfig, $openPrs[$this->pluginKey($pluginConfig)] ?? [], $defaultBranch);
             } catch (\Throwable $throwable) {
                 $errors[] = sprintf('%s: %s', $pluginConfig['slug'], $throwable->getMessage());
                 fwrite(STDERR, sprintf("[error] %s\n", end($errors)));
@@ -50,9 +51,9 @@ final class Updater
     private function syncPlugin(array $pluginConfig, array $existingPrs, string $defaultBranch): void
     {
         $pluginState = $this->pluginScanner->inspect($this->config->repoRoot, $pluginConfig);
-        $pluginInfo = $this->wordPressOrgClient->fetchPluginInfo((string) $pluginConfig['slug']);
-        $latestVersion = $this->wordPressOrgClient->latestVersion($pluginInfo);
-        $latestReleaseAt = $this->wordPressOrgClient->latestReleaseAt($pluginInfo);
+        $catalog = $this->fetchReleaseCatalog($pluginConfig);
+        $latestVersion = (string) $catalog['latest_version'];
+        $latestReleaseAt = (string) $catalog['latest_release_at'];
 
         $plannedPrs = [];
 
@@ -74,7 +75,7 @@ final class Updater
             $this->refreshPullRequest(
                 pluginConfig: $pluginConfig,
                 pluginState: $pluginState,
-                pluginInfo: $pluginInfo,
+                catalog: $catalog,
                 plannedPr: $plannedPr,
                 blockedBy: $blockedBy,
                 defaultBranch: $defaultBranch,
@@ -95,7 +96,7 @@ final class Updater
             $this->createPullRequestForLatest(
                 pluginConfig: $pluginConfig,
                 pluginState: $pluginState,
-                pluginInfo: $pluginInfo,
+                catalog: $catalog,
                 latestVersion: $latestVersion,
                 latestReleaseAt: $latestReleaseAt,
                 scope: $scope,
@@ -152,14 +153,14 @@ final class Updater
     /**
      * @param array<string, mixed> $pluginConfig
      * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string} $pluginState
-     * @param array<string, mixed> $pluginInfo
+     * @param array<string, mixed> $catalog
      * @param array<string, mixed> $plannedPr
      * @param list<int> $blockedBy
      */
     private function refreshPullRequest(
         array $pluginConfig,
         array $pluginState,
-        array $pluginInfo,
+        array $catalog,
         array $plannedPr,
         array $blockedBy,
         string $defaultBranch,
@@ -174,8 +175,10 @@ final class Updater
             throw new RuntimeException(sprintf('Managed pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
+        $releaseData = $this->releaseDataForVersion($pluginConfig, $catalog, $targetVersion, $releaseAt);
+
         if ((bool) $plannedPr['requires_code_update']) {
-            $this->checkoutAndApplyPluginVersion($defaultBranch, $branch, $pluginConfig, $pluginInfo, $targetVersion);
+            $this->checkoutAndApplyPluginVersion($defaultBranch, $branch, $pluginConfig, $releaseData);
             $this->gitRunner->commitAndPush(
                 $branch,
                 sprintf('Update %s to %s', $pluginConfig['slug'], $targetVersion),
@@ -183,16 +186,15 @@ final class Updater
             );
         }
 
-        $changelogHtml = $this->safeChangelogHtml($pluginInfo, $targetVersion);
-        $changelogText = $this->wordPressOrgClient->htmlToText($changelogHtml);
-        $supportTopics = $this->supportTopicsForExistingPullRequest(
+        $notesText = (string) $releaseData['notes_text'];
+        $supportTopics = $this->postReleaseTopicsForExistingPullRequest(
             pluginConfig: $pluginConfig,
             releaseAt: new DateTimeImmutable($releaseAt),
             pullRequest: $plannedPr,
             metadata: $metadata,
         );
 
-        $labels = $this->releaseClassifier->deriveLabels($scope, $changelogText, $supportTopics);
+        $labels = $this->releaseClassifier->deriveLabels($this->sourceLabel($pluginConfig), $scope, $notesText, $supportTopics);
         $labels = array_values(array_unique(array_merge($labels, (array) ($pluginConfig['extra_labels'] ?? []))));
 
         if ($blockedBy !== []) {
@@ -206,23 +208,22 @@ final class Updater
         $metadata['release_at'] = $releaseAt;
         $metadata['scope'] = $scope;
         $metadata['kind'] = 'plugin';
+        $metadata['source'] = $this->pluginSource($pluginConfig);
+        $metadata['component_key'] = $this->pluginKey($pluginConfig);
         $metadata['blocked_by'] = $blockedBy;
         $metadata['support_synced_at'] = gmdate(DATE_ATOM);
         $metadata['updated_at'] = gmdate(DATE_ATOM);
 
         $title = $this->titleForPullRequest($pluginState['name'], (string) $metadata['base_version'], $targetVersion);
-        $body = $this->prBodyRenderer->render(
-            pluginName: $pluginState['name'],
-            pluginSlug: (string) $pluginConfig['slug'],
-            pluginPath: $pluginState['path'],
+        $body = $this->renderPluginPullRequest(
+            pluginConfig: $pluginConfig,
+            pluginState: $pluginState,
             currentVersion: (string) $metadata['base_version'],
             targetVersion: $targetVersion,
-            releaseScope: $scope,
+            scope: $scope,
             releaseAt: $releaseAt,
             labels: $labels,
-            pluginUrl: $this->wordPressOrgClient->pluginUrl((string) $pluginConfig['slug']),
-            supportUrl: $this->wordPressOrgClient->supportUrl((string) $pluginConfig['slug']),
-            changelogHtml: $changelogHtml,
+            releaseData: $releaseData,
             supportTopics: $supportTopics,
             metadata: $metadata,
         );
@@ -235,13 +236,13 @@ final class Updater
     /**
      * @param array<string, mixed> $pluginConfig
      * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string} $pluginState
-     * @param array<string, mixed> $pluginInfo
+     * @param array<string, mixed> $catalog
      * @param list<int> $blockedBy
      */
     private function createPullRequestForLatest(
         array $pluginConfig,
         array $pluginState,
-        array $pluginInfo,
+        array $catalog,
         string $latestVersion,
         string $latestReleaseAt,
         string $scope,
@@ -249,8 +250,9 @@ final class Updater
         string $defaultBranch,
     ): void {
         $branch = $this->newBranchName((string) $pluginConfig['slug'], $latestVersion);
+        $releaseData = $this->releaseDataForVersion($pluginConfig, $catalog, $latestVersion, $latestReleaseAt);
 
-        $this->checkoutAndApplyPluginVersion($defaultBranch, $branch, $pluginConfig, $pluginInfo, $latestVersion);
+        $this->checkoutAndApplyPluginVersion($defaultBranch, $branch, $pluginConfig, $releaseData);
         $changed = $this->gitRunner->commitAndPush(
             $branch,
             sprintf('Update %s to %s', $pluginConfig['slug'], $latestVersion),
@@ -266,16 +268,13 @@ final class Updater
             return;
         }
 
-        $changelogHtml = $this->safeChangelogHtml($pluginInfo, $latestVersion);
-        $changelogText = $this->wordPressOrgClient->htmlToText($changelogHtml);
-        $supportTopics = $this->supportForumClient->fetchTopicsOpenedAfter(
-            (string) $pluginConfig['slug'],
+        $notesText = (string) $releaseData['notes_text'];
+        $supportTopics = $this->postReleaseTopicsForNewPullRequest(
+            $pluginConfig,
             new DateTimeImmutable($latestReleaseAt),
-            null,
-            $this->pluginSupportMaxPages($pluginConfig),
         );
 
-        $labels = $this->releaseClassifier->deriveLabels($scope, $changelogText, $supportTopics);
+        $labels = $this->releaseClassifier->deriveLabels($this->sourceLabel($pluginConfig), $scope, $notesText, $supportTopics);
         $labels = array_values(array_unique(array_merge($labels, (array) ($pluginConfig['extra_labels'] ?? []))));
 
         if ($blockedBy !== []) {
@@ -287,7 +286,9 @@ final class Updater
 
         $metadata = [
             'kind' => 'plugin',
+            'source' => $this->pluginSource($pluginConfig),
             'slug' => (string) $pluginConfig['slug'],
+            'component_key' => $this->pluginKey($pluginConfig),
             'plugin_path' => $pluginState['path'],
             'branch' => $branch,
             'base_branch' => $defaultBranch,
@@ -301,18 +302,15 @@ final class Updater
         ];
 
         $title = $this->titleForPullRequest($pluginState['name'], $pluginState['version'], $latestVersion);
-        $body = $this->prBodyRenderer->render(
-            pluginName: $pluginState['name'],
-            pluginSlug: (string) $pluginConfig['slug'],
-            pluginPath: $pluginState['path'],
+        $body = $this->renderPluginPullRequest(
+            pluginConfig: $pluginConfig,
+            pluginState: $pluginState,
             currentVersion: $pluginState['version'],
             targetVersion: $latestVersion,
-            releaseScope: $scope,
+            scope: $scope,
             releaseAt: $latestReleaseAt,
             labels: $labels,
-            pluginUrl: $this->wordPressOrgClient->pluginUrl((string) $pluginConfig['slug']),
-            supportUrl: $this->wordPressOrgClient->supportUrl((string) $pluginConfig['slug']),
-            changelogHtml: $changelogHtml,
+            releaseData: $releaseData,
             supportTopics: $supportTopics,
             metadata: $metadata,
         );
@@ -329,11 +327,9 @@ final class Updater
         string $defaultBranch,
         string $branch,
         array $pluginConfig,
-        array $pluginInfo,
-        string $targetVersion,
+        array $releaseData,
     ): void {
         $this->gitRunner->checkoutBranch($defaultBranch, $branch);
-        $downloadUrl = $this->wordPressOrgClient->downloadUrlForVersion($pluginInfo, $targetVersion);
         $tempDir = sys_get_temp_dir() . '/wporg-update-' . bin2hex(random_bytes(6));
 
         if (! mkdir($tempDir, 0777, true) && ! is_dir($tempDir)) {
@@ -345,7 +341,7 @@ final class Updater
         mkdir($extractPath, 0777, true);
 
         try {
-            (new HttpClient())->downloadToFile($downloadUrl, $archivePath);
+            (new HttpClient())->downloadToFile((string) $releaseData['download_url'], $archivePath);
 
             $zip = new ZipArchive();
 
@@ -356,13 +352,12 @@ final class Updater
             ZipExtractor::extractValidated($zip, $extractPath);
             $zip->close();
 
-            $rootDirectories = $this->rootDirectories($extractPath);
-
-            if (count($rootDirectories) !== 1) {
-                throw new RuntimeException(sprintf('Expected exactly one root directory in plugin archive for %s.', $pluginConfig['slug']));
-            }
-
-            $sourcePath = $extractPath . '/' . $rootDirectories[0];
+            $sourcePath = $this->resolvePluginSourcePath(
+                $extractPath,
+                trim((string) ($releaseData['archive_subdir'] ?? ''), '/'),
+                trim((string) $pluginConfig['main_file'], '/'),
+                (string) $pluginConfig['slug'],
+            );
             $destinationPath = $this->config->repoRoot . '/' . trim((string) $pluginConfig['path'], '/');
 
             $this->removeDirectory($destinationPath);
@@ -393,14 +388,14 @@ final class Updater
                 continue;
             }
 
-            $slug = $metadata['slug'] ?? null;
+            $componentKey = $this->componentKeyFromMetadata($metadata);
 
-            if (! is_string($slug) || $slug === '') {
+            if ($componentKey === null) {
                 continue;
             }
 
-            $indexed[$slug] ??= [];
-            $indexed[$slug][] = $pullRequest;
+            $indexed[$componentKey] ??= [];
+            $indexed[$componentKey][] = $pullRequest;
         }
 
         return $indexed;
@@ -412,9 +407,10 @@ final class Updater
     public static function labelDefinitions(): array
     {
         return [
-            'automation:plugin-update' => ['color' => '1d76db', 'description' => 'Managed wordpress.org plugin update PR'],
+            'automation:plugin-update' => ['color' => '1d76db', 'description' => 'Managed plugin update PR'],
             'component:wordpress-core' => ['color' => '0366d6', 'description' => 'WordPress core update'],
             'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from wordpress.org'],
+            'source:github' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
             'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],
             'release:minor' => ['color' => 'fbca04', 'description' => 'Minor release'],
             'release:major' => ['color' => 'd93f0b', 'description' => 'Major release'],
@@ -466,16 +462,172 @@ final class Updater
 
     /**
      * @param array<string, mixed> $pluginConfig
+     * @return array<string, mixed>
+     */
+    private function fetchReleaseCatalog(array $pluginConfig): array
+    {
+        if ($this->pluginSource($pluginConfig) === 'github') {
+            $releases = $this->gitHubReleaseClient->fetchStableReleases($pluginConfig);
+            $releasesByVersion = [];
+
+            foreach ($releases as $release) {
+                $version = (string) ($release['normalized_version'] ?? '');
+
+                if ($version !== '') {
+                    $releasesByVersion[$version] = $release;
+                }
+            }
+
+            $latest = $releases[0];
+
+            return [
+                'source' => 'github',
+                'repository' => (string) $pluginConfig['github_repository'],
+                'latest_version' => (string) $latest['normalized_version'],
+                'latest_release_at' => $this->gitHubReleaseClient->latestReleaseAt($latest),
+                'releases_by_version' => $releasesByVersion,
+            ];
+        }
+
+        $pluginInfo = $this->wordPressOrgClient->fetchPluginInfo((string) $pluginConfig['slug']);
+
+        return [
+            'source' => 'wordpress.org',
+            'plugin_info' => $pluginInfo,
+            'latest_version' => $this->wordPressOrgClient->latestVersion($pluginInfo),
+            'latest_release_at' => $this->wordPressOrgClient->latestReleaseAt($pluginInfo),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $pluginConfig
+     * @param array<string, mixed> $catalog
+     * @return array<string, mixed>
+     */
+    private function releaseDataForVersion(array $pluginConfig, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
+    {
+        if ($this->pluginSource($pluginConfig) === 'github') {
+            $repository = (string) $catalog['repository'];
+            $release = $catalog['releases_by_version'][$targetVersion] ?? null;
+
+            if (! is_array($release)) {
+                throw new RuntimeException(sprintf(
+                    'Could not find GitHub release metadata for %s version %s.',
+                    $repository,
+                    $targetVersion
+                ));
+            }
+
+            $notesMarkup = $this->gitHubReleaseClient->releaseNotesMarkdown($release, $targetVersion);
+
+            return [
+                'source' => 'github',
+                'repository' => $repository,
+                'release_url' => $this->gitHubReleaseClient->releaseUrl($release, $repository),
+                'issues_url' => $this->gitHubReleaseClient->issuesUrl($repository),
+                'download_url' => $this->gitHubReleaseClient->downloadUrl($release, $pluginConfig),
+                'archive_subdir' => $this->gitHubReleaseClient->archiveSubdir($pluginConfig),
+                'notes_markup' => $notesMarkup,
+                'notes_text' => $this->gitHubReleaseClient->markdownToText($notesMarkup),
+                'release_at' => $this->gitHubReleaseClient->latestReleaseAt($release),
+            ];
+        }
+
+        $pluginInfo = $catalog['plugin_info'] ?? null;
+
+        if (! is_array($pluginInfo)) {
+            throw new RuntimeException(sprintf(
+                'Missing wordpress.org catalog metadata for %s.',
+                (string) $pluginConfig['slug']
+            ));
+        }
+
+        $notesMarkup = $this->safeChangelogHtml($pluginInfo, $targetVersion);
+
+        return [
+            'source' => 'wordpress.org',
+            'plugin_url' => $this->wordPressOrgClient->pluginUrl((string) $pluginConfig['slug']),
+            'support_url' => $this->wordPressOrgClient->supportUrl((string) $pluginConfig['slug']),
+            'download_url' => $this->wordPressOrgClient->downloadUrlForVersion($pluginInfo, $targetVersion),
+            'archive_subdir' => '',
+            'notes_markup' => $notesMarkup,
+            'notes_text' => $this->wordPressOrgClient->htmlToText($notesMarkup),
+            'release_at' => $fallbackReleaseAt,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $pluginConfig
+     * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string} $pluginState
+     * @param list<string> $labels
+     * @param list<array{title:string, url:string, opened_at:string}> $supportTopics
+     * @param array<string, mixed> $releaseData
+     * @param array<string, mixed> $metadata
+     */
+    private function renderPluginPullRequest(
+        array $pluginConfig,
+        array $pluginState,
+        string $currentVersion,
+        string $targetVersion,
+        string $scope,
+        string $releaseAt,
+        array $labels,
+        array $releaseData,
+        array $supportTopics,
+        array $metadata,
+    ): string {
+        if ($this->pluginSource($pluginConfig) === 'github') {
+            return $this->prBodyRenderer->renderGitHubPluginUpdate(
+                pluginName: $pluginState['name'],
+                pluginSlug: (string) $pluginConfig['slug'],
+                pluginPath: $pluginState['path'],
+                currentVersion: $currentVersion,
+                targetVersion: $targetVersion,
+                releaseScope: $scope,
+                releaseAt: $releaseAt,
+                labels: $labels,
+                repository: (string) $releaseData['repository'],
+                releaseUrl: (string) $releaseData['release_url'],
+                issuesUrl: (string) $releaseData['issues_url'],
+                downloadUrl: (string) $releaseData['download_url'],
+                releaseNotesMarkdown: (string) $releaseData['notes_markup'],
+                metadata: $metadata,
+            );
+        }
+
+        return $this->prBodyRenderer->render(
+            pluginName: $pluginState['name'],
+            pluginSlug: (string) $pluginConfig['slug'],
+            pluginPath: $pluginState['path'],
+            currentVersion: $currentVersion,
+            targetVersion: $targetVersion,
+            releaseScope: $scope,
+            releaseAt: $releaseAt,
+            labels: $labels,
+            pluginUrl: (string) $releaseData['plugin_url'],
+            supportUrl: (string) $releaseData['support_url'],
+            changelogHtml: (string) $releaseData['notes_markup'],
+            supportTopics: $supportTopics,
+            metadata: $metadata,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $pluginConfig
      * @param array<string, mixed> $pullRequest
      * @param array<string, mixed> $metadata
      * @return list<array{title:string, url:string, opened_at:string}>
      */
-    private function supportTopicsForExistingPullRequest(
+    private function postReleaseTopicsForExistingPullRequest(
         array $pluginConfig,
         DateTimeImmutable $releaseAt,
         array $pullRequest,
         array $metadata,
     ): array {
+        if ($this->pluginSource($pluginConfig) !== 'wordpress.org') {
+            return [];
+        }
+
         $existingTopics = PrBodyRenderer::extractSupportTopics((string) ($pullRequest['body'] ?? ''));
         $lastSyncAt = $metadata['support_synced_at'] ?? $metadata['updated_at'] ?? $metadata['release_at'] ?? null;
         $incrementalWindow = is_string($lastSyncAt) && $lastSyncAt !== '' ? new DateTimeImmutable($lastSyncAt) : null;
@@ -491,12 +643,78 @@ final class Updater
 
     /**
      * @param array<string, mixed> $pluginConfig
+     * @return list<array{title:string, url:string, opened_at:string}>
+     */
+    private function postReleaseTopicsForNewPullRequest(array $pluginConfig, DateTimeImmutable $releaseAt): array
+    {
+        if ($this->pluginSource($pluginConfig) !== 'wordpress.org') {
+            return [];
+        }
+
+        return $this->supportForumClient->fetchTopicsOpenedAfter(
+            (string) $pluginConfig['slug'],
+            $releaseAt,
+            null,
+            $this->pluginSupportMaxPages($pluginConfig),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $pluginConfig
      */
     private function pluginSupportMaxPages(array $pluginConfig): ?int
     {
         $maxPages = $pluginConfig['support_max_pages'] ?? null;
 
         return is_int($maxPages) && $maxPages > 0 ? $maxPages : null;
+    }
+
+    /**
+     * @param array<string, mixed> $pluginConfig
+     */
+    private function pluginSource(array $pluginConfig): string
+    {
+        $source = $pluginConfig['source'] ?? 'wordpress.org';
+        return is_string($source) && $source !== '' ? $source : 'wordpress.org';
+    }
+
+    /**
+     * @param array<string, mixed> $pluginConfig
+     */
+    private function pluginKey(array $pluginConfig): string
+    {
+        return $this->pluginSource($pluginConfig) . ':' . (string) $pluginConfig['slug'];
+    }
+
+    /**
+     * @param array<string, mixed> $pluginConfig
+     */
+    private function sourceLabel(array $pluginConfig): string
+    {
+        return $this->pluginSource($pluginConfig) === 'github'
+            ? 'source:github'
+            : 'source:wordpress.org';
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function componentKeyFromMetadata(array $metadata): ?string
+    {
+        $componentKey = $metadata['component_key'] ?? null;
+
+        if (is_string($componentKey) && $componentKey !== '') {
+            return $componentKey;
+        }
+
+        $slug = $metadata['slug'] ?? null;
+
+        if (! is_string($slug) || $slug === '') {
+            return null;
+        }
+
+        $source = $metadata['source'] ?? 'wordpress.org';
+        return (is_string($source) && $source !== '' ? $source : 'wordpress.org') . ':' . $slug;
     }
 
     /**
@@ -566,18 +784,59 @@ final class Updater
         return sprintf('Update %s from %s to %s', $pluginName, $baseVersion, $targetVersion);
     }
 
-    /**
-     * @return list<string>
-     */
-    private function rootDirectories(string $extractPath): array
+    private function resolvePluginSourcePath(
+        string $extractPath,
+        string $archiveSubdir,
+        string $mainFile,
+        string $slug,
+    ): string
     {
         $entries = array_values(array_filter(scandir($extractPath) ?: [], static function (string $entry): bool {
             return $entry !== '.' && $entry !== '..';
         }));
 
-        return array_values(array_filter($entries, static function (string $entry) use ($extractPath): bool {
-            return is_dir($extractPath . '/' . $entry);
-        }));
+        $candidateBases = [$extractPath];
+
+        foreach ($entries as $entry) {
+            $candidate = $extractPath . '/' . $entry;
+
+            if (is_dir($candidate)) {
+                $candidateBases[] = $candidate;
+            }
+        }
+
+        $matches = [];
+
+        foreach ($candidateBases as $candidateBase) {
+            $candidatePath = $candidateBase;
+
+            if ($archiveSubdir !== '') {
+                $candidatePath .= '/' . $archiveSubdir;
+            }
+
+            if (is_file($candidatePath . '/' . $mainFile)) {
+                $matches[] = $candidatePath;
+            }
+        }
+
+        $matches = array_values(array_unique($matches));
+
+        if (count($matches) === 1) {
+            return $matches[0];
+        }
+
+        if ($matches === []) {
+            throw new RuntimeException(sprintf(
+                'Could not locate the extracted plugin root for %s. Expected to find %s inside the archive.',
+                $slug,
+                $mainFile
+            ));
+        }
+
+        throw new RuntimeException(sprintf(
+            'Extracted archive for %s matched multiple candidate plugin roots.',
+            $slug
+        ));
     }
 
     private function removeDirectory(string $path): void

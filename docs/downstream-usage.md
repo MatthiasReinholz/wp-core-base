@@ -80,6 +80,11 @@ A downstream repository that uses the automation should treat these files as its
 
 The example files in this repository are a starting point, not something you should treat as hidden framework internals.
 
+Managed plugins can come from:
+
+- `wordpress.org`
+- public GitHub repositories that publish stable GitHub Releases
+
 Use:
 
 - [examples/downstream-wporg-updates.php](examples/downstream-wporg-updates.php)
@@ -94,6 +99,13 @@ Examples:
 php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=.
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --tool-path=vendor/wp-core-base
 ```
+
+For GitHub-sourced plugins, use:
+
+- `source: 'github'`
+- `github_repository`
+- optionally `github_release_asset_pattern` if you want a release asset instead of the release zipball
+- optionally `github_archive_subdir` if the plugin code lives below the repository root
 
 ## Example Layouts
 

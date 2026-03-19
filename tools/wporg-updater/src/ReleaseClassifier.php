@@ -78,9 +78,9 @@ final class ReleaseClassifier
     /**
      * @return list<string>
      */
-    public function deriveLabels(string $scope, string $changelogText, array $supportTopics): array
+    public function deriveLabels(string $sourceLabel, string $scope, string $changelogText, array $supportTopics): array
     {
-        $labels = ['automation:plugin-update', 'source:wordpress.org'];
+        $labels = ['automation:plugin-update', $sourceLabel];
 
         if ($scope !== 'none') {
             $labels[] = 'release:' . $scope;

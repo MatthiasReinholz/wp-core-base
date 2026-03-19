@@ -45,5 +45,17 @@ return [
             'enabled' => true,
             'extra_labels' => ['plugin:redirection'],
         ],
+        // Public GitHub release-backed plugin example:
+        // [
+        //     'source' => 'github',
+        //     'slug' => 'example-plugin',
+        //     'path' => 'wp-content/plugins/example-plugin',
+        //     'main_file' => 'example-plugin.php',
+        //     'enabled' => true,
+        //     'github_repository' => 'owner/repo',
+        //     'github_release_asset_pattern' => '*.zip',
+        //     'github_archive_subdir' => '',
+        //     'extra_labels' => ['plugin:example-plugin'],
+        // ],
     ],
 ];

@@ -83,6 +83,70 @@ MARKDOWN);
      * @param list<string> $labels
      * @param array<string, mixed> $metadata
      */
+    public function renderGitHubPluginUpdate(
+        string $pluginName,
+        string $pluginSlug,
+        string $pluginPath,
+        string $currentVersion,
+        string $targetVersion,
+        string $releaseScope,
+        string $releaseAt,
+        array $labels,
+        string $repository,
+        string $releaseUrl,
+        string $issuesUrl,
+        string $downloadUrl,
+        string $releaseNotesMarkdown,
+        array $metadata,
+    ): string {
+        $releaseDate = new DateTimeImmutable($releaseAt);
+        $blockedBy = $metadata['blocked_by'] ?? [];
+        $labelLines = implode("\n", array_map(static fn (string $label): string => '- `' . $label . '`', $labels));
+        $blockedLine = $blockedBy === []
+            ? 'None'
+            : implode(', ', array_map(static fn (int $number): string => '#' . $number, $blockedBy));
+
+        return trim(<<<MARKDOWN
+## Summary
+
+| Field | Value |
+| --- | --- |
+| Plugin | `{$pluginName}` |
+| Slug | `{$pluginSlug}` |
+| Path | `{$pluginPath}` |
+| Installed version on base branch | `{$currentVersion}` |
+| Target version | `{$targetVersion}` |
+| Release scope | `{$releaseScope}` |
+| Release timestamp (UTC) | `{$releaseDate->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C')}` |
+| Source repository | [`{$repository}`](https://github.com/{$repository}) |
+| GitHub release | [Open]({$releaseUrl}) |
+| Issue tracker | [Open]({$issuesUrl}) |
+| Download package | [zip]({$downloadUrl}) |
+| Blocked by older update PRs | {$blockedLine} |
+
+## Derived Labels
+
+{$labelLines}
+
+## Release Notes
+
+{$releaseNotesMarkdown}
+
+## Automation Notes
+
+- This PR is managed by the GitHub release plugin updater automation.
+- GitHub plugin support currently assumes a repository with published releases and a public downloadable release asset or source archive.
+- If a newer patch release lands on the same release line before merge, this PR will be updated in place.
+- If a newer minor or major release lands before merge, the automation will open a separate blocked PR.
+
+<!-- wporg-update-metadata: {$this->encodeMetadata($metadata)} -->
+MARKDOWN);
+    }
+
+    /**
+     * @param list<string> $labels
+     * @param array<string, mixed> $metadata
+     */
     public function renderCoreUpdate(
         string $currentVersion,
         string $targetVersion,

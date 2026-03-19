@@ -72,8 +72,8 @@ The automation is designed to make PRs self-describing, but the team still needs
 
 For plugin PRs, pay special attention to:
 
-- changelog entries
-- support topics opened after release
+- changelog entries or GitHub release notes
+- support topics opened after release for wordpress.org plugins
 - whether the release is patch, minor, or major
 - whether your project keeps any local plugin patches
 

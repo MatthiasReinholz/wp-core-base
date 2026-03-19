@@ -2,7 +2,7 @@
 
 `wp-core-base` is a versioned WordPress base that you can use as the starting point or upstream dependency for a WordPress project.
 
-It is designed for people who want WordPress code to live in Git, be versioned intentionally, and optionally receive update pull requests for WordPress core and selected wordpress.org plugins.
+It is designed for people who want WordPress code to live in Git, be versioned intentionally, and optionally receive update pull requests for WordPress core and selected wordpress.org or GitHub release-backed plugins.
 
 This README is the entry point for users of the base. If you want to work on `wp-core-base` itself as a contributor, maintainer, or repository author, use [docs/contributing.md](docs/contributing.md).
 
