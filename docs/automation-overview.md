@@ -1,160 +1,111 @@
 # Automation Overview
 
-This document is for contributors and advanced users who need the implementation details behind `wp-core-base`.
+This document is for contributors and advanced downstream users who need the technical internals.
 
-If you only want to use the repository as a dependency, start with [../README.md](../README.md), [getting-started.md](getting-started.md), and [downstream-usage.md](downstream-usage.md).
+If you only need adoption guidance, start with [../README.md](../README.md) and [getting-started.md](getting-started.md).
 
-## What The Repository Does
+## Architecture
 
-`wp-core-base` combines three things:
+The framework now revolves around a single manifest:
 
-- a WordPress core mirror that can be versioned and released
-- a curated baseline of selected plugins
-- automation that raises GitHub pull requests when WordPress core or managed plugins have upstream updates
+- `.wp-core-base/manifest.php`
 
-## Repository Model
+That manifest drives:
 
-The repository is intentionally organized so that reusable upstream concerns stay separate from downstream application concerns.
+- repository profile
+- root paths
+- core management mode
+- runtime staging policy
+- dependency ownership and update eligibility
 
-The important paths are:
+The legacy `.github/wporg-updates.php` model is no longer the primary configuration surface.
 
-- `.github/workflows/wporg-updates.yml`
-- `.github/workflows/wporg-update-pr-blocker.yml`
-- `.github/wporg-updates.php`
-- `tools/wporg-updater/bin/wporg-updater.php`
-- `tools/wporg-updater/src/`
-- `tools/wporg-updater/templates/`
-- `docs/examples/`
-- `tools/wporg-updater/tests/run.php`
+## Commands
 
-WordPress core remains at the repository root. The automation is layered around that baseline instead of being mixed into a site-specific application structure.
+The CLI supports:
 
-## Configuration
+- `doctor`
+- `sync`
+- `stage-runtime`
+- `scaffold-downstream`
+- `pr-blocker`
 
-Runtime configuration lives in `.github/wporg-updates.php`.
+## Sync Behavior
 
-The configuration currently covers:
+`sync` runs two reconcilers:
 
-- base branch selection
-- global support-forum crawl limits
-- GitHub API base URL
-- dry-run behavior
-- WordPress core update handling
-- managed plugin allowlist entries
+- WordPress core, when `core.mode` is `managed` and `core.enabled` is true
+- managed dependencies from the manifest
 
-Each managed plugin entry provides:
+Managed dependencies are explicit. Folder presence alone never makes something updateable.
 
-- source type
-- plugin slug
-- repository path
-- main plugin file
-- enabled state
-- optional plugin-specific support-forum crawl limit
-- optional GitHub release repository and archive settings
-- optional extra labels
+## Dependency Update Sources
 
-Managed plugins are explicit. The updater does not try to guess which folders in `wp-content/plugins` should be treated as managed dependencies.
+Supported automated sources:
 
-## Downstream Scaffolding
+- `wordpress.org`
+- `github-release`
 
-The CLI also includes a `scaffold-downstream` mode.
+GitHub source handling uses stable Releases as the source of truth. It does not infer release state from raw tags or commit history.
 
-That mode writes downstream-owned starter files for:
+Private GitHub release assets are supported through:
 
-- `.github/wporg-updates.php`
-- `.github/workflows/wporg-updates.yml`
-- `.github/workflows/wporg-update-pr-blocker.yml`
+- `source_config.github_repository`
+- `source_config.github_release_asset_pattern`
+- `source_config.github_token_env`
 
-The rendered files come from `tools/wporg-updater/templates/` and `docs/examples/`. If you change that downstream bootstrap path, keep those sources aligned.
+The download flow never forwards authorization headers to redirected CDN URLs.
+
+## Runtime Hygiene
+
+The runtime contract is enforced by:
+
+- `RuntimeInspector`
+- `RuntimeStager`
+
+Key behavior:
+
+- managed and local dependencies are checked for forbidden files and directories
+- managed dependencies must match their manifest checksum
+- `stage-runtime` assembles the runtime payload and validates the staged tree
 
 ## Pull Request Behavior
 
-For plugin updates, the updater:
+Dependency PRs use manifest metadata and stable component keys.
 
-- reads the installed plugin version from the repository
-- queries the configured source for release metadata
-- collects the relevant changelog section or release notes
-- collects support topics opened after the release timestamp for wordpress.org plugins
-- classifies the release and applies labels
-- opens or refreshes a GitHub pull request
+Rules:
 
-For WordPress core updates, the updater:
+- same release line + newer patch => update existing PR in place
+- newer minor or major while older PR still open => open a later blocked PR
+- support topics refresh incrementally for wordpress.org plugins
 
-- reads the installed core version
-- queries the WordPress core release API
-- collects release metadata and release-note content
-- classifies the release and applies labels
-- opens or refreshes a GitHub pull request
+## Scaffolding
 
-## PR Refresh Rules
+`scaffold-downstream` renders:
 
-The automation distinguishes between three cases:
+- `.wp-core-base/manifest.php`
+- `.github/workflows/wporg-updates.yml`
+- `.github/workflows/wporg-update-pr-blocker.yml`
+- `.github/workflows/wporg-validate-runtime.yml`
 
-- same target version, but new support-forum data: refresh the body and labels only
-- newer patch release on the same line: update the existing PR in place
-- newer minor or major release while an older PR is still open: open a new blocked PR
+Profiles:
 
-Later PRs are logically blocked, not stacked through git history. The blocker workflow keeps later PRs in draft until earlier ones are resolved.
+- `full-core`
+- `content-only`
 
-## Labels
+## Tests
 
-The automation maintains these shared labels:
-
-- `automation:plugin-update`
-- `component:wordpress-core`
-- `source:wordpress.org`
-- `source:github`
-- `release:patch`
-- `release:minor`
-- `release:major`
-- `type:security-bugfix`
-- `type:feature`
-- `support:new-topics`
-- `support:regression-signal`
-- `status:blocked`
-
-Plugins can also define extra labels such as `plugin:woocommerce` or `plugin:jetpack`.
-
-## GitHub Plugin Sources
-
-GitHub plugin support is release-backed.
-
-The intended model is:
-
-- the plugin lives in a GitHub repository
-- the repository publishes stable GitHub Releases
-- the release either exposes a public `.zip` asset or a public source archive that contains the plugin code
-- if the plugin code is not at the repository root, `github_archive_subdir` points to the plugin subdirectory inside the extracted archive
-
-The current implementation does not try to infer changelogs from raw commits or tags. It uses GitHub Release metadata as the source of truth.
-
-## Support-Forum Scanning
-
-Support-topic collection is intentionally cautious:
-
-- it prefers the wordpress.org support feed when that feed fully covers the relevant time window
-- it falls back to support-forum crawling when the feed is not sufficient
-- it keeps crawl limits bounded so that high-volume support forums do not silently produce partial results
-- it refreshes existing PRs incrementally so the system does not have to recrawl the full post-release history on every run
-
-If a plugin forum exceeds the configured crawl limit, the run fails intentionally rather than pretending the results are complete.
-
-## Safety Model
-
-The automation assumes this repository remains a clean base repository.
-
-Important consequences:
-
-- WordPress core replacement is only safe when the repository stays close to an upstream core mirror
-- managed plugin updates replace the full plugin directory from the configured source archive
-- local patches inside managed plugin directories are therefore unsafe unless you intentionally accept that tradeoff
-
-## Verification
-
-Local parser and classifier checks are available through:
+Local verification is intentionally lightweight and self-contained:
 
 ```bash
 php tools/wporg-updater/tests/run.php
 ```
 
-Contributors should update documentation and tests together when changing updater behavior.
+That test suite covers:
+
+- manifest loading
+- release parsing
+- support-forum parsing
+- runtime staging
+- scaffolding
+- migration guardrails

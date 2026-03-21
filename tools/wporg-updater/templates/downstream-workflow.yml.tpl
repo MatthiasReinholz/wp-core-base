@@ -1,28 +1,29 @@
-# This file belongs in the downstream repository, not in wp-core-base itself.
-# It opens update pull requests in GitHub.
-# Deployment is a separate concern and can still happen by FTP, SFTP, or another process.
-
-name: Sync Upstream Base
+name: wp-core-base Updates
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: '23 5 * * *'
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+  pull_request_target:
+    types:
+      - closed
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
 
+concurrency:
+  group: wp-core-base-updates
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out downstream project
+      - name: Check out repository
         uses: actions/checkout@v4
         with:
-          # Remove this line if your downstream repository does not use submodules.
-          submodules: recursive
           fetch-depth: 0
 
       - name: Set up PHP
@@ -36,11 +37,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run upstream updater against downstream repo
+      - name: Run updater
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
-          WPORG_REPO_ROOT: ${{ github.workspace }}
-          # For an initial rollout, you can temporarily add:
-          # WPORG_UPDATE_DRY_RUN: 1
         run: __WPORG_SYNC_COMMAND__

@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace WpOrgPluginUpdater;
 
 use DateTimeImmutable;
+use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use RuntimeException;
 use ZipArchive;
 
 final class Updater
 {
     public function __construct(
-        private readonly Config $config,
-        private readonly PluginScanner $pluginScanner,
+        private Config $config,
+        private readonly DependencyScanner $dependencyScanner,
         private readonly WordPressOrgClient $wordPressOrgClient,
         private readonly GitHubReleaseClient $gitHubReleaseClient,
         private readonly SupportForumClient $supportForumClient,
@@ -20,45 +23,72 @@ final class Updater
         private readonly PrBodyRenderer $prBodyRenderer,
         private readonly GitHubClient $gitHubClient,
         private readonly GitCommandRunner $gitRunner,
+        private readonly RuntimeInspector $runtimeInspector,
+        private readonly ManifestWriter $manifestWriter,
+        private readonly HttpClient $httpClient,
     ) {
     }
 
     public function sync(): void
     {
-        $defaultBranch = $this->config->baseBranch ?? $this->gitHubClient->getDefaultBranch();
+        $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $this->gitHubClient->ensureLabels($this->labelDefinitionsForRun());
         $openPrs = $this->indexManagedPullRequests($this->gitHubClient->listOpenPullRequests());
         $errors = [];
 
-        foreach ($this->config->enabledPlugins() as $pluginConfig) {
+        foreach ($this->config->managedDependencies() as $dependency) {
             try {
-                $this->syncPlugin($pluginConfig, $openPrs[$this->pluginKey($pluginConfig)] ?? [], $defaultBranch);
+                $this->syncDependency($dependency, $openPrs[$dependency['component_key']] ?? [], $defaultBranch);
             } catch (\Throwable $throwable) {
-                $errors[] = sprintf('%s: %s', $pluginConfig['slug'], $throwable->getMessage());
+                $errors[] = sprintf('%s: %s', $dependency['component_key'], $throwable->getMessage());
                 fwrite(STDERR, sprintf("[error] %s\n", end($errors)));
             }
         }
 
         if ($errors !== []) {
-            throw new RuntimeException("Plugin update sync completed with errors:\n- " . implode("\n- ", $errors));
+            throw new RuntimeException("Dependency update sync completed with errors:\n- " . implode("\n- ", $errors));
         }
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
+     * @return array<string, array{color:string, description:string}>
+     */
+    public static function labelDefinitions(): array
+    {
+        return [
+            'automation:dependency-update' => ['color' => '1d76db', 'description' => 'Managed dependency update PR'],
+            'component:wordpress-core' => ['color' => '0366d6', 'description' => 'WordPress core update'],
+            'kind:plugin' => ['color' => '0e8a16', 'description' => 'Plugin dependency'],
+            'kind:theme' => ['color' => '5319e7', 'description' => 'Theme dependency'],
+            'kind:mu-plugin-package' => ['color' => 'fbca04', 'description' => 'MU plugin package dependency'],
+            'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from wordpress.org'],
+            'source:github-release' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
+            'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],
+            'release:minor' => ['color' => 'fbca04', 'description' => 'Minor release'],
+            'release:major' => ['color' => 'd93f0b', 'description' => 'Major release'],
+            'type:security-bugfix' => ['color' => 'b60205', 'description' => 'Contains security or bugfix work'],
+            'type:feature' => ['color' => '0052cc', 'description' => 'Contains feature work'],
+            'support:new-topics' => ['color' => 'c2e0c6', 'description' => 'Support topics were opened after the release'],
+            'support:regression-signal' => ['color' => 'e99695', 'description' => 'Support topic titles suggest a regression or urgent issue'],
+            'status:blocked' => ['color' => 'bfdadc', 'description' => 'Blocked behind an older open update PR for the same dependency'],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
      * @param list<array<string, mixed>> $existingPrs
      */
-    private function syncPlugin(array $pluginConfig, array $existingPrs, string $defaultBranch): void
+    private function syncDependency(array $dependency, array $existingPrs, string $defaultBranch): void
     {
-        $pluginState = $this->pluginScanner->inspect($this->config->repoRoot, $pluginConfig);
-        $catalog = $this->fetchReleaseCatalog($pluginConfig);
+        $dependencyState = $this->dependencyScanner->inspect($this->config->repoRoot, $dependency);
+        $this->assertManagedDependencyChecksum($dependency);
+        $catalog = $this->fetchReleaseCatalog($dependency);
         $latestVersion = (string) $catalog['latest_version'];
         $latestReleaseAt = (string) $catalog['latest_release_at'];
-
         $plannedPrs = [];
 
         foreach ($existingPrs as $pr) {
-            $plannedPrs[] = $this->planExistingPullRequest($pr, $pluginState['version'], $latestVersion, $latestReleaseAt);
+            $plannedPrs[] = $this->planExistingPullRequest($pr, $dependencyState['version'], $latestVersion, $latestReleaseAt);
         }
 
         usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
@@ -73,8 +103,8 @@ final class Updater
             )));
 
             $this->refreshPullRequest(
-                pluginConfig: $pluginConfig,
-                pluginState: $pluginState,
+                dependency: $dependency,
+                dependencyState: $dependencyState,
                 catalog: $catalog,
                 plannedPr: $plannedPr,
                 blockedBy: $blockedBy,
@@ -82,7 +112,7 @@ final class Updater
             );
         }
 
-        $highestCoveredVersion = $pluginState['version'];
+        $highestCoveredVersion = $dependencyState['version'];
 
         foreach ($plannedPrs as $plannedPr) {
             if (version_compare($plannedPr['planned_target_version'], $highestCoveredVersion, '>')) {
@@ -94,8 +124,8 @@ final class Updater
             $scope = $this->releaseClassifier->classifyScope($highestCoveredVersion, $latestVersion);
 
             $this->createPullRequestForLatest(
-                pluginConfig: $pluginConfig,
-                pluginState: $pluginState,
+                dependency: $dependency,
+                dependencyState: $dependencyState,
                 catalog: $catalog,
                 latestVersion: $latestVersion,
                 latestReleaseAt: $latestReleaseAt,
@@ -151,22 +181,22 @@ final class Updater
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
-     * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string} $pluginState
+     * @param array<string, mixed> $dependency
      * @param array<string, mixed> $catalog
      * @param array<string, mixed> $plannedPr
      * @param list<int> $blockedBy
+     * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string, kind:string} $dependencyState
      */
     private function refreshPullRequest(
-        array $pluginConfig,
-        array $pluginState,
+        array $dependency,
+        array $dependencyState,
         array $catalog,
         array $plannedPr,
         array $blockedBy,
         string $defaultBranch,
     ): void {
         $metadata = $plannedPr['metadata'];
-        $targetVersion = $plannedPr['planned_target_version'];
+        $targetVersion = (string) $plannedPr['planned_target_version'];
         $releaseAt = (string) $plannedPr['planned_release_at'];
         $scope = (string) $plannedPr['planned_scope'];
         $branch = (string) ($metadata['branch'] ?? $plannedPr['head']['ref'] ?? '');
@@ -175,49 +205,41 @@ final class Updater
             throw new RuntimeException(sprintf('Managed pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
-        $releaseData = $this->releaseDataForVersion($pluginConfig, $catalog, $targetVersion, $releaseAt);
+        $releaseData = $this->releaseDataForVersion($dependency, $catalog, $targetVersion, $releaseAt);
 
         if ((bool) $plannedPr['requires_code_update']) {
-            $this->checkoutAndApplyPluginVersion($defaultBranch, $branch, $pluginConfig, $releaseData);
+            $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData);
+            $dependency = $updatedDependency;
             $this->gitRunner->commitAndPush(
                 $branch,
-                sprintf('Update %s to %s', $pluginConfig['slug'], $targetVersion),
-                [(string) $pluginConfig['path']]
+                sprintf('Update %s to %s', $dependency['slug'], $targetVersion),
+                [$dependency['path'], $this->relativeManifestPath()]
             );
         }
 
-        $notesText = (string) $releaseData['notes_text'];
-        $supportTopics = $this->postReleaseTopicsForExistingPullRequest(
-            pluginConfig: $pluginConfig,
+        $supportTopics = $this->supportTopicsForExistingPullRequest(
+            dependency: $dependency,
             releaseAt: new DateTimeImmutable($releaseAt),
             pullRequest: $plannedPr,
             metadata: $metadata,
         );
 
-        $labels = $this->releaseClassifier->deriveLabels($this->sourceLabel($pluginConfig), $scope, $notesText, $supportTopics);
-        $labels = array_values(array_unique(array_merge($labels, (array) ($pluginConfig['extra_labels'] ?? []))));
-
-        if ($blockedBy !== []) {
-            $labels[] = 'status:blocked';
-        }
-
-        $labels = array_values(array_unique($labels));
-        sort($labels);
+        $labels = $this->deriveDependencyLabels($dependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
 
         $metadata['target_version'] = $targetVersion;
         $metadata['release_at'] = $releaseAt;
         $metadata['scope'] = $scope;
-        $metadata['kind'] = 'plugin';
-        $metadata['source'] = $this->pluginSource($pluginConfig);
-        $metadata['component_key'] = $this->pluginKey($pluginConfig);
+        $metadata['kind'] = $dependency['kind'];
+        $metadata['source'] = $dependency['source'];
+        $metadata['component_key'] = $dependency['component_key'];
         $metadata['blocked_by'] = $blockedBy;
         $metadata['support_synced_at'] = gmdate(DATE_ATOM);
         $metadata['updated_at'] = gmdate(DATE_ATOM);
 
-        $title = $this->titleForPullRequest($pluginState['name'], (string) $metadata['base_version'], $targetVersion);
-        $body = $this->renderPluginPullRequest(
-            pluginConfig: $pluginConfig,
-            pluginState: $pluginState,
+        $title = $this->titleForPullRequest($dependencyState['name'], (string) $metadata['base_version'], $targetVersion);
+        $body = $this->renderDependencyPullRequest(
+            dependency: $dependency,
+            dependencyState: $dependencyState,
             currentVersion: (string) $metadata['base_version'],
             targetVersion: $targetVersion,
             scope: $scope,
@@ -234,14 +256,14 @@ final class Updater
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
-     * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string} $pluginState
+     * @param array<string, mixed> $dependency
      * @param array<string, mixed> $catalog
+     * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string, kind:string} $dependencyState
      * @param list<int> $blockedBy
      */
     private function createPullRequestForLatest(
-        array $pluginConfig,
-        array $pluginState,
+        array $dependency,
+        array $dependencyState,
         array $catalog,
         string $latestVersion,
         string $latestReleaseAt,
@@ -249,50 +271,35 @@ final class Updater
         array $blockedBy,
         string $defaultBranch,
     ): void {
-        $branch = $this->newBranchName((string) $pluginConfig['slug'], $latestVersion);
-        $releaseData = $this->releaseDataForVersion($pluginConfig, $catalog, $latestVersion, $latestReleaseAt);
-
-        $this->checkoutAndApplyPluginVersion($defaultBranch, $branch, $pluginConfig, $releaseData);
+        $branch = $this->newBranchName($dependency['slug'], $dependency['kind'], $latestVersion);
+        $releaseData = $this->releaseDataForVersion($dependency, $catalog, $latestVersion, $latestReleaseAt);
+        $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData);
         $changed = $this->gitRunner->commitAndPush(
             $branch,
-            sprintf('Update %s to %s', $pluginConfig['slug'], $latestVersion),
-            [(string) $pluginConfig['path']]
+            sprintf('Update %s to %s', $dependency['slug'], $latestVersion),
+            [$dependency['path'], $this->relativeManifestPath()]
         );
 
         if (! $changed) {
             fwrite(STDOUT, sprintf(
                 "Skipping PR creation for %s because updating to %s produced no file changes.\n",
-                $pluginConfig['slug'],
+                $dependency['slug'],
                 $latestVersion
             ));
             return;
         }
 
-        $notesText = (string) $releaseData['notes_text'];
-        $supportTopics = $this->postReleaseTopicsForNewPullRequest(
-            $pluginConfig,
-            new DateTimeImmutable($latestReleaseAt),
-        );
-
-        $labels = $this->releaseClassifier->deriveLabels($this->sourceLabel($pluginConfig), $scope, $notesText, $supportTopics);
-        $labels = array_values(array_unique(array_merge($labels, (array) ($pluginConfig['extra_labels'] ?? []))));
-
-        if ($blockedBy !== []) {
-            $labels[] = 'status:blocked';
-        }
-
-        $labels = array_values(array_unique($labels));
-        sort($labels);
-
+        $supportTopics = $this->supportTopicsForNewPullRequest($updatedDependency, new DateTimeImmutable($latestReleaseAt));
+        $labels = $this->deriveDependencyLabels($updatedDependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
         $metadata = [
-            'kind' => 'plugin',
-            'source' => $this->pluginSource($pluginConfig),
-            'slug' => (string) $pluginConfig['slug'],
-            'component_key' => $this->pluginKey($pluginConfig),
-            'plugin_path' => $pluginState['path'],
+            'kind' => $updatedDependency['kind'],
+            'source' => $updatedDependency['source'],
+            'slug' => (string) $updatedDependency['slug'],
+            'component_key' => $updatedDependency['component_key'],
+            'dependency_path' => $dependencyState['path'],
             'branch' => $branch,
             'base_branch' => $defaultBranch,
-            'base_version' => $pluginState['version'],
+            'base_version' => $dependencyState['version'],
             'target_version' => $latestVersion,
             'scope' => $scope,
             'release_at' => $latestReleaseAt,
@@ -301,11 +308,11 @@ final class Updater
             'updated_at' => gmdate(DATE_ATOM),
         ];
 
-        $title = $this->titleForPullRequest($pluginState['name'], $pluginState['version'], $latestVersion);
-        $body = $this->renderPluginPullRequest(
-            pluginConfig: $pluginConfig,
-            pluginState: $pluginState,
-            currentVersion: $pluginState['version'],
+        $title = $this->titleForPullRequest($dependencyState['name'], $dependencyState['version'], $latestVersion);
+        $body = $this->renderDependencyPullRequest(
+            dependency: $updatedDependency,
+            dependencyState: $dependencyState,
+            currentVersion: $dependencyState['version'],
             targetVersion: $latestVersion,
             scope: $scope,
             releaseAt: $latestReleaseAt,
@@ -320,57 +327,320 @@ final class Updater
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
-     * @param array<string, mixed> $pluginInfo
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $releaseData
+     * @return array<string, mixed>
      */
-    private function checkoutAndApplyPluginVersion(
+    private function checkoutAndApplyDependencyVersion(
         string $defaultBranch,
         string $branch,
-        array $pluginConfig,
+        array $dependency,
         array $releaseData,
-    ): void {
+    ): array {
         $this->gitRunner->checkoutBranch($defaultBranch, $branch);
         $tempDir = sys_get_temp_dir() . '/wporg-update-' . bin2hex(random_bytes(6));
 
-        if (! mkdir($tempDir, 0777, true) && ! is_dir($tempDir)) {
+        if (! mkdir($tempDir, 0775, true) && ! is_dir($tempDir)) {
             throw new RuntimeException(sprintf('Failed to create temp directory: %s', $tempDir));
         }
 
-        $archivePath = $tempDir . '/plugin.zip';
+        $archivePath = $tempDir . '/dependency.zip';
         $extractPath = $tempDir . '/extract';
-        mkdir($extractPath, 0777, true);
+        mkdir($extractPath, 0775, true);
 
         try {
-            (new HttpClient())->downloadToFile((string) $releaseData['download_url'], $archivePath);
+            $this->downloadArchiveForRelease($dependency, $releaseData, $archivePath);
 
             $zip = new ZipArchive();
 
             if ($zip->open($archivePath) !== true) {
-                throw new RuntimeException(sprintf('Failed to open plugin archive: %s', $archivePath));
+                throw new RuntimeException(sprintf('Failed to open dependency archive: %s', $archivePath));
             }
 
             ZipExtractor::extractValidated($zip, $extractPath);
             $zip->close();
 
-            $sourcePath = $this->resolvePluginSourcePath(
+            $sourcePath = $this->resolveExtractedDependencyRoot(
                 $extractPath,
                 trim((string) ($releaseData['archive_subdir'] ?? ''), '/'),
-                trim((string) $pluginConfig['main_file'], '/'),
-                (string) $pluginConfig['slug'],
+                trim((string) $dependency['main_file'], '/'),
+                (string) $dependency['slug'],
             );
-            $destinationPath = $this->config->repoRoot . '/' . trim((string) $pluginConfig['path'], '/');
 
+            $this->runtimeInspector->assertTreeIsClean($sourcePath, (array) $dependency['policy']['allow_runtime_paths']);
+            $destinationPath = $this->config->repoRoot . '/' . trim((string) $dependency['path'], '/');
             $this->removeDirectory($destinationPath);
-            $this->copyDirectory($sourcePath, $destinationPath);
+            $this->runtimeInspector->copyTree($sourcePath, $destinationPath);
 
-            $expectedMainFile = $destinationPath . '/' . trim((string) $pluginConfig['main_file'], '/');
+            $expectedMainFile = $destinationPath . '/' . trim((string) $dependency['main_file'], '/');
 
             if (! is_file($expectedMainFile)) {
-                throw new RuntimeException(sprintf('Updated plugin archive did not contain expected main file %s.', $expectedMainFile));
+                throw new RuntimeException(sprintf('Updated archive did not contain expected main file %s.', $expectedMainFile));
             }
+
+            $checksum = $this->runtimeInspector->computeTreeChecksum($destinationPath);
+            $this->config = $this->updateDependencyInManifest(
+                $dependency['component_key'],
+                (string) $releaseData['version'],
+                $checksum
+            );
+
+            return $this->config->dependencyByKey($dependency['component_key']);
         } finally {
             $this->removeDirectory($tempDir);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $releaseData
+     */
+    private function downloadArchiveForRelease(array $dependency, array $releaseData, string $archivePath): void
+    {
+        if ($dependency['source'] === 'github-release') {
+            $this->gitHubReleaseClient->downloadReleaseToFile($releaseData['release'], $dependency, $archivePath);
+            return;
+        }
+
+        $this->httpClient->downloadToFile((string) $releaseData['download_url'], $archivePath);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function fetchReleaseCatalog(array $dependency): array
+    {
+        if ($dependency['source'] === 'github-release') {
+            $releases = $this->gitHubReleaseClient->fetchStableReleases($dependency);
+            $releasesByVersion = [];
+
+            foreach ($releases as $release) {
+                $version = (string) ($release['normalized_version'] ?? '');
+
+                if ($version !== '') {
+                    $releasesByVersion[$version] = $release;
+                }
+            }
+
+            $latest = $releases[0];
+
+            return [
+                'source' => 'github-release',
+                'repository' => $this->gitHubReleaseClient->repository($dependency),
+                'latest_version' => (string) $latest['normalized_version'],
+                'latest_release_at' => $this->gitHubReleaseClient->latestReleaseAt($latest),
+                'releases_by_version' => $releasesByVersion,
+            ];
+        }
+
+        $info = $this->wordPressOrgClient->fetchComponentInfo((string) $dependency['kind'], (string) $dependency['slug']);
+
+        return [
+            'source' => 'wordpress.org',
+            'info' => $info,
+            'latest_version' => $this->wordPressOrgClient->latestVersion((string) $dependency['kind'], $info),
+            'latest_release_at' => $this->wordPressOrgClient->latestReleaseAt((string) $dependency['kind'], $info),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $catalog
+     * @return array<string, mixed>
+     */
+    private function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
+    {
+        if ($dependency['source'] === 'github-release') {
+            $repository = (string) $catalog['repository'];
+            $release = $catalog['releases_by_version'][$targetVersion] ?? null;
+
+            if (! is_array($release)) {
+                throw new RuntimeException(sprintf(
+                    'Could not find GitHub release metadata for %s version %s.',
+                    $repository,
+                    $targetVersion
+                ));
+            }
+
+            $notesMarkup = $this->gitHubReleaseClient->releaseNotesMarkdown($release, $targetVersion);
+
+            return [
+                'source' => 'github-release',
+                'version' => $targetVersion,
+                'repository' => $repository,
+                'release_url' => $this->gitHubReleaseClient->releaseUrl($release, $repository),
+                'issues_url' => $this->gitHubReleaseClient->issuesUrl($repository),
+                'archive_subdir' => $this->gitHubReleaseClient->archiveSubdir($dependency),
+                'notes_markup' => $notesMarkup,
+                'notes_text' => $this->gitHubReleaseClient->markdownToText($notesMarkup),
+                'release_at' => $this->gitHubReleaseClient->latestReleaseAt($release),
+                'release' => $release,
+            ];
+        }
+
+        $info = $catalog['info'] ?? null;
+
+        if (! is_array($info)) {
+            throw new RuntimeException(sprintf('Missing wordpress.org catalog metadata for %s.', (string) $dependency['slug']));
+        }
+
+        $notesMarkup = $this->wordPressOrgClient->extractReleaseNotes((string) $dependency['kind'], $info, $targetVersion);
+
+        return [
+            'source' => 'wordpress.org',
+            'version' => $targetVersion,
+            'component_url' => $this->wordPressOrgClient->componentUrl((string) $dependency['kind'], (string) $dependency['slug']),
+            'support_url' => $dependency['kind'] === 'plugin' ? $this->wordPressOrgClient->supportUrl((string) $dependency['slug']) : '',
+            'download_url' => $this->wordPressOrgClient->downloadUrlForVersion((string) $dependency['kind'], $info, $targetVersion),
+            'archive_subdir' => trim((string) $dependency['archive_subdir'], '/'),
+            'notes_markup' => $notesMarkup,
+            'notes_text' => $this->wordPressOrgClient->htmlToText($notesMarkup),
+            'release_at' => $fallbackReleaseAt,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param list<string> $labels
+     * @param list<array{title:string, url:string, opened_at:string}> $supportTopics
+     * @param array<string, mixed> $releaseData
+     * @param array<string, mixed> $metadata
+     * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string, kind:string} $dependencyState
+     */
+    private function renderDependencyPullRequest(
+        array $dependency,
+        array $dependencyState,
+        string $currentVersion,
+        string $targetVersion,
+        string $scope,
+        string $releaseAt,
+        array $labels,
+        array $releaseData,
+        array $supportTopics,
+        array $metadata,
+    ): string {
+        if ($dependency['source'] === 'github-release') {
+            return $this->prBodyRenderer->renderDependencyUpdate(
+                dependencyName: $dependencyState['name'],
+                dependencySlug: (string) $dependency['slug'],
+                dependencyKind: (string) $dependency['kind'],
+                dependencyPath: $dependencyState['path'],
+                currentVersion: $currentVersion,
+                targetVersion: $targetVersion,
+                releaseScope: $scope,
+                releaseAt: $releaseAt,
+                labels: $labels,
+                sourceDetails: [
+                    ['label' => 'Source repository', 'value' => sprintf('[`%s`](https://github.com/%s)', $releaseData['repository'], $releaseData['repository'])],
+                    ['label' => 'GitHub release', 'value' => sprintf('[Open](%s)', $releaseData['release_url'])],
+                    ['label' => 'Issue tracker', 'value' => sprintf('[Open](%s)', $releaseData['issues_url'])],
+                ],
+                releaseNotesHeading: 'Release Notes',
+                releaseNotesBody: (string) $releaseData['notes_markup'],
+                supportTopics: [],
+                metadata: $metadata,
+            );
+        }
+
+        $sourceDetails = [
+            ['label' => 'WordPress.org page', 'value' => sprintf('[Open](%s)', $releaseData['component_url'])],
+        ];
+
+        if ($dependency['kind'] === 'plugin') {
+            $sourceDetails[] = ['label' => 'WordPress.org support forum', 'value' => sprintf('[Open](%s)', $releaseData['support_url'])];
+        }
+
+        return $this->prBodyRenderer->renderDependencyUpdate(
+            dependencyName: $dependencyState['name'],
+            dependencySlug: (string) $dependency['slug'],
+            dependencyKind: (string) $dependency['kind'],
+            dependencyPath: $dependencyState['path'],
+            currentVersion: $currentVersion,
+            targetVersion: $targetVersion,
+            releaseScope: $scope,
+            releaseAt: $releaseAt,
+            labels: $labels,
+            sourceDetails: $sourceDetails,
+            releaseNotesHeading: 'Release Notes',
+            releaseNotesBody: (string) $releaseData['notes_markup'],
+            supportTopics: $supportTopics,
+            metadata: $metadata,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $pullRequest
+     * @param array<string, mixed> $metadata
+     * @return list<array{title:string, url:string, opened_at:string}>
+     */
+    private function supportTopicsForExistingPullRequest(
+        array $dependency,
+        DateTimeImmutable $releaseAt,
+        array $pullRequest,
+        array $metadata,
+    ): array {
+        if (! $this->supportsForumSync($dependency)) {
+            return [];
+        }
+
+        $existingTopics = PrBodyRenderer::extractSupportTopics((string) ($pullRequest['body'] ?? ''));
+        $lastSyncAt = $metadata['support_synced_at'] ?? $metadata['updated_at'] ?? $metadata['release_at'] ?? null;
+        $incrementalWindow = is_string($lastSyncAt) && $lastSyncAt !== '' ? new DateTimeImmutable($lastSyncAt) : null;
+        $newTopics = $this->supportForumClient->fetchTopicsOpenedAfter(
+            (string) $dependency['slug'],
+            $releaseAt,
+            $incrementalWindow,
+            null,
+        );
+
+        return $this->mergeSupportTopics($existingTopics, $newTopics);
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @return list<array{title:string, url:string, opened_at:string}>
+     */
+    private function supportTopicsForNewPullRequest(array $dependency, DateTimeImmutable $releaseAt): array
+    {
+        if (! $this->supportsForumSync($dependency)) {
+            return [];
+        }
+
+        return $this->supportForumClient->fetchTopicsOpenedAfter(
+            (string) $dependency['slug'],
+            $releaseAt,
+            null,
+            null,
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param list<array{title:string, url:string, opened_at:string}> $supportTopics
+     * @param list<int> $blockedBy
+     * @return list<string>
+     */
+    private function deriveDependencyLabels(array $dependency, string $scope, string $notesText, array $supportTopics, array $blockedBy): array
+    {
+        $labels = $this->releaseClassifier->deriveLabels(
+            'source:' . $dependency['source'],
+            $scope,
+            $notesText,
+            $supportTopics
+        );
+
+        $labels[] = 'automation:dependency-update';
+        $labels[] = 'kind:' . $dependency['kind'];
+        $labels = array_values(array_unique(array_merge($labels, (array) ($dependency['extra_labels'] ?? []))));
+
+        if ($blockedBy !== []) {
+            $labels[] = 'status:blocked';
+        }
+
+        $labels = array_values(array_unique($labels));
+        sort($labels);
+        return $labels;
     }
 
     /**
@@ -388,9 +658,9 @@ final class Updater
                 continue;
             }
 
-            $componentKey = $this->componentKeyFromMetadata($metadata);
+            $componentKey = $metadata['component_key'] ?? null;
 
-            if ($componentKey === null) {
+            if (! is_string($componentKey) || $componentKey === '') {
                 continue;
             }
 
@@ -404,40 +674,19 @@ final class Updater
     /**
      * @return array<string, array{color:string, description:string}>
      */
-    public static function labelDefinitions(): array
-    {
-        return [
-            'automation:plugin-update' => ['color' => '1d76db', 'description' => 'Managed plugin update PR'],
-            'component:wordpress-core' => ['color' => '0366d6', 'description' => 'WordPress core update'],
-            'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from wordpress.org'],
-            'source:github' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
-            'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],
-            'release:minor' => ['color' => 'fbca04', 'description' => 'Minor release'],
-            'release:major' => ['color' => 'd93f0b', 'description' => 'Major release'],
-            'type:security-bugfix' => ['color' => 'b60205', 'description' => 'Contains security or bugfix work'],
-            'type:feature' => ['color' => '0052cc', 'description' => 'Contains feature work'],
-            'support:new-topics' => ['color' => 'c2e0c6', 'description' => 'Support topics were opened after the release'],
-            'support:regression-signal' => ['color' => 'e99695', 'description' => 'Support topic titles suggest a regression or urgent issue'],
-            'status:blocked' => ['color' => 'bfdadc', 'description' => 'Blocked behind an older open update PR for the same plugin'],
-        ];
-    }
-
-    /**
-     * @return array<string, array{color:string, description:string}>
-     */
     private function labelDefinitionsForRun(): array
     {
         $definitions = self::labelDefinitions();
 
-        foreach ($this->config->enabledPlugins() as $pluginConfig) {
-            foreach ((array) ($pluginConfig['extra_labels'] ?? []) as $label) {
+        foreach ($this->config->dependencies() as $dependency) {
+            foreach ((array) ($dependency['extra_labels'] ?? []) as $label) {
                 if (! is_string($label) || $label === '' || isset($definitions[$label])) {
                     continue;
                 }
 
                 $definitions[$label] = [
                     'color' => 'ededed',
-                    'description' => sprintf('Managed label for %s', (string) $pluginConfig['slug']),
+                    'description' => sprintf('Managed label for %s', (string) $dependency['slug']),
                 ];
             }
         }
@@ -445,276 +694,141 @@ final class Updater
         return $definitions;
     }
 
-    private function safeChangelogHtml(array $pluginInfo, string $targetVersion): string
-    {
-        try {
-            $changelog = (string) (($pluginInfo['sections']['changelog'] ?? '') ?: '');
-
-            if ($changelog === '') {
-                throw new RuntimeException('No changelog section returned by wordpress.org.');
-            }
-
-            return $this->wordPressOrgClient->extractChangelogSection($changelog, $targetVersion);
-        } catch (\Throwable $throwable) {
-            return sprintf('<p><em>Changelog unavailable for version %s: %s</em></p>', $targetVersion, htmlspecialchars($throwable->getMessage(), ENT_QUOTES));
-        }
-    }
-
     /**
-     * @param array<string, mixed> $pluginConfig
-     * @return array<string, mixed>
+     * @param array<string, mixed> $dependency
      */
-    private function fetchReleaseCatalog(array $pluginConfig): array
+    private function assertManagedDependencyChecksum(array $dependency): void
     {
-        if ($this->pluginSource($pluginConfig) === 'github') {
-            $releases = $this->gitHubReleaseClient->fetchStableReleases($pluginConfig);
-            $releasesByVersion = [];
+        $dependencyPath = $this->config->repoRoot . '/' . $dependency['path'];
+        $this->runtimeInspector->assertTreeIsClean($dependencyPath, (array) $dependency['policy']['allow_runtime_paths']);
+        $checksum = $this->runtimeInspector->computeTreeChecksum($dependencyPath);
 
-            foreach ($releases as $release) {
-                $version = (string) ($release['normalized_version'] ?? '');
-
-                if ($version !== '') {
-                    $releasesByVersion[$version] = $release;
-                }
-            }
-
-            $latest = $releases[0];
-
-            return [
-                'source' => 'github',
-                'repository' => (string) $pluginConfig['github_repository'],
-                'latest_version' => (string) $latest['normalized_version'],
-                'latest_release_at' => $this->gitHubReleaseClient->latestReleaseAt($latest),
-                'releases_by_version' => $releasesByVersion,
-            ];
-        }
-
-        $pluginInfo = $this->wordPressOrgClient->fetchPluginInfo((string) $pluginConfig['slug']);
-
-        return [
-            'source' => 'wordpress.org',
-            'plugin_info' => $pluginInfo,
-            'latest_version' => $this->wordPressOrgClient->latestVersion($pluginInfo),
-            'latest_release_at' => $this->wordPressOrgClient->latestReleaseAt($pluginInfo),
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     * @param array<string, mixed> $catalog
-     * @return array<string, mixed>
-     */
-    private function releaseDataForVersion(array $pluginConfig, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
-    {
-        if ($this->pluginSource($pluginConfig) === 'github') {
-            $repository = (string) $catalog['repository'];
-            $release = $catalog['releases_by_version'][$targetVersion] ?? null;
-
-            if (! is_array($release)) {
-                throw new RuntimeException(sprintf(
-                    'Could not find GitHub release metadata for %s version %s.',
-                    $repository,
-                    $targetVersion
-                ));
-            }
-
-            $notesMarkup = $this->gitHubReleaseClient->releaseNotesMarkdown($release, $targetVersion);
-
-            return [
-                'source' => 'github',
-                'repository' => $repository,
-                'release_url' => $this->gitHubReleaseClient->releaseUrl($release, $repository),
-                'issues_url' => $this->gitHubReleaseClient->issuesUrl($repository),
-                'download_url' => $this->gitHubReleaseClient->downloadUrl($release, $pluginConfig),
-                'archive_subdir' => $this->gitHubReleaseClient->archiveSubdir($pluginConfig),
-                'notes_markup' => $notesMarkup,
-                'notes_text' => $this->gitHubReleaseClient->markdownToText($notesMarkup),
-                'release_at' => $this->gitHubReleaseClient->latestReleaseAt($release),
-            ];
-        }
-
-        $pluginInfo = $catalog['plugin_info'] ?? null;
-
-        if (! is_array($pluginInfo)) {
+        if ($checksum !== $dependency['checksum']) {
             throw new RuntimeException(sprintf(
-                'Missing wordpress.org catalog metadata for %s.',
-                (string) $pluginConfig['slug']
+                'Managed dependency checksum mismatch for %s. Expected %s but found %s.',
+                $dependency['slug'],
+                $dependency['checksum'],
+                $checksum
+            ));
+        }
+    }
+
+    private function updateDependencyInManifest(string $componentKey, string $version, string $checksum): Config
+    {
+        $dependencies = $this->config->dependencies();
+
+        foreach ($dependencies as $index => $dependency) {
+            if ($dependency['component_key'] !== $componentKey) {
+                continue;
+            }
+
+            $dependencies[$index]['version'] = $version;
+            $dependencies[$index]['checksum'] = $checksum;
+            $nextConfig = $this->config->withDependencies($dependencies);
+            $this->manifestWriter->write($nextConfig);
+            return $nextConfig;
+        }
+
+        throw new RuntimeException(sprintf('Unable to update manifest for %s.', $componentKey));
+    }
+
+    private function relativeManifestPath(): string
+    {
+        return ltrim(str_replace($this->config->repoRoot, '', $this->config->manifestPath), '/');
+    }
+
+    private function supportsForumSync(array $dependency): bool
+    {
+        return $dependency['source'] === 'wordpress.org' && $dependency['kind'] === 'plugin';
+    }
+
+    private function titleForPullRequest(string $dependencyName, string $baseVersion, string $targetVersion): string
+    {
+        return sprintf('Update %s from %s to %s', $dependencyName, $baseVersion, $targetVersion);
+    }
+
+    private function resolveExtractedDependencyRoot(
+        string $extractPath,
+        string $archiveSubdir,
+        string $mainFile,
+        string $slug,
+    ): string {
+        $entries = array_values(array_filter(scandir($extractPath) ?: [], static fn (string $entry): bool => $entry !== '.' && $entry !== '..'));
+        $candidateBases = [$extractPath];
+
+        foreach ($entries as $entry) {
+            $candidate = $extractPath . '/' . $entry;
+
+            if (is_dir($candidate)) {
+                $candidateBases[] = $candidate;
+            }
+        }
+
+        $matches = [];
+
+        foreach ($candidateBases as $candidateBase) {
+            $candidatePath = $candidateBase;
+
+            if ($archiveSubdir !== '') {
+                $candidatePath .= '/' . $archiveSubdir;
+            }
+
+            if (is_file($candidatePath . '/' . $mainFile)) {
+                $matches[] = $candidatePath;
+            }
+        }
+
+        $matches = array_values(array_unique($matches));
+
+        if (count($matches) === 1) {
+            return $matches[0];
+        }
+
+        if ($matches === []) {
+            throw new RuntimeException(sprintf(
+                'Could not locate the extracted dependency root for %s. Expected to find %s inside the archive.',
+                $slug,
+                $mainFile
             ));
         }
 
-        $notesMarkup = $this->safeChangelogHtml($pluginInfo, $targetVersion);
-
-        return [
-            'source' => 'wordpress.org',
-            'plugin_url' => $this->wordPressOrgClient->pluginUrl((string) $pluginConfig['slug']),
-            'support_url' => $this->wordPressOrgClient->supportUrl((string) $pluginConfig['slug']),
-            'download_url' => $this->wordPressOrgClient->downloadUrlForVersion($pluginInfo, $targetVersion),
-            'archive_subdir' => '',
-            'notes_markup' => $notesMarkup,
-            'notes_text' => $this->wordPressOrgClient->htmlToText($notesMarkup),
-            'release_at' => $fallbackReleaseAt,
-        ];
+        throw new RuntimeException(sprintf(
+            'Extracted archive for %s matched multiple candidate dependency roots.',
+            $slug
+        ));
     }
 
-    /**
-     * @param array<string, mixed> $pluginConfig
-     * @param array{name:string, version:string, path:string, absolute_path:string, main_file:string} $pluginState
-     * @param list<string> $labels
-     * @param list<array{title:string, url:string, opened_at:string}> $supportTopics
-     * @param array<string, mixed> $releaseData
-     * @param array<string, mixed> $metadata
-     */
-    private function renderPluginPullRequest(
-        array $pluginConfig,
-        array $pluginState,
-        string $currentVersion,
-        string $targetVersion,
-        string $scope,
-        string $releaseAt,
-        array $labels,
-        array $releaseData,
-        array $supportTopics,
-        array $metadata,
-    ): string {
-        if ($this->pluginSource($pluginConfig) === 'github') {
-            return $this->prBodyRenderer->renderGitHubPluginUpdate(
-                pluginName: $pluginState['name'],
-                pluginSlug: (string) $pluginConfig['slug'],
-                pluginPath: $pluginState['path'],
-                currentVersion: $currentVersion,
-                targetVersion: $targetVersion,
-                releaseScope: $scope,
-                releaseAt: $releaseAt,
-                labels: $labels,
-                repository: (string) $releaseData['repository'],
-                releaseUrl: (string) $releaseData['release_url'],
-                issuesUrl: (string) $releaseData['issues_url'],
-                downloadUrl: (string) $releaseData['download_url'],
-                releaseNotesMarkdown: (string) $releaseData['notes_markup'],
-                metadata: $metadata,
-            );
+    private function removeDirectory(string $path): void
+    {
+        if (! file_exists($path)) {
+            return;
         }
 
-        return $this->prBodyRenderer->render(
-            pluginName: $pluginState['name'],
-            pluginSlug: (string) $pluginConfig['slug'],
-            pluginPath: $pluginState['path'],
-            currentVersion: $currentVersion,
-            targetVersion: $targetVersion,
-            releaseScope: $scope,
-            releaseAt: $releaseAt,
-            labels: $labels,
-            pluginUrl: (string) $releaseData['plugin_url'],
-            supportUrl: (string) $releaseData['support_url'],
-            changelogHtml: (string) $releaseData['notes_markup'],
-            supportTopics: $supportTopics,
-            metadata: $metadata,
-        );
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     * @param array<string, mixed> $pullRequest
-     * @param array<string, mixed> $metadata
-     * @return list<array{title:string, url:string, opened_at:string}>
-     */
-    private function postReleaseTopicsForExistingPullRequest(
-        array $pluginConfig,
-        DateTimeImmutable $releaseAt,
-        array $pullRequest,
-        array $metadata,
-    ): array {
-        if ($this->pluginSource($pluginConfig) !== 'wordpress.org') {
-            return [];
+        if (is_file($path) || is_link($path)) {
+            unlink($path);
+            return;
         }
 
-        $existingTopics = PrBodyRenderer::extractSupportTopics((string) ($pullRequest['body'] ?? ''));
-        $lastSyncAt = $metadata['support_synced_at'] ?? $metadata['updated_at'] ?? $metadata['release_at'] ?? null;
-        $incrementalWindow = is_string($lastSyncAt) && $lastSyncAt !== '' ? new DateTimeImmutable($lastSyncAt) : null;
-        $newTopics = $this->supportForumClient->fetchTopicsOpenedAfter(
-            (string) $pluginConfig['slug'],
-            $releaseAt,
-            $incrementalWindow,
-            $this->pluginSupportMaxPages($pluginConfig),
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
         );
 
-        return $this->mergeSupportTopics($existingTopics, $newTopics);
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     * @return list<array{title:string, url:string, opened_at:string}>
-     */
-    private function postReleaseTopicsForNewPullRequest(array $pluginConfig, DateTimeImmutable $releaseAt): array
-    {
-        if ($this->pluginSource($pluginConfig) !== 'wordpress.org') {
-            return [];
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                rmdir($item->getPathname());
+            } else {
+                unlink($item->getPathname());
+            }
         }
 
-        return $this->supportForumClient->fetchTopicsOpenedAfter(
-            (string) $pluginConfig['slug'],
-            $releaseAt,
-            null,
-            $this->pluginSupportMaxPages($pluginConfig),
-        );
+        rmdir($path);
     }
 
-    /**
-     * @param array<string, mixed> $pluginConfig
-     */
-    private function pluginSupportMaxPages(array $pluginConfig): ?int
+    private function newBranchName(string $slug, string $kind, string $targetVersion): string
     {
-        $maxPages = $pluginConfig['support_max_pages'] ?? null;
-
-        return is_int($maxPages) && $maxPages > 0 ? $maxPages : null;
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     */
-    private function pluginSource(array $pluginConfig): string
-    {
-        $source = $pluginConfig['source'] ?? 'wordpress.org';
-        return is_string($source) && $source !== '' ? $source : 'wordpress.org';
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     */
-    private function pluginKey(array $pluginConfig): string
-    {
-        return $this->pluginSource($pluginConfig) . ':' . (string) $pluginConfig['slug'];
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     */
-    private function sourceLabel(array $pluginConfig): string
-    {
-        return $this->pluginSource($pluginConfig) === 'github'
-            ? 'source:github'
-            : 'source:wordpress.org';
-    }
-
-    /**
-     * @param array<string, mixed> $metadata
-     */
-    private function componentKeyFromMetadata(array $metadata): ?string
-    {
-        $componentKey = $metadata['component_key'] ?? null;
-
-        if (is_string($componentKey) && $componentKey !== '') {
-            return $componentKey;
-        }
-
-        $slug = $metadata['slug'] ?? null;
-
-        if (! is_string($slug) || $slug === '') {
-            return null;
-        }
-
-        $source = $metadata['source'] ?? 'wordpress.org';
-        return (is_string($source) && $source !== '' ? $source : 'wordpress.org') . ':' . $slug;
+        $fragment = preg_replace('/[^a-z0-9]+/i', '-', strtolower($kind . '-' . $slug . '-' . $targetVersion . '-' . gmdate('YmdHis')));
+        return 'codex/wporg-' . trim((string) $fragment, '-');
     }
 
     /**
@@ -748,9 +862,7 @@ final class Updater
             $topicsWithDates[] = $topic;
         }
 
-        usort($topicsWithDates, static function (array $left, array $right): int {
-            return strcmp($right['opened_at'], $left['opened_at']);
-        });
+        usort($topicsWithDates, static fn (array $left, array $right): int => strcmp($right['opened_at'], $left['opened_at']));
 
         return array_values(array_merge($topicsWithDates, $topicsWithoutDates));
     }
@@ -777,125 +889,6 @@ final class Updater
         if ($blockedBy === [] && $isDraft) {
             $this->gitHubClient->markReadyForReview($nodeId);
         }
-    }
-
-    private function titleForPullRequest(string $pluginName, string $baseVersion, string $targetVersion): string
-    {
-        return sprintf('Update %s from %s to %s', $pluginName, $baseVersion, $targetVersion);
-    }
-
-    private function resolvePluginSourcePath(
-        string $extractPath,
-        string $archiveSubdir,
-        string $mainFile,
-        string $slug,
-    ): string
-    {
-        $entries = array_values(array_filter(scandir($extractPath) ?: [], static function (string $entry): bool {
-            return $entry !== '.' && $entry !== '..';
-        }));
-
-        $candidateBases = [$extractPath];
-
-        foreach ($entries as $entry) {
-            $candidate = $extractPath . '/' . $entry;
-
-            if (is_dir($candidate)) {
-                $candidateBases[] = $candidate;
-            }
-        }
-
-        $matches = [];
-
-        foreach ($candidateBases as $candidateBase) {
-            $candidatePath = $candidateBase;
-
-            if ($archiveSubdir !== '') {
-                $candidatePath .= '/' . $archiveSubdir;
-            }
-
-            if (is_file($candidatePath . '/' . $mainFile)) {
-                $matches[] = $candidatePath;
-            }
-        }
-
-        $matches = array_values(array_unique($matches));
-
-        if (count($matches) === 1) {
-            return $matches[0];
-        }
-
-        if ($matches === []) {
-            throw new RuntimeException(sprintf(
-                'Could not locate the extracted plugin root for %s. Expected to find %s inside the archive.',
-                $slug,
-                $mainFile
-            ));
-        }
-
-        throw new RuntimeException(sprintf(
-            'Extracted archive for %s matched multiple candidate plugin roots.',
-            $slug
-        ));
-    }
-
-    private function removeDirectory(string $path): void
-    {
-        if (! file_exists($path)) {
-            return;
-        }
-
-        if (is_file($path) || is_link($path)) {
-            unlink($path);
-            return;
-        }
-
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::CHILD_FIRST
-        );
-
-        foreach ($iterator as $item) {
-            if ($item->isDir()) {
-                rmdir($item->getPathname());
-            } else {
-                unlink($item->getPathname());
-            }
-        }
-
-        rmdir($path);
-    }
-
-    private function copyDirectory(string $source, string $destination): void
-    {
-        if (! is_dir($source)) {
-            throw new RuntimeException(sprintf('Source directory does not exist: %s', $source));
-        }
-
-        mkdir($destination, 0777, true);
-
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::SELF_FIRST
-        );
-
-        foreach ($iterator as $item) {
-            $target = $destination . '/' . $iterator->getSubPathName();
-
-            if ($item->isDir()) {
-                if (! is_dir($target)) {
-                    mkdir($target, 0777, true);
-                }
-            } else {
-                copy($item->getPathname(), $target);
-            }
-        }
-    }
-
-    private function newBranchName(string $slug, string $targetVersion): string
-    {
-        $fragment = preg_replace('/[^a-z0-9]+/i', '-', strtolower($slug . '-' . $targetVersion . '-' . gmdate('YmdHis')));
-        return 'codex/wporg-' . trim((string) $fragment, '-');
     }
 
     /**

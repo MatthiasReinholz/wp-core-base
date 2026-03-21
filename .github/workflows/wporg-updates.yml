@@ -1,4 +1,4 @@
-name: WordPress.org Updates
+name: wp-core-base Updates
 
 on:
   schedule:
@@ -14,7 +14,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: wporg-updates
+  group: wp-core-base-updates
   cancel-in-progress: false
 
 jobs:

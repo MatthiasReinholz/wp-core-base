@@ -80,7 +80,7 @@ final class ReleaseClassifier
      */
     public function deriveLabels(string $sourceLabel, string $scope, string $changelogText, array $supportTopics): array
     {
-        $labels = ['automation:plugin-update', $sourceLabel];
+        $labels = ['automation:dependency-update', $sourceLabel];
 
         if ($scope !== 'none') {
             $labels[] = 'release:' . $scope;

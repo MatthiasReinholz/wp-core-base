@@ -1,174 +1,134 @@
 # Downstream Usage
 
-This guide is for users who already understand the basic onboarding paths and want the more advanced dependency models.
+This guide is for downstream users who already understand the basics and need the operational model in more detail.
 
-If you are just getting started, use [getting-started.md](getting-started.md) first.
+## The Manifest Is The Contract
 
-## Two Valid Adoption Patterns
+The downstream source of truth is `.wp-core-base/manifest.php`.
 
-There are two different ways to use `wp-core-base` downstream, and it is important not to mix them up.
+The manifest defines:
 
-### 1. Base-Code Dependency
+- repository profile
+- content roots
+- whether WordPress core is managed or external
+- runtime staging rules
+- every dependency the updater is allowed to touch
 
-In this model, `wp-core-base` is part of the actual code baseline of your downstream WordPress project.
+The updater does not infer managed dependencies by scanning folders.
 
-Use this when:
+## Dependency Classes
 
-- you want an explicit upstream WordPress base
-- you want to consume upstream tags and releases intentionally
-- you are comfortable structuring your project around an upstream dependency
+Each dependency should fall into one of these classes:
 
-This is the model to choose when `wp-core-base` is truly part of your project foundation.
+- `managed-upstream`
+- `managed-private`
+- `local-owned`
+- `ignored`
 
-### 2. Automation-Only Dependency
+These map to manifest values like this:
 
-In this model, your downstream project keeps its own existing code layout, and `wp-core-base` is used mainly as the source of the updater tooling.
+- `management: managed` + `source: wordpress.org` => `managed-upstream`
+- `management: managed` + `source: github-release` => `managed-private`
+- `management: local` + `source: local` => `local-owned`
+- `management: ignored` + `source: local` => `ignored`
 
-Use this when:
+## Source Types
 
-- your repository already has the code structure you want
-- you mainly want the update PR automation
-- you do not want to reorganize the downstream project around the full base
-
-In that setup, your downstream repository still owns:
-
-- its own application code
-- its own `.github/wporg-updates.php` file
-- its own workflows
-
-The updater code is simply executed from a vendored copy of `wp-core-base`.
-
-## Advanced Dependency Options
-
-### Git Subtree
-
-Use a subtree when:
-
-- you want the base committed directly into your project history
-- local downstream customization is common
-- your team prefers a single-repository experience
-
-This is the best general-purpose option for most teams that want an ongoing upstream relationship.
-
-### Git Submodule
-
-Use a submodule when:
-
-- you want the strongest pinning to released upstream tags
-- you want the upstream base to remain visibly separate
-- your team already understands submodule workflows
-
-This is a stronger separation model, but it is more operationally demanding.
-
-### Template Or Copy-Based Bootstrap
-
-Use this when:
-
-- you want a simple starting point
-- you do not need a strong upstream relationship right away
-
-This is fine for bootstrapping, but it is not the best long-term dependency model if you expect to keep pulling upstream improvements.
-
-## Downstream-Owned Files
-
-A downstream repository that uses the automation should treat these files as its own responsibility:
-
-- `.github/wporg-updates.php`
-- `.github/workflows/...`
-- deployment configuration
-- project-specific themes, plugins, and application code
-
-The example files in this repository are a starting point, not something you should treat as hidden framework internals.
-
-Managed plugins can come from:
+Today the framework supports automated updates from:
 
 - `wordpress.org`
-- public GitHub repositories that publish stable GitHub Releases
+- `github-release`
 
-Use:
+GitHub support is release-backed. The repository must publish stable GitHub Releases. Raw tags without Releases are not treated as the source of truth.
 
-- [examples/downstream-wporg-updates.php](examples/downstream-wporg-updates.php)
-- [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
-- [examples/downstream-pr-blocker-workflow.yml](examples/downstream-pr-blocker-workflow.yml)
+For private GitHub dependencies, the manifest should point to an environment variable through `source_config.github_token_env`.
 
-If you want those files generated for you instead of copied by hand, use `scaffold-downstream`.
+## Managed Versus Local
 
-Examples:
+Use `managed` when:
 
-```bash
-php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=.
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --tool-path=vendor/wp-core-base
-```
+- the framework may replace the directory from an upstream archive
+- you want update PRs for that dependency
+- you can accept that local changes in that directory are unsafe
 
-For GitHub-sourced plugins, use:
+Use `local` when:
 
-- `source: 'github'`
-- `github_repository`
-- optionally `github_release_asset_pattern` if you want a release asset instead of the release zipball
-- optionally `github_archive_subdir` if the plugin code lives below the repository root
+- the dependency is part of the runtime
+- the code is owned by your project
+- the framework must never overwrite it
 
-## Example Layouts
+Use `ignored` when:
 
-### Full Base Dependency
+- the path should be documented in the manifest
+- but it should stay out of update automation and runtime staging
 
-In this model, the downstream repository itself usually contains the WordPress root:
+## Runtime Staging
 
-```text
-downstream-project/
-  .github/
-  wp-admin/
-  wp-content/
-  wp-includes/
-  project-specific-files/
-```
+`stage-runtime` assembles a clean runtime payload into a staging directory.
 
-The upstream relationship is defined by your Git strategy, usually subtree or submodule, not by a visible `vendor/` directory.
-
-### Automation-Only Dependency
-
-One practical layout:
-
-```text
-downstream-project/
-  .github/
-  wp-admin/
-  wp-content/
-  wp-includes/
-  vendor/
-    wp-core-base/
-```
-
-Then the downstream workflow runs the updater from the vendored `wp-core-base` path while targeting the downstream repository root through `WPORG_REPO_ROOT`.
-
-Example:
+Typical command:
 
 ```bash
-WPORG_REPO_ROOT="$GITHUB_WORKSPACE" php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
 
-## Release Consumption
+Use the staged directory as the input to:
 
-Downstream projects should consume tags and releases intentionally rather than tracking arbitrary in-progress commits.
+- Docker `COPY`
+- packaging pipelines
+- immutable artifact builds
 
-The intended tag format is:
+Do not build release artifacts from the raw repository tree when runtime staging is part of your contract.
 
-- `v6.9.4.0`
-- `v6.9.4.1`
-- `v6.9.5.0`
+## Daily Commands
 
-The first three segments track the bundled WordPress core version. The final segment tracks base-repository revisions on top of that core baseline.
+Most downstream teams only need these commands:
 
-## Recommendation
+```bash
+php tools/wporg-updater/bin/wporg-updater.php doctor
+php tools/wporg-updater/bin/wporg-updater.php doctor --github
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
+php tools/wporg-updater/tests/run.php
+```
 
-Good defaults:
+If `wp-core-base` is vendored, run the same commands from the vendored path and pass `--repo-root=.`
 
-- beginner or mixed-skill team: start simple, then move toward subtree if a long-term upstream link becomes important
-- advanced team with strong Git discipline: subtree or submodule
-- existing custom WordPress repo that mainly wants update PRs: automation-only dependency
+## Downstream Dependency Strategies
+
+There are two common ways to consume `wp-core-base`.
+
+### As The Base Repository
+
+Use this when `wp-core-base` should define the actual foundation of the downstream repo.
+
+Typical choices:
+
+- start from a release tag
+- use Git subtree
+- use Git submodule if your team already handles submodules comfortably
+
+### As Tooling Inside Another Repo
+
+Use this when your repo layout already exists and you mainly want the updater, manifest model, and runtime staging.
+
+Typical layout:
+
+```text
+project/
+  .wp-core-base/manifest.php
+  .github/workflows/
+  vendor/wp-core-base/
+```
+
+## Examples
+
+- example downstream manifest: [examples/downstream-manifest.php](examples/downstream-manifest.php)
+- example sync workflow: [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
+- example blocker workflow: [examples/downstream-pr-blocker-workflow.yml](examples/downstream-pr-blocker-workflow.yml)
+- example validation workflow: [examples/downstream-validate-runtime-workflow.yml](examples/downstream-validate-runtime-workflow.yml)
 
 ## What To Read Next
 
-- First-time adoption: [getting-started.md](getting-started.md)
-- Ongoing use and troubleshooting: [operations.md](operations.md)
-- Deployment choices, including FTP-based flows: [deployment-models.md](deployment-models.md)
-- Technical internals: [automation-overview.md](automation-overview.md)
+- step-by-step onboarding: [getting-started.md](getting-started.md)
+- schema details: [manifest-reference.md](manifest-reference.md)
+- migration planning: [migration-guide.md](migration-guide.md)

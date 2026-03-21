@@ -5,137 +5,79 @@ declare(strict_types=1);
 namespace WpOrgPluginUpdater;
 
 use DateTimeImmutable;
+use DateTimeZone;
 
 final class PrBodyRenderer
 {
     /**
      * @param list<string> $labels
+     * @param list<array{label:string, value:string}> $sourceDetails
      * @param list<array{title:string, url:string, opened_at:string}> $supportTopics
      * @param array<string, mixed> $metadata
      */
-    public function render(
-        string $pluginName,
-        string $pluginSlug,
-        string $pluginPath,
+    public function renderDependencyUpdate(
+        string $dependencyName,
+        string $dependencySlug,
+        string $dependencyKind,
+        string $dependencyPath,
         string $currentVersion,
         string $targetVersion,
         string $releaseScope,
         string $releaseAt,
         array $labels,
-        string $pluginUrl,
-        string $supportUrl,
-        string $changelogHtml,
+        array $sourceDetails,
+        string $releaseNotesHeading,
+        string $releaseNotesBody,
         array $supportTopics,
         array $metadata,
     ): string {
         $releaseDate = new DateTimeImmutable($releaseAt);
         $blockedBy = $metadata['blocked_by'] ?? [];
-        $supportLines = $supportTopics === []
-            ? "- None found after `{$releaseDate->format(DATE_ATOM)}`."
-            : implode("\n", array_map(static function (array $topic): string {
-                return sprintf('- [%s](%s)', $topic['title'], $topic['url']);
-            }, $supportTopics));
-
-        $labelLines = implode("\n", array_map(static fn (string $label): string => '- `' . $label . '`', $labels));
         $blockedLine = $blockedBy === []
             ? 'None'
             : implode(', ', array_map(static fn (int $number): string => '#' . $number, $blockedBy));
+        $labelLines = implode("\n", array_map(static fn (string $label): string => '- `' . $label . '`', $labels));
+        $detailRows = implode("\n", array_map(static fn (array $row): string => sprintf('| %s | %s |', $row['label'], $row['value']), $sourceDetails));
+        $supportHeading = $supportTopics === [] ? 'No support topics matched the release window.' : implode("\n", array_map(
+            static fn (array $topic): string => sprintf('- [%s](%s)', $topic['title'], $topic['url']),
+            $supportTopics
+        ));
+        $automationNote = match ($metadata['source'] ?? '') {
+            'github-release' => 'This PR is managed by the GitHub release updater automation.',
+            default => 'This PR is managed by the wordpress.org updater automation.',
+        };
 
         return trim(<<<MARKDOWN
 ## Summary
 
 | Field | Value |
 | --- | --- |
-| Plugin | `{$pluginName}` |
-| Slug | `{$pluginSlug}` |
-| Path | `{$pluginPath}` |
+| Dependency | `{$dependencyName}` |
+| Slug | `{$dependencySlug}` |
+| Kind | `{$dependencyKind}` |
+| Path | `{$dependencyPath}` |
 | Installed version on base branch | `{$currentVersion}` |
 | Target version | `{$targetVersion}` |
 | Release scope | `{$releaseScope}` |
-| Release timestamp (UTC) | `{$releaseDate->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C')}` |
-| WordPress.org plugin page | [Open]({$pluginUrl}) |
-| WordPress.org support forum | [Open]({$supportUrl}) |
+| Release timestamp (UTC) | `{$releaseDate->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C')}` |
 | Blocked by older update PRs | {$blockedLine} |
+{$detailRows}
 
 ## Derived Labels
 
 {$labelLines}
 
-## Changelog
+## {$releaseNotesHeading}
 
-{$changelogHtml}
+{$releaseNotesBody}
 
 ## Support Topics Opened After Release
 
-{$supportLines}
+{$supportHeading}
 
 ## Automation Notes
 
-- This PR is managed by the WordPress.org plugin updater automation.
-- If a newer patch release lands on the same release line before merge, this PR will be updated in place.
-- If a newer minor or major release lands before merge, the automation will open a separate blocked PR.
-
-<!-- wporg-update-metadata: {$this->encodeMetadata($metadata)} -->
-MARKDOWN);
-    }
-
-    /**
-     * @param list<string> $labels
-     * @param array<string, mixed> $metadata
-     */
-    public function renderGitHubPluginUpdate(
-        string $pluginName,
-        string $pluginSlug,
-        string $pluginPath,
-        string $currentVersion,
-        string $targetVersion,
-        string $releaseScope,
-        string $releaseAt,
-        array $labels,
-        string $repository,
-        string $releaseUrl,
-        string $issuesUrl,
-        string $downloadUrl,
-        string $releaseNotesMarkdown,
-        array $metadata,
-    ): string {
-        $releaseDate = new DateTimeImmutable($releaseAt);
-        $blockedBy = $metadata['blocked_by'] ?? [];
-        $labelLines = implode("\n", array_map(static fn (string $label): string => '- `' . $label . '`', $labels));
-        $blockedLine = $blockedBy === []
-            ? 'None'
-            : implode(', ', array_map(static fn (int $number): string => '#' . $number, $blockedBy));
-
-        return trim(<<<MARKDOWN
-## Summary
-
-| Field | Value |
-| --- | --- |
-| Plugin | `{$pluginName}` |
-| Slug | `{$pluginSlug}` |
-| Path | `{$pluginPath}` |
-| Installed version on base branch | `{$currentVersion}` |
-| Target version | `{$targetVersion}` |
-| Release scope | `{$releaseScope}` |
-| Release timestamp (UTC) | `{$releaseDate->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C')}` |
-| Source repository | [`{$repository}`](https://github.com/{$repository}) |
-| GitHub release | [Open]({$releaseUrl}) |
-| Issue tracker | [Open]({$issuesUrl}) |
-| Download package | [zip]({$downloadUrl}) |
-| Blocked by older update PRs | {$blockedLine} |
-
-## Derived Labels
-
-{$labelLines}
-
-## Release Notes
-
-{$releaseNotesMarkdown}
-
-## Automation Notes
-
-- This PR is managed by the GitHub release plugin updater automation.
-- GitHub plugin support currently assumes a repository with published releases and a public downloadable release asset or source archive.
+- {$automationNote}
 - If a newer patch release lands on the same release line before merge, this PR will be updated in place.
 - If a newer minor or major release lands before merge, the automation will open a separate blocked PR.
 
@@ -174,7 +116,7 @@ MARKDOWN);
 | Installed version on base branch | `{$currentVersion}` |
 | Target version | `{$targetVersion}` |
 | Release scope | `{$releaseScope}` |
-| Release timestamp (UTC) | `{$releaseDate->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C')}` |
+| Release timestamp (UTC) | `{$releaseDate->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C')}` |
 | Release announcement | [Open]({$releaseUrl}) |
 | Download package | [zip]({$downloadUrl}) |
 | Blocked by older update PRs | {$blockedLine} |
@@ -189,7 +131,7 @@ MARKDOWN);
 
 ## Automation Notes
 
-- This PR is managed by the WordPress.org updater automation.
+- This PR is managed by the WordPress core updater automation.
 - If a newer patch release lands on the same release line before merge, this PR will be updated in place.
 - If a newer minor or major release lands before merge, the automation will open a separate blocked PR.
 
@@ -230,7 +172,7 @@ MARKDOWN);
 
         $section = trim($matches[1]);
 
-        if ($section === '' || str_contains($section, 'None found after')) {
+        if ($section === '' || str_contains($section, 'No support topics matched')) {
             return [];
         }
 

@@ -31,65 +31,162 @@ final class EnvironmentDoctor
         $this->okIf($this->commandExists('git'), 'git is available.', 'git is not available on PATH.');
         $this->okIf($this->isGitRepository(), 'Repository root is inside a Git worktree.', 'Repository root is not inside a Git worktree.');
 
-        $configPath = $this->repoRoot . '/.github/wporg-updates.php';
-        $this->okIf(is_file($configPath), 'Updater config file exists.', sprintf('Config file not found: %s', $configPath));
+        $manifestPath = $this->repoRoot . '/.wp-core-base/manifest.php';
+        $this->okIf(is_file($manifestPath), 'Manifest file exists.', sprintf('Manifest file not found: %s', $manifestPath));
 
         $config = null;
 
         try {
             $config = Config::load($this->repoRoot);
-            $this->ok('Updater config loads successfully.');
+            $this->ok(sprintf('Manifest loaded successfully for profile `%s`.', $config->profile));
         } catch (RuntimeException $exception) {
             $this->error($exception->getMessage());
         }
 
         if ($config !== null) {
-            $this->inspectConfiguredContent($config);
+            $this->inspectConfiguredStructure($config);
+            $this->inspectDependencies($config);
+            $this->inspectRuntimeStaging($config);
         }
 
-        $this->inspectGitHubEnvironment($requireGitHub);
+        $this->inspectGitHubEnvironment($config, $requireGitHub);
         $this->inspectGitHubWorkflows($requireGitHub);
         $this->printSummary();
 
         return $this->errors === 0 ? 0 : 1;
     }
 
-    private function inspectConfiguredContent(Config $config): void
+    private function inspectConfiguredStructure(Config $config): void
     {
-        if ($config->coreConfig()['enabled']) {
-            try {
-                $core = (new CoreScanner())->inspect($this->repoRoot);
-                $this->ok(sprintf('WordPress core detected at version %s.', $core['version']));
-            } catch (RuntimeException $exception) {
-                $this->error($exception->getMessage());
+        foreach ($config->paths as $key => $path) {
+            if ($key === 'content_root') {
+                $this->ok(sprintf('Configured %s is %s.', $key, $path));
+                continue;
             }
-        } else {
-            $this->warn('WordPress core updates are disabled in config.');
+
+            $this->okIf(
+                $this->isSafeRelativePath($path),
+                sprintf('Configured %s path is valid: %s', $key, $path),
+                sprintf('Configured %s path is not a safe relative path: %s', $key, $path)
+            );
         }
 
-        $plugins = $config->enabledPlugins();
-
-        if ($plugins === []) {
-            $this->warn('No managed plugins are enabled in config.');
+        if ($config->profile === 'content-only') {
+            $this->okIf(
+                ! $config->coreManaged(),
+                'content-only profile is configured with external core.',
+                'content-only profile may not manage WordPress core.'
+            );
             return;
         }
 
-        foreach ($plugins as $pluginConfig) {
+        if (! $config->coreEnabled()) {
+            $this->warn('full-core profile has core updates disabled.');
+            return;
+        }
+
+        try {
+            $core = (new CoreScanner())->inspect($this->repoRoot);
+            $this->ok(sprintf('WordPress core detected at version %s.', $core['version']));
+        } catch (RuntimeException $exception) {
+            $this->error($exception->getMessage());
+        }
+    }
+
+    private function inspectDependencies(Config $config): void
+    {
+        if ($config->dependencies() === []) {
+            $this->warn('No dependencies are declared in the manifest.');
+            return;
+        }
+
+        $scanner = new DependencyScanner();
+        $runtimeInspector = new RuntimeInspector($config->runtime);
+
+        foreach ($config->dependencies() as $dependency) {
+            $absolutePath = $config->repoRoot . '/' . $dependency['path'];
+            $mainFile = $absolutePath . '/' . $dependency['main_file'];
+
+            $this->okIf(
+                is_dir($absolutePath),
+                sprintf('Dependency path exists: %s', $dependency['path']),
+                sprintf('Dependency path does not exist: %s', $dependency['path'])
+            );
+
+            if ($dependency['management'] === 'ignored') {
+                $this->ok(sprintf('Ignored dependency registered: %s.', $dependency['component_key']));
+                continue;
+            }
+
+            $this->okIf(
+                is_file($mainFile),
+                sprintf('Main file exists for %s: %s', $dependency['slug'], $dependency['main_file']),
+                sprintf('Main file not found for %s: %s', $dependency['slug'], $dependency['main_file'])
+            );
+
             try {
-                $plugin = (new PluginScanner())->inspect($this->repoRoot, $pluginConfig);
+                $state = $scanner->inspect($config->repoRoot, $dependency);
                 $this->ok(sprintf(
-                    'Managed plugin %s detected at %s (%s).',
-                    $pluginConfig['slug'],
-                    $plugin['version'],
-                    $plugin['path']
+                    'Dependency %s detected at %s (%s).',
+                    $dependency['component_key'],
+                    $state['version'],
+                    $state['path']
                 ));
+            } catch (RuntimeException $exception) {
+                $this->error($exception->getMessage());
+            }
+
+            try {
+                $runtimeInspector->assertTreeIsClean($absolutePath, (array) $dependency['policy']['allow_runtime_paths']);
+                $this->ok(sprintf('Runtime hygiene passed for %s.', $dependency['component_key']));
+            } catch (RuntimeException $exception) {
+                $this->error($exception->getMessage());
+            }
+
+            if ($dependency['management'] !== 'managed') {
+                continue;
+            }
+
+            try {
+                $checksum = $runtimeInspector->computeTreeChecksum($absolutePath);
+
+                if ($checksum !== $dependency['checksum']) {
+                    $this->error(sprintf(
+                        'Checksum drift detected for %s. Expected %s but found %s.',
+                        $dependency['component_key'],
+                        $dependency['checksum'],
+                        $checksum
+                    ));
+                } else {
+                    $this->ok(sprintf('Checksum matches manifest for %s.', $dependency['component_key']));
+                }
             } catch (RuntimeException $exception) {
                 $this->error($exception->getMessage());
             }
         }
     }
 
-    private function inspectGitHubEnvironment(bool $requireGitHub): void
+    private function inspectRuntimeStaging(Config $config): void
+    {
+        $stagePath = $config->repoRoot . '/.wp-core-base/build/doctor-runtime';
+        $runtimeInspector = new RuntimeInspector($config->runtime);
+        $stager = new RuntimeStager($config, $runtimeInspector);
+
+        try {
+            $stagedPaths = $stager->stage('.wp-core-base/build/doctor-runtime');
+            $this->ok(sprintf(
+                'Runtime staging succeeded at %s (%s).',
+                $stagePath,
+                $stagedPaths === [] ? 'no staged paths' : implode(', ', $stagedPaths)
+            ));
+        } catch (RuntimeException $exception) {
+            $this->error($exception->getMessage());
+        } finally {
+            $runtimeInspector->clearDirectory($stagePath);
+        }
+    }
+
+    private function inspectGitHubEnvironment(?Config $config, bool $requireGitHub): void
     {
         $repository = getenv('GITHUB_REPOSITORY');
         $token = getenv('GITHUB_TOKEN');
@@ -104,17 +201,46 @@ final class EnvironmentDoctor
                 $repository,
                 is_string($apiUrl) && $apiUrl !== '' ? sprintf(' using API %s', $apiUrl) : ''
             ));
+        } else {
+            $message = 'GitHub automation environment is not fully configured. Set GITHUB_REPOSITORY and GITHUB_TOKEN to run sync or pr-blocker modes.';
+
+            if ($requireGitHub) {
+                $this->error($message);
+            } else {
+                $this->warn($message . ' This is fine for local verification and non-GitHub use.');
+            }
+        }
+
+        if ($config === null) {
             return;
         }
 
-        $message = 'GitHub automation environment is not fully configured. Set GITHUB_REPOSITORY and GITHUB_TOKEN to run sync or pr-blocker modes.';
+        foreach ($config->managedDependencies() as $dependency) {
+            if ($dependency['source'] !== 'github-release') {
+                continue;
+            }
 
-        if ($requireGitHub) {
-            $this->error($message);
-            return;
+            $tokenEnv = $dependency['source_config']['github_token_env'] ?? null;
+
+            if (! is_string($tokenEnv) || $tokenEnv === '') {
+                continue;
+            }
+
+            $hasDependencyToken = getenv($tokenEnv);
+
+            if (is_string($hasDependencyToken) && $hasDependencyToken !== '') {
+                $this->ok(sprintf('GitHub token env is configured for %s: %s', $dependency['component_key'], $tokenEnv));
+                continue;
+            }
+
+            $message = sprintf('GitHub token env %s is missing for %s.', $tokenEnv, $dependency['component_key']);
+
+            if ($requireGitHub) {
+                $this->error($message);
+            } else {
+                $this->warn($message);
+            }
         }
-
-        $this->warn($message . ' This is fine for local verification and non-GitHub use.');
     }
 
     private function inspectGitHubWorkflows(bool $requireGitHub): void
@@ -142,6 +268,7 @@ final class EnvironmentDoctor
 
         $hasSyncWorkflow = false;
         $hasBlockerWorkflow = false;
+        $hasValidationWorkflow = false;
 
         foreach ($workflowFiles as $workflowFile) {
             $contents = file_get_contents($workflowFile);
@@ -152,20 +279,12 @@ final class EnvironmentDoctor
 
             $hasSyncWorkflow = $hasSyncWorkflow || str_contains($contents, 'wporg-updater.php sync');
             $hasBlockerWorkflow = $hasBlockerWorkflow || str_contains($contents, 'wporg-updater.php pr-blocker');
+            $hasValidationWorkflow = $hasValidationWorkflow || str_contains($contents, 'wporg-updater.php stage-runtime');
         }
 
-        $this->okIf(
-            $hasSyncWorkflow,
-            'Found a GitHub workflow that runs sync mode.',
-            'No GitHub workflow found that runs `wporg-updater.php sync`.'
-        );
-
-        if ($hasBlockerWorkflow) {
-            $this->ok('Found a GitHub workflow that runs blocker mode.');
-            return;
-        }
-
-        $this->warn('No GitHub workflow found that runs `wporg-updater.php pr-blocker`. Later minor and major update PRs will not queue automatically.');
+        $this->okIf($hasSyncWorkflow, 'Found a GitHub workflow that runs sync mode.', 'No GitHub workflow found that runs `wporg-updater.php sync`.');
+        $this->okIf($hasBlockerWorkflow, 'Found a GitHub workflow that runs blocker mode.', 'No GitHub workflow found that runs `wporg-updater.php pr-blocker`.');
+        $this->okIf($hasValidationWorkflow, 'Found a GitHub workflow that stages runtime output.', 'No GitHub workflow found that runs `wporg-updater.php stage-runtime`.');
     }
 
     private function isGitRepository(): bool
@@ -189,6 +308,11 @@ final class EnvironmentDoctor
         return $status === 0;
     }
 
+    private function isSafeRelativePath(string $path): bool
+    {
+        return $path !== '' && ! str_starts_with($path, '/') && ! str_contains($path, '../');
+    }
+
     private function printHeading(string $heading): void
     {
         fwrite(STDOUT, $heading . "\n\n");
@@ -203,11 +327,7 @@ final class EnvironmentDoctor
             return;
         }
 
-        fwrite(STDOUT, sprintf(
-            "Doctor found %d error(s) and %d warning(s).\n",
-            $this->errors,
-            $this->warnings
-        ));
+        fwrite(STDOUT, sprintf("Doctor found %d error(s) and %d warning(s).\n", $this->errors, $this->warnings));
     }
 
     private function ok(string $message): void

@@ -1,4 +1,4 @@
-name: WordPress.org Update PR Blocker
+name: wp-core-base PR Blocker
 
 on:
   pull_request_target:

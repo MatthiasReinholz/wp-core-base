@@ -5,16 +5,19 @@ declare(strict_types=1);
 use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\CoreUpdater;
+use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\EnvironmentDoctor;
 use WpOrgPluginUpdater\GitCommandRunner;
 use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
-use WpOrgPluginUpdater\PluginScanner;
+use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
+use WpOrgPluginUpdater\RuntimeInspector;
+use WpOrgPluginUpdater\RuntimeStager;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\Updater;
 use WpOrgPluginUpdater\WordPressCoreClient;
@@ -59,21 +62,26 @@ try {
 Usage:
   php tools/wporg-updater/bin/wporg-updater.php sync
   php tools/wporg-updater/bin/wporg-updater.php doctor [--repo-root=/path] [--github]
-  php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--force]
+  php tools/wporg-updater/bin/wporg-updater.php stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
+  php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only] [--content-root=cms] [--force]
   php tools/wporg-updater/bin/wporg-updater.php pr-blocker
 
 Modes:
-  sync        Run WordPress core and plugin reconciliation.
-  doctor      Validate local prerequisites, config, and optional GitHub environment.
-  scaffold-downstream  Create downstream config and workflow files from the bundled templates.
-  pr-blocker  Evaluate whether the current PR should remain blocked.
+  sync              Run WordPress core and dependency reconciliation.
+  doctor            Validate the manifest, repo structure, runtime hygiene, and optional GitHub environment.
+  stage-runtime     Assemble a clean runtime payload for image builds.
+  scaffold-downstream  Create a manifest and workflow files from the bundled templates.
+  pr-blocker        Evaluate whether the current PR should remain blocked.
 
 Flags and environment:
-  --repo-root=PATH      Override the repository root to inspect or update.
-  --tool-path=PATH      Path from the downstream repo root to the wp-core-base checkout for scaffold mode.
-  --force               Overwrite scaffolded files when they already exist.
-  WPORG_REPO_ROOT       Environment alternative to --repo-root.
-  WPORG_UPDATE_DRY_RUN  Enable dry-run behavior for sync mode.
+  --repo-root=PATH       Override the repository root to inspect or update.
+  --tool-path=PATH       Path from the downstream repo root to the wp-core-base checkout for scaffold mode.
+  --profile=PROFILE      Downstream scaffold profile: full-core or content-only.
+  --content-root=PATH    Override the scaffolded content root.
+  --output=PATH          Override the stage-runtime output path.
+  --force                Overwrite scaffolded files when they already exist.
+  WPORG_REPO_ROOT        Environment alternative to --repo-root.
+  WPORG_UPDATE_DRY_RUN   Enable dry-run behavior for sync mode.
 
 TEXT);
         exit(0);
@@ -85,27 +93,46 @@ TEXT);
     }
 
     if ($mode === 'scaffold-downstream') {
+        $profile = $options['profile'] ?? 'content-only';
+        $contentRoot = $options['content-root'] ?? null;
         $scaffolder = new DownstreamScaffolder($frameworkRoot, $repoRoot);
-        exit($scaffolder->scaffold((string) $toolPath, $force));
+        exit($scaffolder->scaffold((string) $toolPath, (string) $profile, is_string($contentRoot) ? $contentRoot : null, $force));
     }
 
     $config = Config::load($repoRoot);
     $httpClient = new HttpClient(
-        userAgent: 'wp-core-base/' . ($mode === 'sync' ? 'sync' : 'pr-blocker')
+        userAgent: 'wp-core-base/' . ($mode === 'sync' ? 'sync' : $mode)
     );
 
+    if ($mode === 'stage-runtime') {
+        $runtimeInspector = new RuntimeInspector($config->runtime);
+        $stager = new RuntimeStager($config, $runtimeInspector);
+        $stagedPaths = $stager->stage((string) ($options['output'] ?? $config->runtime['stage_dir']));
+        fwrite(STDOUT, "Staged runtime paths:\n");
+
+        foreach ($stagedPaths as $path) {
+            fwrite(STDOUT, sprintf("- %s\n", $path));
+        }
+
+        exit(0);
+    }
+
     if ($mode === 'sync') {
-        $gitHubClient = GitHubClient::fromEnvironment($httpClient, $config->githubApiBase, $config->dryRun);
-        $pluginUpdater = new Updater(
+        $gitHubClient = GitHubClient::fromEnvironment($httpClient, $config->githubApiBase(), $config->dryRun());
+        $runtimeInspector = new RuntimeInspector($config->runtime);
+        $dependencyUpdater = new Updater(
             config: $config,
-            pluginScanner: new PluginScanner(),
+            dependencyScanner: new DependencyScanner(),
             wordPressOrgClient: new WordPressOrgClient($httpClient),
-            gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase),
-            supportForumClient: new SupportForumClient($httpClient, $config->supportMaxPages),
+            gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase()),
+            supportForumClient: new SupportForumClient($httpClient, 100),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),
             gitHubClient: $gitHubClient,
-            gitRunner: new GitCommandRunner($repoRoot, $config->dryRun),
+            gitRunner: new GitCommandRunner($repoRoot, $config->dryRun()),
+            runtimeInspector: $runtimeInspector,
+            manifestWriter: new ManifestWriter(),
+            httpClient: $httpClient,
         );
         $coreUpdater = new CoreUpdater(
             config: $config,
@@ -114,13 +141,13 @@ TEXT);
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),
             gitHubClient: $gitHubClient,
-            gitRunner: new GitCommandRunner($repoRoot, $config->dryRun),
+            gitRunner: new GitCommandRunner($repoRoot, $config->dryRun()),
         );
         $errors = [];
 
         foreach ([
             'core' => static fn () => $coreUpdater->sync(),
-            'plugins' => static fn () => $pluginUpdater->sync(),
+            'dependencies' => static fn () => $dependencyUpdater->sync(),
         ] as $name => $syncPass) {
             try {
                 $syncPass();
@@ -137,7 +164,7 @@ TEXT);
     }
 
     if ($mode === 'pr-blocker') {
-        $gitHubClient = GitHubClient::fromEnvironment($httpClient, $config->githubApiBase, $config->dryRun);
+        $gitHubClient = GitHubClient::fromEnvironment($httpClient, $config->githubApiBase(), $config->dryRun());
         $blocker = new PullRequestBlocker($gitHubClient);
         exit($blocker->evaluateCurrentPullRequest());
     }

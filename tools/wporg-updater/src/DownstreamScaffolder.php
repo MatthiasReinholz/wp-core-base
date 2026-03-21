@@ -14,32 +14,57 @@ final class DownstreamScaffolder
     ) {
     }
 
-    public function scaffold(string $toolPath, bool $force = false): int
+    public function scaffold(string $toolPath, string $profile = 'content-only', ?string $contentRoot = null, bool $force = false): int
     {
         if (! is_dir($this->repoRoot)) {
             throw new RuntimeException(sprintf('Repository root does not exist: %s', $this->repoRoot));
         }
 
+        if (! in_array($profile, ['full-core', 'content-only'], true)) {
+            throw new RuntimeException(sprintf('Invalid scaffold profile: %s', $profile));
+        }
+
+        $contentRoot = $this->normalizeContentRoot($contentRoot ?? ($profile === 'content-only' ? 'cms' : 'wp-content'));
+        $paths = $this->pathsForProfile($profile, $contentRoot);
+
         $this->printHeading('wp-core-base scaffold-downstream');
 
         $syncCommand = $this->updaterCommand($toolPath, 'sync');
         $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
+        $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --github');
+        $stageCommand = $this->updaterCommand($toolPath, 'stage-runtime --repo-root=. --output=.wp-core-base/build/runtime');
 
         $writes = [
             [
-                'source' => $this->frameworkRoot . '/docs/examples/downstream-wporg-updates.php',
-                'target' => $this->repoRoot . '/.github/wporg-updates.php',
-                'render' => static fn (string $contents): string => $contents,
+                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/manifest.' . $profile . '.php.tpl',
+                'target' => $this->repoRoot . '/.wp-core-base/manifest.php',
+                'replacements' => [
+                    '__PROFILE__' => $profile,
+                    '__CONTENT_ROOT__' => $paths['content_root'],
+                    '__PLUGINS_ROOT__' => $paths['plugins_root'],
+                    '__THEMES_ROOT__' => $paths['themes_root'],
+                    '__MU_PLUGINS_ROOT__' => $paths['mu_plugins_root'],
+                    '__CORE_MODE__' => $profile === 'content-only' ? 'external' : 'managed',
+                    '__CORE_ENABLED__' => $profile === 'content-only' ? 'false' : 'true',
+                ],
             ],
             [
                 'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
                 'target' => $this->repoRoot . '/.github/workflows/wporg-updates.yml',
-                'render' => static fn (string $contents): string => str_replace('__WPORG_SYNC_COMMAND__', $syncCommand, $contents),
+                'replacements' => ['__WPORG_SYNC_COMMAND__' => $syncCommand],
             ],
             [
                 'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
                 'target' => $this->repoRoot . '/.github/workflows/wporg-update-pr-blocker.yml',
-                'render' => static fn (string $contents): string => str_replace('__WPORG_BLOCKER_COMMAND__', $blockerCommand, $contents),
+                'replacements' => ['__WPORG_BLOCKER_COMMAND__' => $blockerCommand],
+            ],
+            [
+                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-validate-runtime-workflow.yml.tpl',
+                'target' => $this->repoRoot . '/.github/workflows/wporg-validate-runtime.yml',
+                'replacements' => [
+                    '__WPORG_DOCTOR_COMMAND__' => $doctorCommand,
+                    '__WPORG_STAGE_RUNTIME_COMMAND__' => $stageCommand,
+                ],
             ],
         ];
 
@@ -47,24 +72,24 @@ final class DownstreamScaffolder
             $this->writeFile(
                 $write['source'],
                 $write['target'],
-                $write['render'],
+                $write['replacements'],
                 $force
             );
         }
 
         fwrite(STDOUT, "\n");
         fwrite(STDOUT, "Next steps:\n");
-        fwrite(STDOUT, sprintf("[next] Review the generated files in %s/.github.\n", $this->repoRoot));
-        fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $this->updaterCommand($toolPath, 'doctor --repo-root=. --github')));
-        fwrite(STDOUT, "[next] Adjust managed plugins in `.github/wporg-updates.php` before enabling the scheduled workflow.\n");
+        fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
+        fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $doctorCommand));
+        fwrite(STDOUT, "[next] Classify your runtime trees as managed, local, or ignored before enabling the scheduled workflow.\n");
 
         return 0;
     }
 
     /**
-     * @param callable(string): string $render
+     * @param array<string, string> $replacements
      */
-    private function writeFile(string $source, string $target, callable $render, bool $force): void
+    private function writeFile(string $source, string $target, array $replacements, bool $force): void
     {
         if (! is_file($source)) {
             throw new RuntimeException(sprintf('Scaffold template not found: %s', $source));
@@ -76,7 +101,7 @@ final class DownstreamScaffolder
             throw new RuntimeException(sprintf('Unable to read scaffold template: %s', $source));
         }
 
-        $rendered = $render($contents);
+        $rendered = str_replace(array_keys($replacements), array_values($replacements), $contents);
         $targetDir = dirname($target);
 
         if (! is_dir($targetDir) && ! mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
@@ -102,6 +127,30 @@ final class DownstreamScaffolder
         }
 
         fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $target));
+    }
+
+    /**
+     * @return array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string}
+     */
+    private function pathsForProfile(string $profile, string $contentRoot): array
+    {
+        return [
+            'content_root' => $contentRoot,
+            'plugins_root' => $contentRoot . '/plugins',
+            'themes_root' => $contentRoot . '/themes',
+            'mu_plugins_root' => $contentRoot . '/mu-plugins',
+        ];
+    }
+
+    private function normalizeContentRoot(string $contentRoot): string
+    {
+        $normalized = trim(str_replace('\\', '/', $contentRoot), '/');
+
+        if ($normalized === '' || str_starts_with($normalized, '..') || str_contains($normalized, '../')) {
+            throw new RuntimeException(sprintf('Invalid content root: %s', $contentRoot));
+        }
+
+        return $normalized;
     }
 
     private function updaterCommand(string $toolPath, string $mode): string

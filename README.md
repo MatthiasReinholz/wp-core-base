@@ -1,93 +1,95 @@
 # wp-core-base
 
-`wp-core-base` is a versioned WordPress base that you can use as the starting point or upstream dependency for a WordPress project.
+`wp-core-base` is a reusable WordPress foundation for teams that want their WordPress code, dependency snapshots, and update flow to live in Git.
 
-It is designed for people who want WordPress code to live in Git, be versioned intentionally, and optionally receive update pull requests for WordPress core and selected wordpress.org or GitHub release-backed plugins.
+It supports two downstream styles:
 
-This README is the entry point for users of the base. If you want to work on `wp-core-base` itself as a contributor, maintainer, or repository author, use [docs/contributing.md](docs/contributing.md).
+- `full-core`: the downstream repository contains WordPress core
+- `content-only`: the downstream repository contains only its content tree and treats WordPress core as external
 
-## What This Means In Practice
+This README is written for people adopting `wp-core-base` in their own WordPress projects. If you are contributing to `wp-core-base` itself, use [docs/contributing.md](docs/contributing.md).
 
-You can use `wp-core-base` in several different ways:
+## What You Get
 
-- as the starting codebase for a brand-new WordPress project
-- as an upstream dependency for an existing Git-managed WordPress project
-- as the automation source for an existing WordPress repository, even if you still deploy by FTP or another manual flow
+- a versioned WordPress base repository
+- an explicit manifest at `.wp-core-base/manifest.php`
+- scheduled GitHub update PRs for WordPress core and managed dependencies
+- support for WordPress.org and GitHub Release backed dependencies
+- runtime staging for image-first or immutable deployment flows
 
-`wp-core-base` does not force one hosting or deployment model. It manages code and update flow. Your deployment can still be Git-based, FTP-based, manual, or CI-driven.
+## Start Here
 
-## Before You Start
+Choose the path that matches your project:
 
-Two points matter up front:
+- brand-new WordPress project: [docs/getting-started.md#full-core-project-from-scratch](docs/getting-started.md#full-core-project-from-scratch)
+- content-only or image-first downstream: [docs/getting-started.md#content-only-project-from-scratch](docs/getting-started.md#content-only-project-from-scratch)
+- existing Git-managed WordPress project: [docs/getting-started.md#existing-git-managed-project](docs/getting-started.md#existing-git-managed-project)
+- existing FTP or manual deployment workflow: [docs/getting-started.md#existing-ftp-or-manual-deployment](docs/getting-started.md#existing-ftp-or-manual-deployment)
+- local development and validation: [docs/getting-started.md#local-development](docs/getting-started.md#local-development)
 
-- GitHub is not required to use the code base itself.
-- GitHub is required if you want the automated pull-request workflow, because that automation is built around GitHub Actions and GitHub pull requests.
+If you need help choosing an architecture first, read [docs/deployment-models.md](docs/deployment-models.md).
 
-If you do not use GitHub today, you can still use `wp-core-base` as a versioned WordPress base. You would just manage updates manually until or unless you move your source repository to GitHub.
+## GitHub And Non-GitHub Use
 
-If GitHub itself is new to you, start with [docs/getting-started.md](docs/getting-started.md). That guide explains what GitHub is doing in this setup and what stays unchanged in local development and deployment.
+You do not need GitHub to use `wp-core-base` as a code base.
 
-If you already have `wp-core-base` inside a downstream repository and want the quickest safe setup path, [docs/getting-started.md](docs/getting-started.md) now includes a scaffolding flow for the required config and workflow files.
+You do need GitHub if you want the scheduled pull-request automation, because that part of the framework is built on GitHub Actions and GitHub pull requests.
 
-## Choose Your Starting Path
+That means these are all valid:
 
-If you are new to this, start with the path that matches your situation:
+- GitHub for source control and CI/CD deployment
+- GitHub for source control, with FTP or SFTP deployment
+- GitHub for source control, with manual deployment
+- no GitHub yet, with manual adoption of tagged releases
 
-- Brand-new WordPress project: [docs/getting-started.md#brand-new-wordpress-project](docs/getting-started.md#brand-new-wordpress-project)
-- Existing WordPress project already in Git: [docs/getting-started.md#existing-wordpress-project-already-in-git](docs/getting-started.md#existing-wordpress-project-already-in-git)
-- Existing WordPress site that is still deployed by FTP or another manual flow: [docs/getting-started.md#existing-wordpress-site-with-ftp-or-manual-deployment](docs/getting-started.md#existing-wordpress-site-with-ftp-or-manual-deployment)
-- Local development setup: [docs/getting-started.md#local-development](docs/getting-started.md#local-development)
-- Deployment and architecture choices: [docs/deployment-models.md](docs/deployment-models.md)
+## Recommended First Commands
 
-If you already understand the basics and want the more advanced dependency model, use [docs/downstream-usage.md](docs/downstream-usage.md).
+If `wp-core-base` is the current repository:
 
-## If You Are Unsure, Start Like This
+```bash
+php tools/wporg-updater/bin/wporg-updater.php doctor
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
+```
 
-If you are completely new to this style of workflow, the safest order is:
+If you are onboarding a downstream repository and want the framework to generate the initial manifest and workflows:
 
-1. get the WordPress project into Git
-2. get it working locally
-3. decide whether you want to adopt `wp-core-base` as code, automation, or both
-4. move the repository to GitHub only when you are ready for automated pull requests
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only --content-root=cms
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+```
 
-That path keeps the learning curve manageable and works for both fresh projects and legacy FTP-based sites.
+Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
 
 ## Current Baseline
 
-The current bundled baseline in this repository is:
+This repository currently ships:
 
-- the exact WordPress core and plugin versions currently committed to this Git repository
 - WordPress core `6.9.4`
 - Akismet `5.6`
 - WooCommerce `10.6.1`
 - Jetpack `15.6`
 - Contact Form 7 `6.1.5`
 - Redirection `5.7.5`
+- Twenty Twenty-Three `1.6`
+- Twenty Twenty-Four `1.4`
+- Twenty Twenty-Five `1.4`
+
+These versions describe the code committed in this repository, not a floating latest channel.
 
 ## Documentation Map
 
-Use the document that matches your role and level of detail:
-
-- Start here if you are adopting the base: [docs/getting-started.md](docs/getting-started.md)
-- Day-to-day usage after adoption: [docs/operations.md](docs/operations.md)
-- Compare deployment and architecture options: [docs/deployment-models.md](docs/deployment-models.md)
-- Advanced dependency usage: [docs/downstream-usage.md](docs/downstream-usage.md)
-- Workflow example for downstream repositories: [docs/examples/downstream-workflow.yml](docs/examples/downstream-workflow.yml)
-- Blocker workflow example for downstream repositories: [docs/examples/downstream-pr-blocker-workflow.yml](docs/examples/downstream-pr-blocker-workflow.yml)
-- Example downstream update config: [docs/examples/downstream-wporg-updates.php](docs/examples/downstream-wporg-updates.php)
-- Contributors, maintainers, and repository author: [docs/contributing.md](docs/contributing.md)
-- Technical internals and automation behavior: [docs/automation-overview.md](docs/automation-overview.md)
+- onboarding and implementation: [docs/getting-started.md](docs/getting-started.md)
+- deployment and architecture choices: [docs/deployment-models.md](docs/deployment-models.md)
+- advanced downstream usage: [docs/downstream-usage.md](docs/downstream-usage.md)
+- ongoing operations: [docs/operations.md](docs/operations.md)
+- manifest reference: [docs/manifest-reference.md](docs/manifest-reference.md)
+- migration guidance: [docs/migration-guide.md](docs/migration-guide.md)
+- example downstream manifest and workflows: [docs/examples/](docs/examples/)
+- contributor guide: [docs/contributing.md](docs/contributing.md)
+- automation internals: [docs/automation-overview.md](docs/automation-overview.md)
 
 ## Contributing
 
-If you are changing `wp-core-base` itself, do not use this README as the contributor guide.
+If you are changing `wp-core-base` itself, do not use this README as the maintainer guide.
 
-Use:
-
-- [docs/contributing.md](docs/contributing.md)
-
-If you want a quick local health check after cloning, run:
-
-```bash
-php tools/wporg-updater/bin/wporg-updater.php doctor
-```
+Use [docs/contributing.md](docs/contributing.md). That document covers verification, release discipline, audience separation, and the repository’s contributor responsibilities.

@@ -16,19 +16,19 @@ final class GitHubReleaseClient
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
+     * @param array<string, mixed> $dependency
      * @return list<array<string, mixed>>
      */
-    public function fetchStableReleases(array $pluginConfig): array
+    public function fetchStableReleases(array $dependency): array
     {
-        $repository = (string) $pluginConfig['github_repository'];
+        $repository = $this->repository($dependency);
         $releases = [];
         $page = 1;
 
         do {
             $chunk = $this->requestJson(
                 sprintf('/repos/%s/releases?per_page=100&page=%d', $this->repositoryPath($repository), $page),
-                $this->headers($pluginConfig)
+                $this->headers($dependency)
             );
 
             if (! array_is_list($chunk)) {
@@ -36,47 +36,33 @@ final class GitHubReleaseClient
             }
 
             foreach ($chunk as $release) {
-                if (is_array($release)) {
-                    $releases[] = $release;
+                if (! is_array($release)) {
+                    continue;
                 }
+
+                if ((bool) ($release['draft'] ?? false) || (bool) ($release['prerelease'] ?? false)) {
+                    continue;
+                }
+
+                $release['normalized_version'] = $this->normalizeVersion((string) ($release['tag_name'] ?? ''), $dependency);
+                $releases[] = $release;
             }
 
             $page++;
         } while (count($chunk) === 100);
 
-        $stableReleases = array_values(array_filter($releases, static function (array $release): bool {
-            return ! (bool) ($release['draft'] ?? false) && ! (bool) ($release['prerelease'] ?? false);
-        }));
-
-        if ($stableReleases === []) {
+        if ($releases === []) {
             throw new RuntimeException(sprintf('No published stable GitHub releases were found for %s.', $repository));
         }
 
-        foreach ($stableReleases as &$release) {
-            $release['normalized_version'] = $this->normalizeVersion((string) ($release['tag_name'] ?? ''), $pluginConfig);
-        }
-        unset($release);
-
-        usort($stableReleases, static function (array $left, array $right): int {
+        usort($releases, static function (array $left, array $right): int {
             return version_compare((string) $right['normalized_version'], (string) $left['normalized_version']);
         });
 
-        return $stableReleases;
+        return $releases;
     }
 
-    /**
-     * @param array<string, mixed> $pluginConfig
-     * @return array<string, mixed>
-     */
-    public function fetchLatestStableRelease(array $pluginConfig): array
-    {
-        return $this->fetchStableReleases($pluginConfig)[0];
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     */
-    public function latestVersion(array $release, array $pluginConfig): string
+    public function latestVersion(array $release, array $dependency): string
     {
         $normalized = $release['normalized_version'] ?? null;
 
@@ -84,7 +70,7 @@ final class GitHubReleaseClient
             return $normalized;
         }
 
-        return $this->normalizeVersion((string) ($release['tag_name'] ?? ''), $pluginConfig);
+        return $this->normalizeVersion((string) ($release['tag_name'] ?? ''), $dependency);
     }
 
     public function latestReleaseAt(array $release): string
@@ -92,67 +78,12 @@ final class GitHubReleaseClient
         foreach (['published_at', 'created_at'] as $field) {
             $value = $release[$field] ?? null;
 
-            if (! is_string($value) || $value === '') {
-                continue;
+            if (is_string($value) && $value !== '') {
+                return (new DateTimeImmutable($value))->format(DATE_ATOM);
             }
-
-            return (new DateTimeImmutable($value))->format(DATE_ATOM);
         }
 
         throw new RuntimeException('GitHub release did not include published_at or created_at.');
-    }
-
-    /**
-     * @param array<string, mixed> $pluginConfig
-     */
-    public function downloadUrl(array $release, array $pluginConfig): string
-    {
-        $assetPattern = $pluginConfig['github_release_asset_pattern'] ?? null;
-
-        if (is_string($assetPattern) && $assetPattern !== '') {
-            $assets = $release['assets'] ?? null;
-
-            if (! is_array($assets)) {
-                throw new RuntimeException(sprintf(
-                    'GitHub release for %s did not include an assets list.',
-                    (string) $pluginConfig['slug']
-                ));
-            }
-
-            foreach ($assets as $asset) {
-                if (! is_array($asset)) {
-                    continue;
-                }
-
-                $name = $asset['name'] ?? null;
-                $downloadUrl = $asset['browser_download_url'] ?? null;
-
-                if (! is_string($name) || ! is_string($downloadUrl) || $downloadUrl === '') {
-                    continue;
-                }
-
-                if (fnmatch($assetPattern, $name)) {
-                    return $downloadUrl;
-                }
-            }
-
-            throw new RuntimeException(sprintf(
-                'No GitHub release asset matching "%s" was found for %s.',
-                $assetPattern,
-                (string) $pluginConfig['github_repository']
-            ));
-        }
-
-        $zipballUrl = $release['zipball_url'] ?? null;
-
-        if (! is_string($zipballUrl) || $zipballUrl === '') {
-            throw new RuntimeException(sprintf(
-                'GitHub release for %s did not include a zipball_url.',
-                (string) $pluginConfig['github_repository']
-            ));
-        }
-
-        return $zipballUrl;
     }
 
     public function releaseUrl(array $release, string $repository): string
@@ -163,11 +94,6 @@ final class GitHubReleaseClient
             return $releaseUrl;
         }
 
-        return sprintf('https://github.com/%s/releases', $repository);
-    }
-
-    public function releasesUrl(string $repository): string
-    {
         return sprintf('https://github.com/%s/releases', $repository);
     }
 
@@ -197,12 +123,111 @@ final class GitHubReleaseClient
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
+     * @param array<string, mixed> $dependency
      */
-    public function archiveSubdir(array $pluginConfig): string
+    public function downloadReleaseToFile(array $release, array $dependency, string $destination): void
     {
-        $subdir = $pluginConfig['github_archive_subdir'] ?? null;
-        return is_string($subdir) ? trim($subdir, '/') : '';
+        $selectedAsset = $this->selectReleaseAsset($release, $dependency);
+
+        if ($selectedAsset !== null) {
+            $apiUrl = (string) ($selectedAsset['url'] ?? '');
+
+            if ($apiUrl === '') {
+                throw new RuntimeException(sprintf(
+                    'GitHub release asset metadata for %s is missing the API URL.',
+                    $this->repository($dependency)
+                ));
+            }
+
+            $this->downloadAssetFromApi($apiUrl, $dependency, $destination);
+            return;
+        }
+
+        $zipballUrl = $release['zipball_url'] ?? null;
+
+        if (! is_string($zipballUrl) || $zipballUrl === '') {
+            throw new RuntimeException(sprintf(
+                'GitHub release for %s did not include a zipball_url.',
+                $this->repository($dependency)
+            ));
+        }
+
+        $headers = $this->headers($dependency);
+
+        if (isset($headers['Authorization'])) {
+            $response = $this->httpClient->request('GET', $zipballUrl, $headers, null, null, false);
+
+            if (($response['status'] === 302 || $response['status'] === 301) && isset($response['headers']['location'])) {
+                $this->httpClient->downloadToFile($response['headers']['location'], $destination);
+                return;
+            }
+
+            if ($response['status'] >= 200 && $response['status'] < 300) {
+                $this->writeBinaryBody($destination, $response['body']);
+                return;
+            }
+
+            throw new RuntimeException(sprintf(
+                'GitHub release download for %s failed with status %d.',
+                $this->repository($dependency),
+                $response['status']
+            ));
+        }
+
+        $this->httpClient->downloadToFile($zipballUrl, $destination);
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    public function archiveSubdir(array $dependency): string
+    {
+        return trim((string) ($dependency['archive_subdir'] ?? ''), '/');
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    public function repository(array $dependency): string
+    {
+        $repository = $dependency['source_config']['github_repository'] ?? null;
+
+        if (! is_string($repository) || $repository === '') {
+            throw new RuntimeException(sprintf('Dependency %s is missing source_config.github_repository.', (string) ($dependency['slug'] ?? 'unknown')));
+        }
+
+        return $repository;
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @return array<string, string>
+     */
+    private function headers(array $dependency): array
+    {
+        $headers = [
+            'Accept' => 'application/vnd.github+json',
+            'X-GitHub-Api-Version' => '2022-11-28',
+        ];
+
+        $tokenEnv = $dependency['source_config']['github_token_env'] ?? null;
+
+        if (! is_string($tokenEnv) || $tokenEnv === '') {
+            return $headers;
+        }
+
+        $token = getenv($tokenEnv);
+
+        if (! is_string($token) || $token === '') {
+            throw new RuntimeException(sprintf(
+                'Dependency %s requires the %s environment variable for GitHub release access.',
+                (string) $dependency['slug'],
+                $tokenEnv
+            ));
+        }
+
+        $headers['Authorization'] = 'Bearer ' . $token;
+        return $headers;
     }
 
     /**
@@ -236,23 +261,78 @@ final class GitHubReleaseClient
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
-     * @return array<string, string>
+     * @param array<string, mixed> $release
+     * @param array<string, mixed> $dependency
+     * @return array<string, mixed>|null
      */
-    private function headers(array $pluginConfig): array
+    private function selectReleaseAsset(array $release, array $dependency): ?array
     {
-        $headers = [
-            'Accept' => 'application/vnd.github+json',
-            'X-GitHub-Api-Version' => '2022-11-28',
-        ];
+        $assetPattern = $dependency['source_config']['github_release_asset_pattern'] ?? null;
 
-        $token = $pluginConfig['github_token'] ?? null;
-
-        if (is_string($token) && $token !== '') {
-            $headers['Authorization'] = 'Bearer ' . $token;
+        if (! is_string($assetPattern) || $assetPattern === '') {
+            return null;
         }
 
-        return $headers;
+        $assets = $release['assets'] ?? null;
+
+        if (! is_array($assets)) {
+            throw new RuntimeException(sprintf(
+                'GitHub release for %s did not include an assets list.',
+                $this->repository($dependency)
+            ));
+        }
+
+        foreach ($assets as $asset) {
+            if (! is_array($asset)) {
+                continue;
+            }
+
+            $name = $asset['name'] ?? null;
+
+            if (is_string($name) && $name !== '' && fnmatch($assetPattern, $name)) {
+                return $asset;
+            }
+        }
+
+        throw new RuntimeException(sprintf(
+            'No GitHub release asset matching "%s" was found for %s.',
+            $assetPattern,
+            $this->repository($dependency)
+        ));
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    private function downloadAssetFromApi(string $assetApiUrl, array $dependency, string $destination): void
+    {
+        $headers = $this->headers($dependency);
+        $headers['Accept'] = 'application/octet-stream';
+
+        $response = $this->httpClient->request('GET', $assetApiUrl, $headers, null, null, false);
+
+        if (($response['status'] === 302 || $response['status'] === 301) && isset($response['headers']['location'])) {
+            $this->httpClient->downloadToFile($response['headers']['location'], $destination);
+            return;
+        }
+
+        if ($response['status'] >= 200 && $response['status'] < 300) {
+            $this->writeBinaryBody($destination, $response['body']);
+            return;
+        }
+
+        throw new RuntimeException(sprintf(
+            'GitHub release asset download for %s failed with status %d.',
+            $this->repository($dependency),
+            $response['status']
+        ));
+    }
+
+    private function writeBinaryBody(string $destination, string $body): void
+    {
+        if (file_put_contents($destination, $body) === false) {
+            throw new RuntimeException(sprintf('Failed to write GitHub archive download to %s.', $destination));
+        }
     }
 
     private function repositoryPath(string $repository): string
@@ -267,9 +347,9 @@ final class GitHubReleaseClient
     }
 
     /**
-     * @param array<string, mixed> $pluginConfig
+     * @param array<string, mixed> $dependency
      */
-    private function normalizeVersion(string $tagName, array $pluginConfig): string
+    private function normalizeVersion(string $tagName, array $dependency): string
     {
         if (preg_match('/\d+(?:\.\d+)+/', $tagName, $matches) === 1) {
             return $matches[0];
@@ -284,7 +364,7 @@ final class GitHubReleaseClient
         throw new RuntimeException(sprintf(
             'GitHub release tag "%s" for %s does not contain a parseable version.',
             $tagName,
-            (string) $pluginConfig['github_repository']
+            $this->repository($dependency)
         ));
     }
 }

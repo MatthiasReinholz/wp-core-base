@@ -1,29 +1,21 @@
 # This file belongs in the downstream repository, not in wp-core-base itself.
-# It keeps later update PRs blocked until earlier PRs for the same dependency are resolved.
+# It validates the manifest and stages a clean runtime payload.
 
-name: wp-core-base PR Blocker
+name: wp-core-base Runtime Validation
 
 on:
-  pull_request_target:
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - edited
-      - ready_for_review
+  pull_request:
+  workflow_dispatch:
 
 permissions:
-  pull-requests: read
-  issues: read
+  contents: read
 
 jobs:
-  blocker:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - name: Check out downstream repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.ref }}
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -31,9 +23,12 @@ jobs:
           php-version: '8.3'
           coverage: none
 
-      - name: Evaluate blocker state
+      - name: Run doctor
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
           WPORG_REPO_ROOT: ${{ github.workspace }}
-        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php pr-blocker
+        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+
+      - name: Stage runtime payload
+        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime

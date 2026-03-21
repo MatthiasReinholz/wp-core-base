@@ -22,11 +22,11 @@ final class CoreUpdater
 
     public function sync(): void
     {
-        if (! $this->config->coreConfig()['enabled']) {
+        if (! $this->config->coreManaged()) {
             return;
         }
 
-        $defaultBranch = $this->config->baseBranch ?? $this->gitHubClient->getDefaultBranch();
+        $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $this->gitHubClient->ensureLabels(Updater::labelDefinitions());
         $current = $this->coreScanner->inspect($this->config->repoRoot);
         $release = $this->coreClient->fetchLatestStableRelease();
@@ -164,6 +164,7 @@ final class CoreUpdater
 
         $releaseForTarget = $this->coreClient->releaseForVersion($targetVersion, $release);
         $labels = $this->releaseClassifier->deriveLabels('source:wordpress.org', $scope, (string) $releaseForTarget['release_text'], []);
+        $labels[] = 'automation:dependency-update';
         $labels[] = 'component:wordpress-core';
 
         if ($blockedBy !== []) {
@@ -219,6 +220,7 @@ final class CoreUpdater
         }
 
         $labels = $this->releaseClassifier->deriveLabels('source:wordpress.org', $scope, (string) $release['release_text'], []);
+        $labels[] = 'automation:dependency-update';
         $labels[] = 'component:wordpress-core';
 
         if ($blockedBy !== []) {
@@ -351,6 +353,8 @@ final class CoreUpdater
                 throw new RuntimeException('Expected extracted WordPress core archive to contain a wordpress/ root directory.');
             }
 
+            $this->sanitizeExtractedTree($sourceRoot);
+
             $paths = [];
 
             foreach (array_values(array_filter(scandir($sourceRoot) ?: [], static fn (string $entry): bool => ! in_array($entry, ['.', '..'], true))) as $entry) {
@@ -378,7 +382,7 @@ final class CoreUpdater
      */
     private function syncCoreWpContent(string $sourceWpContent): array
     {
-        $destinationWpContent = $this->config->repoRoot . '/wp-content';
+        $destinationWpContent = $this->config->repoRoot . '/' . $this->config->paths['content_root'];
 
         if (! is_dir($destinationWpContent)) {
             mkdir($destinationWpContent, 0777, true);
@@ -391,13 +395,13 @@ final class CoreUpdater
             $destination = $destinationWpContent . '/' . $entry;
 
             if (is_dir($source) && in_array($entry, ['plugins', 'themes'], true)) {
-                $paths = array_merge($paths, $this->syncBundledDirectory($source, $destination, 'wp-content/' . $entry));
+                $paths = array_merge($paths, $this->syncBundledDirectory($source, $destination, $this->config->paths['content_root'] . '/' . $entry));
                 continue;
             }
 
             $this->removePath($destination);
             $this->copyPath($source, $destination);
-            $paths[] = 'wp-content/' . $entry;
+            $paths[] = $this->config->paths['content_root'] . '/' . $entry;
         }
 
         return $paths;
@@ -486,6 +490,38 @@ final class CoreUpdater
                 }
             } else {
                 copy($item->getPathname(), $target);
+            }
+        }
+    }
+
+    private function sanitizeExtractedTree(string $root): void
+    {
+        $forbiddenPaths = $this->config->runtime['forbidden_paths'];
+        $forbiddenFiles = $this->config->runtime['forbidden_files'];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            $basename = basename($item->getPathname());
+
+            if ($item->isDir()) {
+                foreach ($forbiddenPaths as $pattern) {
+                    if (fnmatch($pattern, $basename)) {
+                        $this->removePath($item->getPathname());
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            foreach ($forbiddenFiles as $pattern) {
+                if (fnmatch($pattern, $basename)) {
+                    @unlink($item->getPathname());
+                    break;
+                }
             }
         }
     }

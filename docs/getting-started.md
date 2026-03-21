@@ -1,274 +1,176 @@
 # Getting Started
 
-This guide is for people who want to adopt `wp-core-base` in a real WordPress project.
+This guide is for downstream users of `wp-core-base`.
 
-If you are contributing to `wp-core-base` itself, use [contributing.md](contributing.md) instead.
+If you are contributing to `wp-core-base` itself, use [contributing.md](contributing.md).
 
-## The Mental Model
+## Choose Your Starting Point
 
-`wp-core-base` is about source code management, versioning, and update flow.
+- use [Full-Core Project From Scratch](#full-core-project-from-scratch) if your downstream repository should contain WordPress core
+- use [Content-Only Project From Scratch](#content-only-project-from-scratch) if your downstream repository should contain only `wp-content` or another content tree such as `cms/`
+- use [Existing Git-Managed Project](#existing-git-managed-project) if you already have WordPress in Git
+- use [Existing FTP Or Manual Deployment](#existing-ftp-or-manual-deployment) if your deployment still happens by file transfer or manual upload
 
-It is not your hosting provider and it is not your database.
+## What The Framework Controls
 
-In practical terms:
+`wp-core-base` manages:
 
-- your WordPress code lives in Git
-- your project can use `wp-core-base` as its baseline or as its update-tooling source
-- if you use GitHub, the automation can open update pull requests for you
-- deployment to the actual server is still your choice
+- repository structure
+- dependency metadata through `.wp-core-base/manifest.php`
+- update pull requests
+- runtime staging for build or deployment pipelines
 
-That means you can keep a Git-based deployment, a CI/CD deployment, or even an FTP-based deployment while still using this project.
+`wp-core-base` does not force:
 
-## What You Need
+- a specific host
+- a specific local dev stack
+- a specific deployment method
+- Composer as your source of truth
 
-For basic use:
+## Full-Core Project From Scratch
 
-- a Git repository for your WordPress code
-- a local development environment that can run WordPress
-- a decision about whether you want to use `wp-core-base` as code, automation, or both
+Use this model when your downstream repository should contain WordPress core directly.
 
-For automated update pull requests:
+Typical steps:
 
-- a GitHub repository
-- GitHub Actions enabled
-- comfort with reviewing and merging pull requests
-
-The config examples also support GitHub Enterprise environments that expose `GITHUB_API_URL`.
-
-If you do not use GitHub, you can still use `wp-core-base`, but the automated PR feature does not apply.
-
-## If GitHub Is New To You
-
-GitHub plays three roles in this project:
-
-- it stores the Git repository remotely
-- it runs scheduled automation through GitHub Actions
-- it provides pull requests so updates can be reviewed before merge
-
-It does not have to be your deployment method.
-
-You can use GitHub for source control and reviews while still:
-
-- developing locally
-- deploying manually
-- deploying through FTP or SFTP
-- using a separate hosting workflow
-
-If you are new to GitHub, the simplest path is usually:
-
-1. get the project working locally
-2. push it to a GitHub repository
-3. turn on the update workflow later
-
-## Choose The Path That Matches You
-
-- New project from scratch: go to [Brand-New WordPress Project](#brand-new-wordpress-project)
-- Existing project already in Git: go to [Existing WordPress Project Already In Git](#existing-wordpress-project-already-in-git)
-- Existing site still deployed manually or by FTP: go to [Existing WordPress Site With FTP Or Manual Deployment](#existing-wordpress-site-with-ftp-or-manual-deployment)
-- Need to understand local development: go to [Local Development](#local-development)
-- Need to understand deployment choices: read [deployment-models.md](deployment-models.md)
-
-## Fastest Safe Automation Setup
-
-If your main goal is to get the GitHub automation wired correctly without copying hidden files by hand, use the scaffolder first.
-
-If `wp-core-base` is the repository itself:
+1. create a new Git repository for your project
+2. start from a tagged release of `wp-core-base`
+3. keep WordPress core at the repo root
+4. add your project-specific plugins, themes, and deployment files
+5. update `.wp-core-base/manifest.php` so every managed or local runtime dependency is declared explicitly
+6. run:
 
 ```bash
-php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=.
-php tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+php tools/wporg-updater/bin/wporg-updater.php doctor
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
 
-If `wp-core-base` is vendored inside another repository at `vendor/wp-core-base`:
+7. if you want automated PRs, enable the GitHub workflows
+
+Use this model when you want the simplest “WordPress in Git” mental model.
+
+## Content-Only Project From Scratch
+
+Use this model when WordPress core is external and your repository should contain only the content tree.
+
+This is the right fit for:
+
+- Docker or image-first deployments
+- immutable runtime images
+- projects where WordPress core comes from a base image or platform layer
+- repos that use `cms/` instead of `wp-content/`
+
+Fastest bootstrap:
 
 ```bash
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --tool-path=vendor/wp-core-base
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only --content-root=cms
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
 ```
 
-That flow creates:
+Then:
 
-- `.github/wporg-updates.php`
-- `.github/workflows/wporg-updates.yml`
-- `.github/workflows/wporg-update-pr-blocker.yml`
+1. classify every runtime dependency in `.wp-core-base/manifest.php`
+2. use `management: managed` for dependencies the updater may overwrite
+3. use `management: local` for repo-owned code that the updater must never replace
+4. use `management: ignored` only for paths you intentionally want outside runtime staging
+5. run:
 
-Then review the generated config, enable only the plugins you actually manage, and commit the files into the downstream repository.
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
+```
 
-## Brand-New WordPress Project
+6. point your image build at the staged runtime directory instead of the raw working tree
 
-If you are starting fresh, you have two realistic options.
+## Existing Git-Managed Project
 
-### Simple path for beginners
+There are two common adoption patterns.
 
-Use `wp-core-base` as the starting codebase for your new repository.
+### Adopt The Base Structure
 
-Practical steps:
+Choose this when your repository is already close to a standard WordPress layout and you want `wp-core-base` to act as the foundation of the code base itself.
 
-1. Create a new repository for your site.
-2. Start from a tagged release of `wp-core-base`.
-3. Add your site-specific theme, plugins, configuration, and deployment setup.
-4. Run the site locally.
-5. If you want automated update PRs, move the project to GitHub and add the downstream workflow and config examples from this repository.
+Suggested order:
 
-This is the easiest mental model if you are new to Git-based WordPress workflows.
+1. create an adoption branch
+2. decide whether `full-core` or `content-only` matches your architecture
+3. bring in `wp-core-base` through your preferred dependency strategy
+4. create or migrate to `.wp-core-base/manifest.php`
+5. declare every managed and local dependency explicitly
+6. run `doctor` and `stage-runtime`
+7. enable GitHub automation only after the manifest is correct
 
-### Linked upstream path for long-term reuse
+### Adopt The Automation First
 
-If you already know you want an ongoing upstream relationship, use one of the dependency models in [downstream-usage.md](downstream-usage.md), usually a Git subtree or Git submodule.
+Choose this when your repo layout is already the one you want and you mainly need update PR automation and runtime staging.
 
-Practical steps:
+Suggested order:
 
-1. Create your downstream repository.
-2. Choose Git subtree or Git submodule.
-3. Bring `wp-core-base` in at a released tag.
-4. Add your project-specific code and deployment logic in the downstream repository.
-5. Document for your team how future upstream pulls should happen.
+1. vendor or otherwise make `wp-core-base` available in the repository
+2. run `scaffold-downstream`
+3. fill in `.wp-core-base/manifest.php`
+4. run `doctor --github`
+5. test one dry-run or one manual workflow dispatch before enabling the schedule
 
-That makes future upstream pulls more structured, but it is a little more advanced.
+## Existing FTP Or Manual Deployment
 
-## Existing WordPress Project Already In Git
+You can keep FTP or manual deployment and still use `wp-core-base`.
 
-If your WordPress project already lives in Git, you do not have to replace everything at once.
+The important shift is that Git becomes the source of truth for code, even if deployment is still manual.
 
-You usually have two adoption choices:
+Recommended order:
 
-### Adopt the base as a code dependency
+1. put the site code into Git
+2. make the project reproducible locally
+3. choose `full-core` or `content-only`
+4. create the manifest
+5. adopt GitHub only when you want automated pull requests
+6. keep deploying by FTP, SFTP, rsync, or manual upload if that still fits your team
 
-Use this when:
-
-- your existing project is still structurally close to a standard WordPress codebase
-- you want an explicit upstream/downstream relationship
-- you are comfortable reorganizing your repository around a maintained base
-
-Use [downstream-usage.md](downstream-usage.md) for the advanced dependency models.
-
-Practical migration flow:
-
-1. Create a branch for the adoption work.
-2. Compare your current repository structure to the standard WordPress structure in `wp-core-base`.
-3. Decide whether the project is close enough to adopt the base cleanly.
-4. Move any local patches out of plugin directories that you want the updater to manage.
-5. Introduce the base through the dependency model you choose.
-6. Test locally before changing deployment.
-
-### Adopt only the update automation
-
-Use this when:
-
-- your existing repository already has the code layout you want
-- you mainly want the WordPress core and plugin update PR workflow
-- you do not want to replace your project structure with the `wp-core-base` structure
-
-In that case, your downstream repository owns:
-
-- its own codebase
-- its own `.github/wporg-updates.php` configuration
-- its own workflow file
-- its own blocker workflow file if you want queued later PRs
-
-The updater code itself can come from `wp-core-base`.
-
-Start with:
-
-- [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
-- [examples/downstream-pr-blocker-workflow.yml](examples/downstream-pr-blocker-workflow.yml)
-- [examples/downstream-wporg-updates.php](examples/downstream-wporg-updates.php)
-- [downstream-usage.md](downstream-usage.md)
-
-Practical migration flow:
-
-1. Keep your existing repository structure.
-2. Add a downstream workflow based on the example file.
-3. Add the blocker workflow if you want later minor and major PRs to queue cleanly.
-4. Add a downstream `.github/wporg-updates.php` file based on the example config.
-5. Make the updater code available in the repository, for example through a subtree, submodule, or vendored copy of `wp-core-base`.
-6. Run the workflow in dry-run mode first if you want a cautious rollout.
-
-## Existing WordPress Site With FTP Or Manual Deployment
-
-This is a common case, and it is important not to confuse deployment with source control.
-
-You can keep FTP deployment and still use `wp-core-base`.
-
-The practical migration path is:
-
-1. Make the current site code your source of truth in Git.
-2. Set up a local development environment so you can test changes safely.
-3. Decide whether you want to adopt `wp-core-base` as code, automation, or both.
-4. If you want automated update PRs, move the source repository to GitHub.
-5. Keep deploying however you want, including FTP, SFTP, or manual upload, after reviewed changes are merged.
-
-Important:
-
-- GitHub is used for source management and pull requests in this model.
-- FTP is still just the way files reach your server.
-- GitHub does not automatically deploy anything unless you add a deployment workflow.
-
-If you are coming from a live-only site with no Git history at all, do not start by turning on automation. Start by putting the code into Git and making the project reproducible locally.
-
-Then add automation.
+GitHub is optional for the code base itself. It becomes required only if you want the automated update PR flow.
 
 ## Local Development
 
-`wp-core-base` works like a normal WordPress codebase in local development.
+Local development is normal WordPress development.
 
-The exact local stack is your choice. Common options include:
+Use whichever local stack your team already prefers, such as:
 
 - Local
 - DDEV
 - Docker
 - MAMP
-- Valet
-- any standard PHP and MySQL setup that can run WordPress
+- a plain PHP and MySQL stack
 
-Typical local flow:
+The framework-specific commands you will use most often are:
 
-1. Clone the repository.
-2. Create `wp-config.php` from `wp-config-sample.php`.
-3. Point it to a local database.
-4. Run the code in your preferred local stack.
-5. Make and test changes locally.
-6. Commit the changes into Git.
+```bash
+php tools/wporg-updater/bin/wporg-updater.php doctor
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
+php tools/wporg-updater/tests/run.php
+```
 
-If the repository is on GitHub, you can then push and use the automated PR flow. If it is not on GitHub, you can still work locally and manage updates manually.
+If `wp-core-base` is vendored into another repository, run the same commands from that vendored path and pass `--repo-root=.`
 
-## Enabling The GitHub Automation
+## GitHub Basics For Teams New To GitHub
 
-If you want automatic WordPress core and plugin update pull requests, the minimum path is:
+GitHub is used here for three things:
 
-1. Put the project in a GitHub repository.
-2. Run the scaffolder, or copy:
-   - [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
-   - [examples/downstream-pr-blocker-workflow.yml](examples/downstream-pr-blocker-workflow.yml)
-   - [examples/downstream-wporg-updates.php](examples/downstream-wporg-updates.php)
-3. Run `doctor --github`.
-4. If you want a cautious first run, enable dry-run mode temporarily.
-5. Enable GitHub Actions.
-6. Review the pull requests the automation opens.
+- remote Git hosting
+- scheduled workflows through GitHub Actions
+- reviewable update PRs
 
-The workflow example shows where to add `WPORG_UPDATE_DRY_RUN: 1` for an initial rollout.
+It does not have to be your deployment tool.
 
-If you want later minor and major update PRs to stay queued behind earlier open PRs, add the blocker workflow and make `WordPress.org Update PR Blocker` a required status check in branch protection.
+You can use GitHub while still:
 
-## If You Do Not Want To Use GitHub
-
-You can still use `wp-core-base` as:
-
-- a WordPress baseline
-- a versioned release source
-- a local development starting point
-
-What you do not get without GitHub is:
-
-- GitHub Actions scheduling
-- GitHub pull requests
-- automated PR updates and blocker behavior
-
-In that case, you would use the repository more like a maintained upstream codebase and manage adoption manually.
+- building Docker images elsewhere
+- deploying by FTP or SFTP
+- deploying manually from a local workstation
+- using another CI platform for final release delivery
 
 ## What To Read Next
 
-- Day-to-day use after setup: [operations.md](operations.md)
-- Deployment patterns and GitHub versus FTP: [deployment-models.md](deployment-models.md)
-- Advanced dependency models: [downstream-usage.md](downstream-usage.md)
-- Technical internals: [automation-overview.md](automation-overview.md)
+- architecture choices: [deployment-models.md](deployment-models.md)
+- dependency and manifest design: [downstream-usage.md](downstream-usage.md)
+- day-to-day usage: [operations.md](operations.md)
+- manifest schema: [manifest-reference.md](manifest-reference.md)
+- migration help: [migration-guide.md](migration-guide.md)
