@@ -108,6 +108,21 @@ Available knobs:
 
 Managed dependencies should still arrive runtime-ready. Strip-on-stage is primarily for `local` code.
 
+## Managed Sanitation
+
+Managed dependencies have a separate normalization path.
+
+Available knobs:
+
+- `runtime.managed_sanitize_paths`
+- `runtime.managed_sanitize_files`
+- `dependencies[].policy.sanitize_paths`
+- `dependencies[].policy.sanitize_files`
+
+Use these when a release-backed managed dependency is legitimate runtime code but still includes predictable non-runtime files such as `README*`, `composer.json`, `package.json`, or test directories.
+
+The managed checksum stored in the manifest represents the sanitized runtime snapshot. That means `doctor`, `sync`, and `stage-runtime` all verify the same normalized tree.
+
 ## Ownership Roots
 
 `runtime.ownership_roots` defines where undeclared runtime-path inspection runs.
@@ -134,6 +149,8 @@ That lets a downstream project do things like:
 - stage MU plugin files
 - validate local themes
 - keep custom runtime files out of updater automation
+
+That separation is the core model of the framework: it manages selected dependencies, but it does not try to own all runtime code in the repository.
 
 ## Runtime Staging
 

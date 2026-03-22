@@ -368,7 +368,15 @@ final class Updater
                 $this->config->isFileKind((string) $dependency['kind']),
             );
 
-            $this->runtimeInspector->assertPathIsClean($sourcePath, (array) $dependency['policy']['allow_runtime_paths']);
+            [$sanitizePaths, $sanitizeFiles] = $this->translatedManagedSanitizeRulesForDependency($dependency);
+            $this->runtimeInspector->stripPath($sourcePath, $sanitizePaths, $sanitizeFiles);
+            $this->runtimeInspector->assertPathIsClean(
+                $sourcePath,
+                (array) $dependency['policy']['allow_runtime_paths'],
+                [],
+                $sanitizePaths,
+                $sanitizeFiles
+            );
             $destinationPath = $this->config->repoRoot . '/' . trim((string) $dependency['path'], '/');
             $this->runtimeInspector->clearPath($destinationPath);
             $this->runtimeInspector->copyPath($sourcePath, $destinationPath);
@@ -381,7 +389,7 @@ final class Updater
                 throw new RuntimeException(sprintf('Updated archive did not contain expected main file %s.', $expectedMainFile));
             }
 
-            $checksum = $this->runtimeInspector->computeChecksum($destinationPath);
+            $checksum = $this->runtimeInspector->computeChecksum($destinationPath, [], $sanitizePaths, $sanitizeFiles);
             $this->config = $this->updateDependencyInManifest(
                 $dependency['component_key'],
                 (string) $releaseData['version'],
@@ -703,8 +711,15 @@ final class Updater
     private function assertManagedDependencyChecksum(array $dependency): void
     {
         $dependencyPath = $this->config->repoRoot . '/' . $dependency['path'];
-        $this->runtimeInspector->assertPathIsClean($dependencyPath, (array) $dependency['policy']['allow_runtime_paths']);
-        $checksum = $this->runtimeInspector->computeChecksum($dependencyPath);
+        [$sanitizePaths, $sanitizeFiles] = $this->translatedManagedSanitizeRulesForDependency($dependency);
+        $this->runtimeInspector->assertPathIsClean(
+            $dependencyPath,
+            (array) $dependency['policy']['allow_runtime_paths'],
+            [],
+            $sanitizePaths,
+            $sanitizeFiles
+        );
+        $checksum = $this->runtimeInspector->computeChecksum($dependencyPath, [], $sanitizePaths, $sanitizeFiles);
 
         if ($checksum !== $dependency['checksum']) {
             throw new RuntimeException(sprintf(
@@ -714,6 +729,32 @@ final class Updater
                 $checksum
             ));
         }
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function translatedManagedSanitizeRulesForDependency(array $dependency): array
+    {
+        $rootPath = (string) $dependency['path'];
+        $sanitizePaths = [];
+
+        foreach ((array) $this->config->runtime['managed_sanitize_paths'] as $sanitizePath) {
+            if ($sanitizePath === $rootPath) {
+                $sanitizePaths[] = '';
+                continue;
+            }
+
+            if (str_starts_with($sanitizePath, $rootPath . '/')) {
+                $sanitizePaths[] = substr($sanitizePath, strlen($rootPath) + 1);
+            }
+        }
+
+        return [
+            array_values(array_unique(array_merge($sanitizePaths, $this->config->dependencySanitizePaths($dependency)))),
+            array_values(array_unique(array_merge($this->config->managedSanitizeFiles(), $this->config->dependencySanitizeFiles($dependency)))),
+        ];
     }
 
     private function updateDependencyInManifest(string $componentKey, string $version, string $checksum): Config

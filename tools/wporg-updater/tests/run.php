@@ -50,6 +50,8 @@ $runtimeDefaults = [
     'allow_runtime_paths' => [],
     'strip_paths' => [],
     'strip_files' => [],
+    'managed_sanitize_paths' => ['cms/plugins/docs', 'cms/plugins/tests', 'cms/themes/docs', 'cms/themes/tests', 'cms/mu-plugins/docs', 'cms/mu-plugins/tests'],
+    'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
 ];
 $legacyRuntimeDefaults = $runtimeDefaults;
 unset(
@@ -60,6 +62,8 @@ unset(
     $legacyRuntimeDefaults['validated_kinds'],
     $legacyRuntimeDefaults['strip_paths'],
     $legacyRuntimeDefaults['strip_files'],
+    $legacyRuntimeDefaults['managed_sanitize_paths'],
+    $legacyRuntimeDefaults['managed_sanitize_files'],
 );
 
 $assert($classifier->classifyScope('5.3.6', '5.3.7') === 'patch', 'Expected patch classification.');
@@ -511,6 +515,83 @@ $assert(! file_exists($stagedCleanOutput . '/README.md'), 'Expected staged-clean
 $assert(! file_exists($stagedCleanOutput . '/package.json'), 'Expected staged-clean output to strip package.json.');
 $assert(! file_exists($stagedCleanOutput . '/tests'), 'Expected staged-clean output to strip declared test directories.');
 
+$managedSanitizeRoot = sys_get_temp_dir() . '/wporg-managed-sanitize-' . bin2hex(random_bytes(4));
+mkdir($managedSanitizeRoot . '/cms/plugins/managed-plugin/tests', 0777, true);
+mkdir($managedSanitizeRoot . '/.wp-core-base', 0777, true);
+file_put_contents($managedSanitizeRoot . '/cms/plugins/managed-plugin/managed-plugin.php', "<?php\n/*\nPlugin Name: Managed Plugin\nVersion: 2.0.0\n*/\n");
+file_put_contents($managedSanitizeRoot . '/cms/plugins/managed-plugin/README.md', "# Docs\n");
+file_put_contents($managedSanitizeRoot . '/cms/plugins/managed-plugin/package.json', "{}\n");
+file_put_contents($managedSanitizeRoot . '/cms/plugins/managed-plugin/tests/test.php', "<?php\n");
+$managedRuntimeConfig = array_merge($runtimeDefaults, [
+    'managed_sanitize_paths' => ['cms/plugins/managed-plugin/tests'],
+    'managed_sanitize_files' => ['README*', 'package.json'],
+]);
+$managedChecksum = (new RuntimeInspector($managedRuntimeConfig))->computeChecksum(
+    $managedSanitizeRoot . '/cms/plugins/managed-plugin',
+    [],
+    ['tests'],
+    ['README*', 'package.json']
+);
+$managedManifest = [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => ['mode' => 'external', 'enabled' => false],
+    'runtime' => $managedRuntimeConfig,
+    'github' => ['api_base' => 'https://api.github.com'],
+    'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => ['plugin']],
+    'dependencies' => [[
+        'name' => 'Managed Plugin',
+        'slug' => 'managed-plugin',
+        'kind' => 'plugin',
+        'management' => 'managed',
+        'source' => 'github-release',
+        'path' => 'cms/plugins/managed-plugin',
+        'main_file' => 'managed-plugin.php',
+        'version' => '2.0.0',
+        'checksum' => $managedChecksum,
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => ['github_repository' => 'owner/managed-plugin', 'github_release_asset_pattern' => '*.zip', 'github_token_env' => 'MANAGED_PLUGIN_TOKEN'],
+        'policy' => ['class' => 'managed-private', 'allow_runtime_paths' => [], 'sanitize_paths' => ['tests'], 'sanitize_files' => []],
+    ]],
+];
+file_put_contents(
+    $managedSanitizeRoot . '/.wp-core-base/manifest.php',
+    "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($managedManifest, true) . ";\n"
+);
+$loadedManagedSanitize = Config::load($managedSanitizeRoot);
+$managedInspector = new RuntimeInspector($loadedManagedSanitize->runtime);
+$managedInspector->assertPathIsClean(
+    $managedSanitizeRoot . '/cms/plugins/managed-plugin',
+    [],
+    [],
+    ['tests'],
+    ['README*', 'package.json']
+);
+$managedMatches = $managedInspector->matchingStrippedEntries(
+    $managedSanitizeRoot . '/cms/plugins/managed-plugin',
+    ['tests'],
+    ['README*', 'package.json']
+);
+$assert(in_array('README.md', $managedMatches, true), 'Expected managed sanitization to detect sanitizable README files.');
+$assert(in_array('tests', $managedMatches, true), 'Expected managed sanitization to detect sanitizable directories.');
+$assert(
+    $managedInspector->computeChecksum($managedSanitizeRoot . '/cms/plugins/managed-plugin', [], ['tests'], ['README*', 'package.json']) === $loadedManagedSanitize->dependencyByKey('plugin:github-release:managed-plugin')['checksum'],
+    'Expected managed dependency checksum to reflect the sanitized runtime snapshot.'
+);
+$managedStager = new RuntimeStager($loadedManagedSanitize, $managedInspector);
+$managedStager->stage('.wp-core-base/build/runtime');
+$managedOutput = $managedSanitizeRoot . '/.wp-core-base/build/runtime/cms/plugins/managed-plugin';
+$assert(is_file($managedOutput . '/managed-plugin.php'), 'Expected managed staging output to retain runtime files.');
+$assert(! file_exists($managedOutput . '/README.md'), 'Expected managed staging output to strip sanitizable README files.');
+$assert(! file_exists($managedOutput . '/package.json'), 'Expected managed staging output to strip sanitizable package.json.');
+$assert(! file_exists($managedOutput . '/tests'), 'Expected managed staging output to strip sanitizable directories.');
+
 $invalidKindRoot = sys_get_temp_dir() . '/wporg-invalid-kind-' . bin2hex(random_bytes(4));
 mkdir($invalidKindRoot . '/.wp-core-base', 0777, true);
 file_put_contents(
@@ -573,6 +654,14 @@ mkdir($migrationScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $migrationScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only-migration', 'cms', true);
 $migrationManifest = (string) file_get_contents($migrationScaffoldRoot . '/.wp-core-base/manifest.php');
 $assert(str_contains($migrationManifest, "'manifest_mode' => 'relaxed'"), 'Expected migration scaffold preset to use relaxed ownership mode.');
+
+$imageFirstScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-image-first-' . bin2hex(random_bytes(4));
+mkdir($imageFirstScaffoldRoot, 0777, true);
+(new DownstreamScaffolder(dirname(__DIR__, 3), $imageFirstScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only-image-first', 'cms', true);
+$imageFirstManifest = (string) file_get_contents($imageFirstScaffoldRoot . '/.wp-core-base/manifest.php');
+$assert(str_contains($imageFirstManifest, "'validation_mode' => 'staged-clean'"), 'Expected image-first scaffold preset to use staged-clean validation.');
+$assert(str_contains($imageFirstManifest, "'cms/languages'"), 'Expected image-first scaffold preset to include languages ownership roots.');
+$assert(str_contains($imageFirstManifest, "'managed_sanitize_paths' =>"), 'Expected image-first scaffold preset to include managed sanitation paths.');
 
 $corePayload = json_decode((string) file_get_contents($fixtureDir . '/wp-core-version-check.json'), true, 512, JSON_THROW_ON_ERROR);
 $coreOffer = $coreClient->parseLatestStableOffer($corePayload);

@@ -23,6 +23,8 @@ final class DownstreamScaffolder
         $preset = $this->presetForProfile($profile);
         $contentRoot = $this->normalizeContentRoot($contentRoot ?? ($preset['profile'] === 'content-only' ? 'cms' : 'wp-content'));
         $paths = $this->pathsForProfile($preset['profile'], $contentRoot);
+        $ownershipRoots = $this->replacePathPlaceholders($preset['ownership_roots'], $paths);
+        $managedSanitizePaths = $this->replacePathPlaceholders($preset['managed_sanitize_paths'], $paths);
 
         $this->printHeading('wp-core-base scaffold-downstream');
 
@@ -45,10 +47,12 @@ final class DownstreamScaffolder
                     '__CORE_ENABLED__' => $preset['core_enabled'] ? 'true' : 'false',
                     '__MANIFEST_MODE__' => $preset['manifest_mode'],
                     '__VALIDATION_MODE__' => $preset['validation_mode'],
-                    '__OWNERSHIP_ROOTS__' => $this->exportInlineArray($preset['ownership_roots']),
+                    '__OWNERSHIP_ROOTS__' => $this->exportInlineArray($ownershipRoots),
                     '__MANAGED_KINDS__' => $this->exportInlineArray($preset['managed_kinds']),
                     '__STAGED_KINDS__' => $this->exportInlineArray($preset['staged_kinds']),
                     '__VALIDATED_KINDS__' => $this->exportInlineArray($preset['validated_kinds']),
+                    '__MANAGED_SANITIZE_PATHS__' => $this->exportInlineArray($managedSanitizePaths),
+                    '__MANAGED_SANITIZE_FILES__' => $this->exportInlineArray($preset['managed_sanitize_files']),
                 ],
             ],
             [
@@ -172,7 +176,7 @@ final class DownstreamScaffolder
     }
 
     /**
-     * @return array{template:string, profile:string, core_mode:string, core_enabled:bool, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, managed_kinds:list<string>, staged_kinds:list<string>, validated_kinds:list<string>}
+     * @return array{template:string, profile:string, core_mode:string, core_enabled:bool, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, managed_kinds:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>}
      */
     private function presetForProfile(string $profile): array
     {
@@ -188,6 +192,8 @@ final class DownstreamScaffolder
                 'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
+                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
+                'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
             ],
             'content-only', 'content-only-default', 'content-only-local-mu' => [
                 'template' => 'content-only',
@@ -200,6 +206,8 @@ final class DownstreamScaffolder
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
+                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
+                'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
             ],
             'content-only-migration' => [
                 'template' => 'content-only',
@@ -212,6 +220,59 @@ final class DownstreamScaffolder
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
+                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
+                'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+            ],
+            'content-only-image-first' => [
+                'template' => 'content-only',
+                'profile' => 'content-only',
+                'core_mode' => 'external',
+                'core_enabled' => false,
+                'manifest_mode' => 'strict',
+                'validation_mode' => 'staged-clean',
+                'ownership_roots' => ['__PLUGINS_ROOT__', '__THEMES_ROOT__', '__MU_PLUGINS_ROOT__', '__CONTENT_ROOT__/languages'],
+                'managed_kinds' => ['plugin', 'theme'],
+                'staged_kinds' => Config::runtimeKinds(),
+                'validated_kinds' => Config::runtimeKinds(),
+                'managed_sanitize_paths' => [
+                    '__PLUGINS_ROOT__/docs',
+                    '__PLUGINS_ROOT__/.github',
+                    '__PLUGINS_ROOT__/.wordpress-org',
+                    '__PLUGINS_ROOT__/node_modules',
+                    '__PLUGINS_ROOT__/doc',
+                    '__PLUGINS_ROOT__/tests',
+                    '__PLUGINS_ROOT__/test',
+                    '__PLUGINS_ROOT__/__tests__',
+                    '__PLUGINS_ROOT__/examples',
+                    '__PLUGINS_ROOT__/example',
+                    '__PLUGINS_ROOT__/demo',
+                    '__PLUGINS_ROOT__/screenshots',
+                    '__THEMES_ROOT__/docs',
+                    '__THEMES_ROOT__/.github',
+                    '__THEMES_ROOT__/.wordpress-org',
+                    '__THEMES_ROOT__/node_modules',
+                    '__THEMES_ROOT__/doc',
+                    '__THEMES_ROOT__/tests',
+                    '__THEMES_ROOT__/test',
+                    '__THEMES_ROOT__/__tests__',
+                    '__THEMES_ROOT__/examples',
+                    '__THEMES_ROOT__/example',
+                    '__THEMES_ROOT__/demo',
+                    '__THEMES_ROOT__/screenshots',
+                ],
+                'managed_sanitize_files' => [
+                    'README*',
+                    'CHANGELOG*',
+                    '.gitignore',
+                    '.gitattributes',
+                    'phpunit.xml*',
+                    'composer.json',
+                    'composer.lock',
+                    'package.json',
+                    'package-lock.json',
+                    'pnpm-lock.yaml',
+                    'yarn.lock',
+                ],
             ],
             default => throw new RuntimeException(sprintf('Invalid scaffold profile: %s', $profile)),
         };
@@ -224,6 +285,22 @@ final class DownstreamScaffolder
     {
         $quoted = array_map(static fn (string $item): string => "'" . $item . "'", $items);
         return '[' . implode(', ', $quoted) . ']';
+    }
+
+    /**
+     * @param list<string> $items
+     * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @return list<string>
+     */
+    private function replacePathPlaceholders(array $items, array $paths): array
+    {
+        return array_map(static function (string $item) use ($paths): string {
+            return str_replace(
+                ['__CONTENT_ROOT__', '__PLUGINS_ROOT__', '__THEMES_ROOT__', '__MU_PLUGINS_ROOT__'],
+                [$paths['content_root'], $paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']],
+                $item
+            );
+        }, $items);
     }
 
     private function printHeading(string $heading): void

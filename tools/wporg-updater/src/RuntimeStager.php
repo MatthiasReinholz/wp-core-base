@@ -47,8 +47,14 @@ final class RuntimeStager
 
             $relativePath = (string) $dependency['path'];
             $source = $this->config->repoRoot . '/' . $relativePath;
-            [$globalAllowPaths, $globalStripPaths, $globalStripFiles] = $this->translatedRuntimeRulesForRoot($relativePath);
-            [$sourceStripPaths, $sourceStripFiles] = $this->sourceValidationStripRules($dependency, $globalStripPaths, $globalStripFiles);
+            [$globalAllowPaths, $globalStripPaths, $globalStripFiles, $globalSanitizePaths, $globalSanitizeFiles] = $this->translatedRuntimeRulesForRoot($relativePath);
+            [$sourceStripPaths, $sourceStripFiles] = $this->sourceValidationRules(
+                $dependency,
+                $globalStripPaths,
+                $globalStripFiles,
+                $globalSanitizePaths,
+                $globalSanitizeFiles
+            );
 
             $this->runtimeInspector->assertPathIsClean(
                 $source,
@@ -59,7 +65,8 @@ final class RuntimeStager
             );
 
             if ($dependency['management'] === 'managed') {
-                $checksum = $this->runtimeInspector->computeChecksum($source);
+                [$sanitizePaths, $sanitizeFiles] = $this->sanitizeRules($dependency, $globalSanitizePaths, $globalSanitizeFiles);
+                $checksum = $this->runtimeInspector->computeChecksum($source, [], $sanitizePaths, $sanitizeFiles);
 
                 if ($checksum !== $dependency['checksum']) {
                     throw new RuntimeException(sprintf(
@@ -73,11 +80,18 @@ final class RuntimeStager
 
             $destination = $absoluteOutput . '/' . $relativePath;
             $this->runtimeInspector->copyPath($source, $destination);
-            $this->runtimeInspector->stripPath(
-                $destination,
-                array_values(array_unique(array_merge($this->config->dependencyStripPaths($dependency), $globalStripPaths))),
-                array_values(array_unique(array_merge($this->config->dependencyStripFiles($dependency), $globalStripFiles)))
-            );
+
+            if ($dependency['management'] === 'managed') {
+                [$sanitizePaths, $sanitizeFiles] = $this->sanitizeRules($dependency, $globalSanitizePaths, $globalSanitizeFiles);
+                $this->runtimeInspector->stripPath($destination, $sanitizePaths, $sanitizeFiles);
+            } else {
+                $this->runtimeInspector->stripPath(
+                    $destination,
+                    array_values(array_unique(array_merge($this->config->dependencyStripPaths($dependency), $globalStripPaths))),
+                    array_values(array_unique(array_merge($this->config->dependencyStripFiles($dependency), $globalStripFiles)))
+                );
+            }
+
             $stagedPaths[] = $relativePath;
         }
 
@@ -140,8 +154,18 @@ final class RuntimeStager
      * @param array<string, mixed> $dependency
      * @return array{0:list<string>,1:list<string>}
      */
-    private function sourceValidationStripRules(array $dependency, array $globalStripPaths, array $globalStripFiles): array
+    private function sourceValidationRules(
+        array $dependency,
+        array $globalStripPaths,
+        array $globalStripFiles,
+        array $globalSanitizePaths,
+        array $globalSanitizeFiles,
+    ): array
     {
+        if ($dependency['management'] === 'managed') {
+            return $this->sanitizeRules($dependency, $globalSanitizePaths, $globalSanitizeFiles);
+        }
+
         if (! $this->config->isStagedCleanValidationMode()) {
             return [[], []];
         }
@@ -156,13 +180,27 @@ final class RuntimeStager
     }
 
     /**
-     * @return array{0:list<string>,1:list<string>,2:list<string>}
+     * @param array<string, mixed> $dependency
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function sanitizeRules(array $dependency, array $globalSanitizePaths, array $globalSanitizeFiles): array
+    {
+        return [
+            array_values(array_unique(array_merge($globalSanitizePaths, $this->config->dependencySanitizePaths($dependency)))),
+            array_values(array_unique(array_merge($globalSanitizeFiles, $this->config->dependencySanitizeFiles($dependency)))),
+        ];
+    }
+
+    /**
+     * @return array{0:list<string>,1:list<string>,2:list<string>,3:list<string>,4:list<string>}
      */
     private function translatedRuntimeRulesForRoot(string $rootPath): array
     {
         $allowPaths = [];
         $stripPaths = [];
         $stripFiles = $this->config->stripFiles();
+        $sanitizePaths = [];
+        $sanitizeFiles = $this->config->managedSanitizeFiles();
 
         foreach ((array) $this->config->runtime['allow_runtime_paths'] as $allowPath) {
             if ($allowPath === $rootPath) {
@@ -186,10 +224,23 @@ final class RuntimeStager
             }
         }
 
+        foreach ((array) $this->config->runtime['managed_sanitize_paths'] as $sanitizePath) {
+            if ($sanitizePath === $rootPath) {
+                $sanitizePaths[] = '';
+                continue;
+            }
+
+            if (str_starts_with($sanitizePath, $rootPath . '/')) {
+                $sanitizePaths[] = substr($sanitizePath, strlen($rootPath) + 1);
+            }
+        }
+
         return [
             array_values(array_unique($allowPaths)),
             array_values(array_unique($stripPaths)),
             array_values(array_unique($stripFiles)),
+            array_values(array_unique($sanitizePaths)),
+            array_values(array_unique($sanitizeFiles)),
         ];
     }
 

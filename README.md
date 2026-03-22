@@ -17,6 +17,7 @@ This README is written for people adopting `wp-core-base` in their own WordPress
 - support for WordPress.org and GitHub Release backed dependencies
 - support for project-owned custom code as first-class `local` runtime entries
 - optional staged-clean runtime assembly for richer local source trees
+- managed-dependency sanitation during update ingestion when upstream archives contain non-runtime metadata
 - runtime staging for image-first or immutable deployment flows
 
 ## Start Here
@@ -61,8 +62,9 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-
 ```
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
+Use `content-only-image-first` if you want a stricter image-first preset with external core, `staged-clean` validation, and starter ownership roots for content repos.
 
-The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, runtime files, and runtime directories owned directly by the downstream project.
+The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, runtime files, and runtime directories owned directly by the downstream project. `local` is a normal long-term ownership model, not a migration workaround.
 
 ## Current Baseline
 

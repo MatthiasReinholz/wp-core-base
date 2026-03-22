@@ -16,7 +16,7 @@ final class Config
      * @param list<array<string, mixed>> $dependencies
      * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
      * @param array{mode:string, enabled:bool} $core
-     * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>} $runtime
+     * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>} $runtime
      * @param array{api_base:string} $github
      * @param array{base_branch:?string, dry_run:bool, managed_kinds:list<string>} $automation
      */
@@ -172,6 +172,16 @@ final class Config
         return $this->runtime['strip_files'];
     }
 
+    public function managedSanitizePaths(): array
+    {
+        return $this->runtime['managed_sanitize_paths'];
+    }
+
+    public function managedSanitizeFiles(): array
+    {
+        return $this->runtime['managed_sanitize_files'];
+    }
+
     public function isKindManagedEnabled(string $kind): bool
     {
         return in_array($kind, $this->automation['managed_kinds'], true);
@@ -276,10 +286,35 @@ final class Config
         return (array) ($dependency['policy']['strip_files'] ?? []);
     }
 
+    public function dependencySanitizePaths(array $dependency): array
+    {
+        return (array) ($dependency['policy']['sanitize_paths'] ?? []);
+    }
+
+    public function dependencySanitizeFiles(array $dependency): array
+    {
+        return (array) ($dependency['policy']['sanitize_files'] ?? []);
+    }
+
     public function shouldAllowStripOnStage(array $dependency): bool
     {
         return $dependency['management'] === 'local'
             && ($this->dependencyStripPaths($dependency) !== [] || $this->dependencyStripFiles($dependency) !== []);
+    }
+
+    /**
+     * @return array{0:list<string>,1:list<string>}
+     */
+    public function managedSanitizeRules(array $dependency): array
+    {
+        if ($dependency['management'] !== 'managed') {
+            return [[], []];
+        }
+
+        return [
+            array_values(array_unique(array_merge($this->managedSanitizePaths(), $this->dependencySanitizePaths($dependency)))),
+            array_values(array_unique(array_merge($this->managedSanitizeFiles(), $this->dependencySanitizeFiles($dependency)))),
+        ];
     }
 
     public function stageDir(string $outputOverride = ''): string
@@ -435,7 +470,7 @@ final class Config
     /**
      * @param array<string, mixed> $value
      * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
-     * @return array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>}
+     * @return array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>}
      */
     private static function normalizeRuntime(array $value, array $paths): array
     {
@@ -500,6 +535,69 @@ final class Config
             'allow_runtime_paths' => self::normalizedPathList($value['allow_runtime_paths'] ?? [], 'runtime.allow_runtime_paths'),
             'strip_paths' => self::normalizedPathList($value['strip_paths'] ?? [], 'runtime.strip_paths'),
             'strip_files' => self::stringList($value['strip_files'] ?? [], 'runtime.strip_files'),
+            'managed_sanitize_paths' => self::normalizedPathList(
+                $value['managed_sanitize_paths'] ?? [
+                    $paths['plugins_root'] . '/.github',
+                    $paths['plugins_root'] . '/.gitlab',
+                    $paths['plugins_root'] . '/.circleci',
+                    $paths['plugins_root'] . '/.wordpress-org',
+                    $paths['plugins_root'] . '/node_modules',
+                    $paths['plugins_root'] . '/docs',
+                    $paths['plugins_root'] . '/doc',
+                    $paths['plugins_root'] . '/tests',
+                    $paths['plugins_root'] . '/test',
+                    $paths['plugins_root'] . '/__tests__',
+                    $paths['plugins_root'] . '/examples',
+                    $paths['plugins_root'] . '/example',
+                    $paths['plugins_root'] . '/demo',
+                    $paths['plugins_root'] . '/screenshots',
+                    $paths['themes_root'] . '/.github',
+                    $paths['themes_root'] . '/.gitlab',
+                    $paths['themes_root'] . '/.circleci',
+                    $paths['themes_root'] . '/.wordpress-org',
+                    $paths['themes_root'] . '/node_modules',
+                    $paths['themes_root'] . '/docs',
+                    $paths['themes_root'] . '/doc',
+                    $paths['themes_root'] . '/tests',
+                    $paths['themes_root'] . '/test',
+                    $paths['themes_root'] . '/__tests__',
+                    $paths['themes_root'] . '/examples',
+                    $paths['themes_root'] . '/example',
+                    $paths['themes_root'] . '/demo',
+                    $paths['themes_root'] . '/screenshots',
+                    $paths['mu_plugins_root'] . '/.github',
+                    $paths['mu_plugins_root'] . '/.gitlab',
+                    $paths['mu_plugins_root'] . '/.circleci',
+                    $paths['mu_plugins_root'] . '/.wordpress-org',
+                    $paths['mu_plugins_root'] . '/node_modules',
+                    $paths['mu_plugins_root'] . '/docs',
+                    $paths['mu_plugins_root'] . '/doc',
+                    $paths['mu_plugins_root'] . '/tests',
+                    $paths['mu_plugins_root'] . '/test',
+                    $paths['mu_plugins_root'] . '/__tests__',
+                    $paths['mu_plugins_root'] . '/examples',
+                    $paths['mu_plugins_root'] . '/example',
+                    $paths['mu_plugins_root'] . '/demo',
+                    $paths['mu_plugins_root'] . '/screenshots',
+                ],
+                'runtime.managed_sanitize_paths'
+            ),
+            'managed_sanitize_files' => self::stringList(
+                $value['managed_sanitize_files'] ?? [
+                    'README*',
+                    'CHANGELOG*',
+                    '.gitignore',
+                    '.gitattributes',
+                    'phpunit.xml*',
+                    'composer.json',
+                    'composer.lock',
+                    'package.json',
+                    'package-lock.json',
+                    'pnpm-lock.yaml',
+                    'yarn.lock',
+                ],
+                'runtime.managed_sanitize_files'
+            ),
         ];
     }
 
@@ -606,9 +704,21 @@ final class Config
                 $policy['strip_files'] ?? [],
                 sprintf('dependencies[%s].policy.strip_files', $slug)
             );
+            $sanitizePaths = self::normalizedPathList(
+                $policy['sanitize_paths'] ?? [],
+                sprintf('dependencies[%s].policy.sanitize_paths', $slug)
+            );
+            $sanitizeFiles = self::stringList(
+                $policy['sanitize_files'] ?? [],
+                sprintf('dependencies[%s].policy.sanitize_files', $slug)
+            );
 
             if (($stripPaths !== [] || $stripFiles !== []) && $management !== 'local') {
                 throw new RuntimeException(sprintf('Strip-on-stage rules are only supported for local dependencies (%s).', $slug));
+            }
+
+            if (($sanitizePaths !== [] || $sanitizeFiles !== []) && $management !== 'managed') {
+                throw new RuntimeException(sprintf('Sanitize-on-sync rules are only supported for managed dependencies (%s).', $slug));
             }
 
             $githubRepository = self::nullableString($sourceConfig['github_repository'] ?? null);
@@ -655,6 +765,8 @@ final class Config
                     ),
                     'strip_paths' => $stripPaths,
                     'strip_files' => $stripFiles,
+                    'sanitize_paths' => $sanitizePaths,
+                    'sanitize_files' => $sanitizeFiles,
                 ],
                 'component_key' => sprintf('%s:%s:%s', $kind, $source, $slug),
             ];

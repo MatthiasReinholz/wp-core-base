@@ -73,7 +73,7 @@ The runtime contract is enforced by:
 Key behavior:
 
 - managed and local dependencies are checked for forbidden files and directories
-- managed dependencies must match their manifest checksum
+- managed dependencies may be sanitized before validation and must match their sanitized manifest checksum
 - `stage-runtime` assembles the runtime payload and validates the staged tree
 - undeclared runtime paths are errors in `strict` mode and warnings in `relaxed` mode
 - file-level runtime entries such as `mu-plugin-file` and `runtime-file` are supported
@@ -106,6 +106,7 @@ Profiles:
 - `content-only-default`
 - `content-only-migration`
 - `content-only-local-mu`
+- `content-only-image-first`
 
 Scaffolded manifests include:
 
@@ -115,6 +116,8 @@ Scaffolded manifests include:
 - `runtime.ownership_roots`
 - `runtime.staged_kinds`
 - `runtime.validated_kinds`
+- `runtime.managed_sanitize_paths`
+- `runtime.managed_sanitize_files`
 
 ## Managed Dependency Packaging Contract
 
@@ -124,6 +127,7 @@ Recommended discipline:
 
 - publish release archives, not raw source checkouts, as deployable inputs
 - exclude docs, tests, screenshots, and build-only files from managed runtime artifacts
+- use managed sanitation only to normalize common upstream noise, not as a substitute for release packaging discipline
 - use strip-on-stage primarily for `local` downstream-owned code, not as the normal packaging strategy for managed releases
 
 ## Tests

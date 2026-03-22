@@ -89,6 +89,65 @@ return array (
     'strip_files' => 
     array (
     ),
+    'managed_sanitize_paths' => 
+    array (
+      0 => 'wp-content/plugins/.github',
+      1 => 'wp-content/plugins/.gitlab',
+      2 => 'wp-content/plugins/.circleci',
+      3 => 'wp-content/plugins/.wordpress-org',
+      4 => 'wp-content/plugins/node_modules',
+      5 => 'wp-content/plugins/docs',
+      6 => 'wp-content/plugins/doc',
+      7 => 'wp-content/plugins/tests',
+      8 => 'wp-content/plugins/test',
+      9 => 'wp-content/plugins/__tests__',
+      10 => 'wp-content/plugins/examples',
+      11 => 'wp-content/plugins/example',
+      12 => 'wp-content/plugins/demo',
+      13 => 'wp-content/plugins/screenshots',
+      14 => 'wp-content/themes/.github',
+      15 => 'wp-content/themes/.gitlab',
+      16 => 'wp-content/themes/.circleci',
+      17 => 'wp-content/themes/.wordpress-org',
+      18 => 'wp-content/themes/node_modules',
+      19 => 'wp-content/themes/docs',
+      20 => 'wp-content/themes/doc',
+      21 => 'wp-content/themes/tests',
+      22 => 'wp-content/themes/test',
+      23 => 'wp-content/themes/__tests__',
+      24 => 'wp-content/themes/examples',
+      25 => 'wp-content/themes/example',
+      26 => 'wp-content/themes/demo',
+      27 => 'wp-content/themes/screenshots',
+      28 => 'wp-content/mu-plugins/.github',
+      29 => 'wp-content/mu-plugins/.gitlab',
+      30 => 'wp-content/mu-plugins/.circleci',
+      31 => 'wp-content/mu-plugins/.wordpress-org',
+      32 => 'wp-content/mu-plugins/node_modules',
+      33 => 'wp-content/mu-plugins/docs',
+      34 => 'wp-content/mu-plugins/doc',
+      35 => 'wp-content/mu-plugins/tests',
+      36 => 'wp-content/mu-plugins/test',
+      37 => 'wp-content/mu-plugins/__tests__',
+      38 => 'wp-content/mu-plugins/examples',
+      39 => 'wp-content/mu-plugins/example',
+      40 => 'wp-content/mu-plugins/demo',
+      41 => 'wp-content/mu-plugins/screenshots',
+    ),
+    'managed_sanitize_files' => 
+    array (
+      0 => 'README*',
+      1 => 'CHANGELOG*',
+      2 => '.gitignore',
+      3 => '.gitattributes',
+      4 => 'phpunit.xml*',
+      5 => 'composer.json',
+      6 => 'composer.lock',
+      7 => 'package.json',
+      8 => 'package-lock.json',
+      9 => 'pnpm-lock.yaml',
+      10 => 'yarn.lock',
+    ),
   ),
   'github' => 
   array (
@@ -135,6 +194,18 @@ return array (
         'allow_runtime_paths' => 
         array (
         ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
+        array (
+        ),
       ),
     ),
     1 => 
@@ -163,6 +234,18 @@ return array (
       array (
         'class' => 'managed-upstream',
         'allow_runtime_paths' => 
+        array (
+        ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
         array (
         ),
       ),
@@ -195,6 +278,18 @@ return array (
         'allow_runtime_paths' => 
         array (
         ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
+        array (
+        ),
       ),
     ),
     3 => 
@@ -223,6 +318,18 @@ return array (
       array (
         'class' => 'managed-upstream',
         'allow_runtime_paths' => 
+        array (
+        ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
         array (
         ),
       ),
@@ -255,6 +362,18 @@ return array (
         'allow_runtime_paths' => 
         array (
         ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
+        array (
+        ),
       ),
     ),
     5 => 
@@ -283,6 +402,18 @@ return array (
       array (
         'class' => 'local-owned',
         'allow_runtime_paths' => 
+        array (
+        ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
         array (
         ),
       ),
@@ -315,6 +446,18 @@ return array (
         'allow_runtime_paths' => 
         array (
         ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
+        array (
+        ),
       ),
     ),
     7 => 
@@ -343,6 +486,18 @@ return array (
       array (
         'class' => 'local-owned',
         'allow_runtime_paths' => 
+        array (
+        ),
+        'strip_paths' => 
+        array (
+        ),
+        'strip_files' => 
+        array (
+        ),
+        'sanitize_paths' => 
+        array (
+        ),
+        'sanitize_files' => 
         array (
         ),
       ),

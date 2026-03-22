@@ -12,7 +12,7 @@ use RuntimeException;
 final class RuntimeInspector
 {
     /**
-     * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>} $runtimeConfig
+     * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>} $runtimeConfig
      */
     public function __construct(
         private readonly array $runtimeConfig,
@@ -80,8 +80,10 @@ final class RuntimeInspector
 
     /**
      * @param list<string> $excludedPaths
+     * @param list<string> $stripPaths
+     * @param list<string> $stripFiles
      */
-    public function computeChecksum(string $path, array $excludedPaths = []): string
+    public function computeChecksum(string $path, array $excludedPaths = [], array $stripPaths = [], array $stripFiles = []): string
     {
         if (! file_exists($path) && ! is_link($path)) {
             throw new RuntimeException(sprintf('Checksum path does not exist: %s', $path));
@@ -90,7 +92,11 @@ final class RuntimeInspector
         $entries = [];
 
         foreach ($this->iterableEntries($path) as $entry) {
-            if ($this->isExcluded($entry['relative_path'], $excludedPaths) || $entry['is_dir']) {
+            if (
+                $this->isExcluded($entry['relative_path'], $excludedPaths)
+                || $this->isStripped($entry['relative_path'], $stripPaths, $stripFiles)
+                || $entry['is_dir']
+            ) {
                 continue;
             }
 
@@ -110,14 +116,16 @@ final class RuntimeInspector
 
     /**
      * @param list<string> $excludedPaths
+     * @param list<string> $stripPaths
+     * @param list<string> $stripFiles
      */
-    public function computeTreeChecksum(string $root, array $excludedPaths = []): string
+    public function computeTreeChecksum(string $root, array $excludedPaths = [], array $stripPaths = [], array $stripFiles = []): string
     {
         if (! is_dir($root)) {
             throw new RuntimeException(sprintf('Checksum root does not exist: %s', $root));
         }
 
-        return $this->computeChecksum($root, $excludedPaths);
+        return $this->computeChecksum($root, $excludedPaths, $stripPaths, $stripFiles);
     }
 
     /**
@@ -280,6 +288,31 @@ final class RuntimeInspector
                 $this->clearPath($item->getPathname());
             }
         }
+    }
+
+    /**
+     * @param list<string> $stripPaths
+     * @param list<string> $stripFiles
+     * @return list<string>
+     */
+    public function matchingStrippedEntries(string $path, array $stripPaths = [], array $stripFiles = []): array
+    {
+        if (($stripPaths === [] && $stripFiles === []) || (! file_exists($path) && ! is_link($path))) {
+            return [];
+        }
+
+        $matches = [];
+
+        foreach ($this->iterableEntries($path) as $entry) {
+            if ($this->isStripped($entry['relative_path'], $stripPaths, $stripFiles)) {
+                $matches[] = $entry['relative_path'];
+            }
+        }
+
+        $matches = array_values(array_unique($matches));
+        sort($matches);
+
+        return $matches;
     }
 
     /**

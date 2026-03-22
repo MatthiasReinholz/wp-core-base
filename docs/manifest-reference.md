@@ -66,6 +66,10 @@ Keys:
 - `forbidden_paths`
 - `forbidden_files`
 - `allow_runtime_paths`
+- `strip_paths`
+- `strip_files`
+- `managed_sanitize_paths`
+- `managed_sanitize_files`
 
 These define the runtime hygiene contract for staging and validation.
 
@@ -78,6 +82,8 @@ These define the runtime hygiene contract for staging and validation.
 
 - `source-clean`: source paths must already be runtime-clean
 - `staged-clean`: local source paths may contain strip-on-stage files, but staged output must be clean
+
+`managed_sanitize_paths` and `managed_sanitize_files` define which non-runtime files the framework may remove from managed dependencies during `sync` before validation, replacement, and checksum calculation.
 
 ## `github`
 
@@ -122,6 +128,8 @@ Each dependency entry supports:
     'policy' => [
         'class' => 'managed-upstream',
         'allow_runtime_paths' => [],
+        'sanitize_paths' => [],
+        'sanitize_files' => [],
     ],
 ]
 ```
@@ -177,7 +185,17 @@ Use `runtime.strip_paths` and `runtime.strip_files` for global strip-on-stage ru
 
 Use `dependencies[].policy.strip_paths` and `dependencies[].policy.strip_files` for local dependency-specific strip rules.
 
-Strip-on-stage is currently supported for `local` entries. Managed dependencies should arrive runtime-ready.
+Strip-on-stage is supported for `local` entries. Use it when local source trees are intentionally richer than the final runtime payload.
+
+## Managed Sanitation
+
+Use `runtime.managed_sanitize_paths` and `runtime.managed_sanitize_files` for global managed-dependency sanitation rules.
+
+Use `dependencies[].policy.sanitize_paths` and `dependencies[].policy.sanitize_files` for managed dependency-specific sanitation rules.
+
+Managed sanitation applies during `sync` before the dependency is validated, copied into the repo, and checksummed. The manifest checksum for a managed dependency is therefore the checksum of the sanitized runtime tree, not the raw upstream archive.
+
+Ideal packaging is still preferred: managed artifacts should already be runtime-ready. Sanitation exists to normalize common WordPress ecosystem extras such as `README*`, build metadata, or test directories when they appear in otherwise valid release archives.
 
 ## Managed Versus Local
 

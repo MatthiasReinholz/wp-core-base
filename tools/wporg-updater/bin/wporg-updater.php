@@ -81,7 +81,7 @@ Modes:
 Flags and environment:
   --repo-root=PATH       Override the repository root to inspect or update.
   --tool-path=PATH       Path from the downstream repo root to the wp-core-base checkout for scaffold mode.
-  --profile=PROFILE      Downstream scaffold profile or preset: full-core, content-only, content-only-default, content-only-migration, or content-only-local-mu.
+  --profile=PROFILE      Downstream scaffold profile or preset: full-core, content-only, content-only-default, content-only-migration, content-only-local-mu, or content-only-image-first.
   --content-root=PATH    Override the scaffolded content root.
   --output=PATH          Override the stage-runtime output path.
   --force                Overwrite scaffolded files when they already exist.

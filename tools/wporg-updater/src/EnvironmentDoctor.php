@@ -152,7 +152,7 @@ final class EnvironmentDoctor
                 continue;
             }
 
-            [$globalAllowPaths, $stripPaths, $stripFiles] = $this->sourceValidationRules($config, $dependency);
+            [$globalAllowPaths, $stripPaths, $stripFiles, $sanitizeMatches] = $this->sourceValidationRules($config, $dependency, $runtimeInspector);
 
             try {
                 $runtimeInspector->assertPathIsClean(
@@ -171,8 +171,16 @@ final class EnvironmentDoctor
                 continue;
             }
 
+            if ($sanitizeMatches !== []) {
+                $this->warn(sprintf(
+                    'Managed dependency %s contains sanitizable entries that will be normalized during sync/stage: %s',
+                    $dependency['component_key'],
+                    implode(', ', $sanitizeMatches)
+                ));
+            }
+
             try {
-                $checksum = $runtimeInspector->computeChecksum($absolutePath);
+                $checksum = $runtimeInspector->computeChecksum($absolutePath, [], $stripPaths, $stripFiles);
 
                 if ($checksum !== $dependency['checksum']) {
                     $this->error(sprintf(
@@ -352,14 +360,31 @@ final class EnvironmentDoctor
 
     /**
      * @param array<string, mixed> $dependency
-     * @return array{0:list<string>,1:list<string>}
+     * @return array{0:list<string>,1:list<string>,2:list<string>,3:list<string>}
      */
-    private function sourceValidationRules(Config $config, array $dependency): array
+    private function sourceValidationRules(Config $config, array $dependency, RuntimeInspector $runtimeInspector): array
     {
         $allowPaths = $this->translatedRuntimeAllowRulesForRoot($config, (string) $dependency['path']);
 
+        if ($dependency['management'] === 'managed') {
+            [$globalSanitizePaths, $globalSanitizeFiles] = $this->translatedManagedSanitizeRulesForRoot($config, (string) $dependency['path']);
+            $sanitizePaths = array_values(array_unique(array_merge($globalSanitizePaths, $config->dependencySanitizePaths($dependency))));
+            $sanitizeFiles = array_values(array_unique(array_merge($globalSanitizeFiles, $config->dependencySanitizeFiles($dependency))));
+
+            return [
+                $allowPaths,
+                $sanitizePaths,
+                $sanitizeFiles,
+                $runtimeInspector->matchingStrippedEntries(
+                    $config->repoRoot . '/' . (string) $dependency['path'],
+                    $sanitizePaths,
+                    $sanitizeFiles
+                ),
+            ];
+        }
+
         if (! $config->isStagedCleanValidationMode()) {
-            return [$allowPaths, [], []];
+            return [$allowPaths, [], [], []];
         }
 
         [$globalStripPaths, $globalStripFiles] = $this->translatedRuntimeStripRulesForRoot($config, (string) $dependency['path']);
@@ -370,6 +395,7 @@ final class EnvironmentDoctor
             $allowPaths,
             array_values(array_unique(array_merge($dependencyStripPaths, $globalStripPaths))),
             array_values(array_unique(array_merge($dependencyStripFiles, $globalStripFiles))),
+            [],
         ];
     }
 
@@ -415,6 +441,30 @@ final class EnvironmentDoctor
         return [
             array_values(array_unique($stripPaths)),
             array_values(array_unique($config->stripFiles())),
+        ];
+    }
+
+    /**
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function translatedManagedSanitizeRulesForRoot(Config $config, string $rootPath): array
+    {
+        $sanitizePaths = [];
+
+        foreach ((array) $config->runtime['managed_sanitize_paths'] as $sanitizePath) {
+            if ($sanitizePath === $rootPath) {
+                $sanitizePaths[] = '';
+                continue;
+            }
+
+            if (str_starts_with($sanitizePath, $rootPath . '/')) {
+                $sanitizePaths[] = substr($sanitizePath, strlen($rootPath) + 1);
+            }
+        }
+
+        return [
+            array_values(array_unique($sanitizePaths)),
+            array_values(array_unique($config->managedSanitizeFiles())),
         ];
     }
 

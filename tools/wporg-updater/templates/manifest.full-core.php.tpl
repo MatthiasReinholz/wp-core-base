@@ -54,6 +54,8 @@ return [
         'allow_runtime_paths' => [],
         'strip_paths' => [],
         'strip_files' => [],
+        'managed_sanitize_paths' => __MANAGED_SANITIZE_PATHS__,
+        'managed_sanitize_files' => __MANAGED_SANITIZE_FILES__,
     ],
     'github' => [
         'api_base' => getenv('GITHUB_API_URL') ?: 'https://api.github.com',
@@ -87,6 +89,8 @@ return [
         //     'policy' => [
         //         'class' => 'managed-upstream',
         //         'allow_runtime_paths' => [],
+        //         'sanitize_paths' => [],
+        //         'sanitize_files' => [],
         //     ],
         // ],
         // Example local theme:

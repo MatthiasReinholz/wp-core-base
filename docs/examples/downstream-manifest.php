@@ -54,6 +54,22 @@ return [
         'allow_runtime_paths' => [],
         'strip_paths' => [],
         'strip_files' => [],
+        'managed_sanitize_paths' => [
+            'cms/plugins/docs',
+            'cms/plugins/tests',
+            'cms/themes/docs',
+            'cms/themes/tests',
+        ],
+        'managed_sanitize_files' => [
+            'README*',
+            'CHANGELOG*',
+            'composer.json',
+            'composer.lock',
+            'package.json',
+            'package-lock.json',
+            'pnpm-lock.yaml',
+            'yarn.lock',
+        ],
     ],
     'github' => [
         'api_base' => getenv('GITHUB_API_URL') ?: 'https://api.github.com',
@@ -84,6 +100,8 @@ return [
             'policy' => [
                 'class' => 'managed-upstream',
                 'allow_runtime_paths' => [],
+                'sanitize_paths' => [],
+                'sanitize_files' => [],
             ],
         ],
         [
@@ -106,6 +124,8 @@ return [
             'policy' => [
                 'class' => 'managed-private',
                 'allow_runtime_paths' => [],
+                'sanitize_paths' => [],
+                'sanitize_files' => [],
             ],
         ],
         [

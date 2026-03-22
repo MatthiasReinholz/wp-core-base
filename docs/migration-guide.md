@@ -75,6 +75,15 @@ If local source trees contain deployment-irrelevant files that you still want to
 - `runtime.strip_files`
 - dependency-level `policy.strip_paths` and `policy.strip_files`
 
+If managed release archives contain predictable non-runtime extras, normalize them during ingestion instead of keeping the raw archive tree in Git:
+
+- `runtime.managed_sanitize_paths`
+- `runtime.managed_sanitize_files`
+- dependency-level `policy.sanitize_paths`
+- dependency-level `policy.sanitize_files`
+
+That keeps the committed managed snapshot aligned with what `stage-runtime` will actually ship.
+
 ## What To Avoid
 
 - relying on folder discovery instead of manifest entries
