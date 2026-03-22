@@ -16,6 +16,9 @@ return [
     ],
     'runtime' => [
         'stage_dir' => '.wp-core-base/build/runtime',
+        'manifest_mode' => 'strict',
+        'staged_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
+        'validated_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
         'forbidden_paths' => [
             '.git',
             '.github',
@@ -54,9 +57,11 @@ return [
     'automation' => [
         'base_branch' => null,
         'dry_run' => false,
+        'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
     ],
     'dependencies' => [
         // Add managed, local, and ignored dependencies here.
+        // local entries are first-class and are the right way to keep project-owned code in the repo.
         // Example managed wordpress.org plugin:
         // [
         //     'name' => 'Contact Form 7',
@@ -77,6 +82,29 @@ return [
         //     ],
         //     'policy' => [
         //         'class' => 'managed-upstream',
+        //         'allow_runtime_paths' => [],
+        //     ],
+        // ],
+        // Example local theme:
+        // [
+        //     'name' => 'Project Theme',
+        //     'slug' => 'project-theme',
+        //     'kind' => 'theme',
+        //     'management' => 'local',
+        //     'source' => 'local',
+        //     'path' => '__THEMES_ROOT__/project-theme',
+        //     'main_file' => 'style.css',
+        //     'version' => '1.0.0',
+        //     'checksum' => null,
+        //     'archive_subdir' => '',
+        //     'extra_labels' => ['theme:project-theme'],
+        //     'source_config' => [
+        //         'github_repository' => null,
+        //         'github_release_asset_pattern' => null,
+        //         'github_token_env' => null,
+        //     ],
+        //     'policy' => [
+        //         'class' => 'local-owned',
         //         'allow_runtime_paths' => [],
         //     ],
         // ],

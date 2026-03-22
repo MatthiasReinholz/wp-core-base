@@ -16,6 +16,9 @@ return [
     ],
     'runtime' => [
         'stage_dir' => '.wp-core-base/build/runtime',
+        'manifest_mode' => 'strict',
+        'staged_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
+        'validated_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
         'forbidden_paths' => [
             '.git',
             '.github',
@@ -54,6 +57,7 @@ return [
     'automation' => [
         'base_branch' => null,
         'dry_run' => (bool) getenv('WPORG_UPDATE_DRY_RUN'),
+        'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
     ],
     'dependencies' => [
         [
@@ -101,13 +105,34 @@ return [
             ],
         ],
         [
-            'name' => 'Project Bootstrap',
-            'slug' => 'project-bootstrap',
-            'kind' => 'mu-plugin-package',
+            'name' => 'Project Theme',
+            'slug' => 'project-theme',
+            'kind' => 'theme',
             'management' => 'local',
             'source' => 'local',
-            'path' => 'cms/mu-plugins/project-bootstrap',
-            'main_file' => 'loader.php',
+            'path' => 'cms/themes/project-theme',
+            'main_file' => 'style.css',
+            'version' => '1.0.0',
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => ['theme:project-theme'],
+            'source_config' => [
+                'github_repository' => null,
+                'github_release_asset_pattern' => null,
+                'github_token_env' => null,
+            ],
+            'policy' => [
+                'class' => 'local-owned',
+                'allow_runtime_paths' => [],
+            ],
+        ],
+        [
+            'name' => 'Project Bootstrap',
+            'slug' => 'project-bootstrap',
+            'kind' => 'mu-plugin-file',
+            'management' => 'local',
+            'source' => 'local',
+            'path' => 'cms/mu-plugins/project-bootstrap.php',
             'version' => '1.0.0',
             'checksum' => null,
             'archive_subdir' => '',

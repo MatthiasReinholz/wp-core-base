@@ -21,7 +21,7 @@ final class RuntimeStager
     {
         $stagedPaths = [];
         $absoluteOutput = $this->config->stageDir($outputDirectory);
-        $this->runtimeInspector->clearDirectory($absoluteOutput);
+        $this->runtimeInspector->clearPath($absoluteOutput);
 
         if (! is_dir($absoluteOutput) && ! mkdir($absoluteOutput, 0775, true) && ! is_dir($absoluteOutput)) {
             throw new RuntimeException(sprintf('Unable to create runtime staging directory: %s', $absoluteOutput));
@@ -35,52 +35,22 @@ final class RuntimeStager
                     continue;
                 }
 
-                $destination = $absoluteOutput . '/' . $entry;
-
-                if (is_dir($source)) {
-                    $this->runtimeInspector->copyTree($source, $destination, [$this->config->paths['content_root']]);
-                } else {
-                    $targetDir = dirname($destination);
-
-                    if (! is_dir($targetDir) && ! mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
-                        throw new RuntimeException(sprintf('Unable to create directory: %s', $targetDir));
-                    }
-
-                    if (! copy($source, $destination)) {
-                        throw new RuntimeException(sprintf('Failed to stage runtime file: %s', $entry));
-                    }
-                }
-
+                $this->runtimeInspector->copyPath($source, $absoluteOutput . '/' . $entry, [$this->config->paths['content_root']]);
                 $stagedPaths[] = $entry;
             }
         }
 
-        $contentRoot = $this->config->paths['content_root'];
-        $contentOutput = $absoluteOutput . '/' . $contentRoot;
-
-        if (! is_dir($contentOutput) && ! mkdir($contentOutput, 0775, true) && ! is_dir($contentOutput)) {
-            throw new RuntimeException(sprintf('Unable to create staged content root: %s', $contentOutput));
-        }
-
-        $dependencyRoots = [];
-
         foreach ($this->config->dependencies() as $dependency) {
-            $relativePath = $dependency['path'];
+            if ($dependency['management'] === 'ignored' || ! $this->config->shouldStageDependency($dependency)) {
+                continue;
+            }
+
+            $relativePath = (string) $dependency['path'];
             $source = $this->config->repoRoot . '/' . $relativePath;
-
-            if (! file_exists($source)) {
-                continue;
-            }
-
-            if ($dependency['management'] === 'ignored') {
-                $dependencyRoots[] = $relativePath;
-                continue;
-            }
-
-            $this->runtimeInspector->assertTreeIsClean($source, (array) $dependency['policy']['allow_runtime_paths']);
+            $this->runtimeInspector->assertPathIsClean($source, (array) $dependency['policy']['allow_runtime_paths']);
 
             if ($dependency['management'] === 'managed') {
-                $checksum = $this->runtimeInspector->computeTreeChecksum($source);
+                $checksum = $this->runtimeInspector->computeChecksum($source);
 
                 if ($checksum !== $dependency['checksum']) {
                     throw new RuntimeException(sprintf(
@@ -92,59 +62,63 @@ final class RuntimeStager
                 }
             }
 
-            $destination = $absoluteOutput . '/' . $relativePath;
-
-            if (is_dir($source)) {
-                $this->runtimeInspector->copyTree($source, $destination);
-            } else {
-                $targetDir = dirname($destination);
-
-                if (! is_dir($targetDir) && ! mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
-                    throw new RuntimeException(sprintf('Unable to create directory: %s', $targetDir));
-                }
-
-                if (! copy($source, $destination)) {
-                    throw new RuntimeException(sprintf('Failed to stage runtime file: %s', $relativePath));
-                }
-            }
-
+            $this->runtimeInspector->copyPath($source, $absoluteOutput . '/' . $relativePath);
             $stagedPaths[] = $relativePath;
-            $dependencyRoots[] = $relativePath;
         }
 
-        $sourceContentRoot = $this->config->repoRoot . '/' . $contentRoot;
+        if ($this->config->isKindStaged('runtime-file')) {
+            foreach ((new RuntimeOwnershipInspector($this->config))->allowedRuntimePaths() as $path) {
+                if (! file_exists($path['absolute_path']) && ! is_link($path['absolute_path'])) {
+                    continue;
+                }
 
-        if (is_dir($sourceContentRoot)) {
-            $this->runtimeInspector->copyTree(
-                $sourceContentRoot,
-                $contentOutput,
-                $this->dependencyPathsRelativeToContentRoot($dependencyRoots, $contentRoot)
-            );
-            $stagedPaths[] = $contentRoot;
+                $translatedAllowList = $this->translatedAllowPathsForRoot($path['path'], (array) $this->config->runtime['allow_runtime_paths']);
+                $this->runtimeInspector->assertPathIsClean($path['absolute_path'], $translatedAllowList);
+                $this->runtimeInspector->copyPath($path['absolute_path'], $absoluteOutput . '/' . $path['path']);
+                $stagedPaths[] = $path['path'];
+            }
+        }
+
+        if ($this->config->isRelaxedManifestMode()) {
+            foreach ((new RuntimeOwnershipInspector($this->config))->undeclaredRuntimePaths() as $entry) {
+                if (! $this->config->isKindStaged($entry['kind'])) {
+                    continue;
+                }
+
+                $this->runtimeInspector->assertPathIsClean($entry['absolute_path']);
+                $this->runtimeInspector->copyPath($entry['absolute_path'], $absoluteOutput . '/' . $entry['path']);
+                $stagedPaths[] = $entry['path'];
+            }
         }
 
         $this->runtimeInspector->assertTreeIsClean($absoluteOutput);
 
-        return array_values(array_unique($stagedPaths));
+        $stagedPaths = array_values(array_unique($stagedPaths));
+        sort($stagedPaths);
+
+        return $stagedPaths;
     }
 
     /**
-     * @param list<string> $dependencyRoots
+     * @param list<string> $allowPaths
      * @return list<string>
      */
-    private function dependencyPathsRelativeToContentRoot(array $dependencyRoots, string $contentRoot): array
+    private function translatedAllowPathsForRoot(string $rootPath, array $allowPaths): array
     {
-        $paths = [];
+        $translated = [];
 
-        foreach ($dependencyRoots as $path) {
-            if (! str_starts_with($path, $contentRoot . '/')) {
+        foreach ($allowPaths as $allowPath) {
+            if ($allowPath === $rootPath) {
+                $translated[] = '';
                 continue;
             }
 
-            $paths[] = substr($path, strlen($contentRoot) + 1);
+            if (str_starts_with($allowPath, $rootPath . '/')) {
+                $translated[] = substr($allowPath, strlen($rootPath) + 1);
+            }
         }
 
-        return array_values(array_filter($paths, static fn (string $path): bool => $path !== ''));
+        return array_values(array_unique($translated));
     }
 
     /**

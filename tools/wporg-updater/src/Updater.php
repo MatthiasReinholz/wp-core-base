@@ -5,9 +5,6 @@ declare(strict_types=1);
 namespace WpOrgPluginUpdater;
 
 use DateTimeImmutable;
-use FilesystemIterator;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 use RuntimeException;
 use ZipArchive;
 
@@ -61,6 +58,8 @@ final class Updater
             'kind:plugin' => ['color' => '0e8a16', 'description' => 'Plugin dependency'],
             'kind:theme' => ['color' => '5319e7', 'description' => 'Theme dependency'],
             'kind:mu-plugin-package' => ['color' => 'fbca04', 'description' => 'MU plugin package dependency'],
+            'kind:mu-plugin-file' => ['color' => 'c5def5', 'description' => 'MU plugin file dependency'],
+            'kind:runtime-file' => ['color' => 'bfd4f2', 'description' => 'Runtime file dependency'],
             'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from wordpress.org'],
             'source:github-release' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
             'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],
@@ -360,25 +359,28 @@ final class Updater
             ZipExtractor::extractValidated($zip, $extractPath);
             $zip->close();
 
-            $sourcePath = $this->resolveExtractedDependencyRoot(
+            $sourcePath = $this->resolveExtractedDependencyPath(
                 $extractPath,
                 trim((string) ($releaseData['archive_subdir'] ?? ''), '/'),
-                trim((string) $dependency['main_file'], '/'),
+                $this->expectedArchiveEntry($dependency),
                 (string) $dependency['slug'],
+                $this->config->isFileKind((string) $dependency['kind']),
             );
 
-            $this->runtimeInspector->assertTreeIsClean($sourcePath, (array) $dependency['policy']['allow_runtime_paths']);
+            $this->runtimeInspector->assertPathIsClean($sourcePath, (array) $dependency['policy']['allow_runtime_paths']);
             $destinationPath = $this->config->repoRoot . '/' . trim((string) $dependency['path'], '/');
-            $this->removeDirectory($destinationPath);
-            $this->runtimeInspector->copyTree($sourcePath, $destinationPath);
+            $this->runtimeInspector->clearPath($destinationPath);
+            $this->runtimeInspector->copyPath($sourcePath, $destinationPath);
 
-            $expectedMainFile = $destinationPath . '/' . trim((string) $dependency['main_file'], '/');
+            $expectedMainFile = $this->config->isFileKind((string) $dependency['kind'])
+                ? $destinationPath
+                : $destinationPath . '/' . trim((string) $dependency['main_file'], '/');
 
             if (! is_file($expectedMainFile)) {
                 throw new RuntimeException(sprintf('Updated archive did not contain expected main file %s.', $expectedMainFile));
             }
 
-            $checksum = $this->runtimeInspector->computeTreeChecksum($destinationPath);
+            $checksum = $this->runtimeInspector->computeChecksum($destinationPath);
             $this->config = $this->updateDependencyInManifest(
                 $dependency['component_key'],
                 (string) $releaseData['version'],
@@ -387,7 +389,7 @@ final class Updater
 
             return $this->config->dependencyByKey($dependency['component_key']);
         } finally {
-            $this->removeDirectory($tempDir);
+            $this->runtimeInspector->clearPath($tempDir);
         }
     }
 
@@ -700,8 +702,8 @@ final class Updater
     private function assertManagedDependencyChecksum(array $dependency): void
     {
         $dependencyPath = $this->config->repoRoot . '/' . $dependency['path'];
-        $this->runtimeInspector->assertTreeIsClean($dependencyPath, (array) $dependency['policy']['allow_runtime_paths']);
-        $checksum = $this->runtimeInspector->computeTreeChecksum($dependencyPath);
+        $this->runtimeInspector->assertPathIsClean($dependencyPath, (array) $dependency['policy']['allow_runtime_paths']);
+        $checksum = $this->runtimeInspector->computeChecksum($dependencyPath);
 
         if ($checksum !== $dependency['checksum']) {
             throw new RuntimeException(sprintf(
@@ -747,11 +749,12 @@ final class Updater
         return sprintf('Update %s from %s to %s', $dependencyName, $baseVersion, $targetVersion);
     }
 
-    private function resolveExtractedDependencyRoot(
+    private function resolveExtractedDependencyPath(
         string $extractPath,
         string $archiveSubdir,
-        string $mainFile,
+        string $expectedEntry,
         string $slug,
+        bool $isFile,
     ): string {
         $entries = array_values(array_filter(scandir($extractPath) ?: [], static fn (string $entry): bool => $entry !== '.' && $entry !== '..'));
         $candidateBases = [$extractPath];
@@ -773,7 +776,17 @@ final class Updater
                 $candidatePath .= '/' . $archiveSubdir;
             }
 
-            if (is_file($candidatePath . '/' . $mainFile)) {
+            if ($isFile) {
+                $candidateFile = $candidatePath . '/' . $expectedEntry;
+
+                if (is_file($candidateFile)) {
+                    $matches[] = $candidateFile;
+                }
+
+                continue;
+            }
+
+            if (is_file($candidatePath . '/' . $expectedEntry)) {
                 $matches[] = $candidatePath;
             }
         }
@@ -786,43 +799,29 @@ final class Updater
 
         if ($matches === []) {
             throw new RuntimeException(sprintf(
-                'Could not locate the extracted dependency root for %s. Expected to find %s inside the archive.',
+                'Could not locate the extracted dependency payload for %s. Expected to find %s inside the archive.',
                 $slug,
-                $mainFile
+                $expectedEntry
             ));
         }
 
         throw new RuntimeException(sprintf(
-            'Extracted archive for %s matched multiple candidate dependency roots.',
+            'Extracted archive for %s matched multiple candidate dependency payloads.',
             $slug
         ));
     }
 
-    private function removeDirectory(string $path): void
+    private function expectedArchiveEntry(array $dependency): string
     {
-        if (! file_exists($path)) {
-            return;
+        if ($this->config->isFileKind((string) $dependency['kind'])) {
+            $mainFile = $dependency['main_file'] ?? null;
+
+            return is_string($mainFile) && $mainFile !== ''
+                ? trim($mainFile, '/')
+                : basename((string) $dependency['path']);
         }
 
-        if (is_file($path) || is_link($path)) {
-            unlink($path);
-            return;
-        }
-
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
-        );
-
-        foreach ($iterator as $item) {
-            if ($item->isDir()) {
-                rmdir($item->getPathname());
-            } else {
-                unlink($item->getPathname());
-            }
-        }
-
-        rmdir($path);
+        return trim((string) $dependency['main_file'], '/');
     }
 
     private function newBranchName(string $slug, string $kind, string $targetVersion): string

@@ -15,6 +15,7 @@ This README is written for people adopting `wp-core-base` in their own WordPress
 - an explicit manifest at `.wp-core-base/manifest.php`
 - scheduled GitHub update PRs for WordPress core and managed dependencies
 - support for WordPress.org and GitHub Release backed dependencies
+- support for project-owned custom code as first-class `local` runtime entries
 - runtime staging for image-first or immutable deployment flows
 
 ## Start Here
@@ -59,6 +60,8 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-
 ```
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
+
+The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, and runtime files owned directly by the downstream project.
 
 ## Current Baseline
 

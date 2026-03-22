@@ -12,6 +12,7 @@ use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\ReleaseClassifier;
 use WpOrgPluginUpdater\RuntimeInspector;
+use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\WordPressCoreClient;
@@ -128,6 +129,9 @@ $assert(in_array('type:feature', $gitHubLabels, true), 'Expected GitHub release 
 $config = Config::load($repoRoot);
 $assert($config->profile === 'full-core', 'Expected repository manifest to load as full-core.');
 $assert($config->coreManaged(), 'Expected repository manifest to manage WordPress core.');
+$assert($config->manifestMode() === 'strict', 'Expected repository manifest to default to strict runtime ownership.');
+$assert(in_array('runtime-file', $config->stagedKinds(), true), 'Expected runtime-file to be stageable by default.');
+$assert(in_array('plugin', $config->managedKinds(), true), 'Expected plugins to remain managed by default.');
 $assert(count($config->managedDependencies()) === 4, 'Expected four managed baseline dependencies.');
 
 $scanner = new DependencyScanner();
@@ -162,13 +166,22 @@ $assert($legacyFailed, 'Expected legacy config loading to fail with migration gu
 
 $contentRoot = sys_get_temp_dir() . '/wporg-content-only-' . bin2hex(random_bytes(4));
 mkdir($contentRoot . '/cms/plugins/example-plugin', 0777, true);
+mkdir($contentRoot . '/cms/plugins/untracked-plugin', 0777, true);
 mkdir($contentRoot . '/cms/themes/example-theme', 0777, true);
 mkdir($contentRoot . '/cms/mu-plugins/bootstrap', 0777, true);
+mkdir($contentRoot . '/cms/shared', 0777, true);
 file_put_contents($contentRoot . '/cms/plugins/example-plugin/example-plugin.php', <<<'PHP'
 <?php
 /*
 Plugin Name: Example Plugin
 Version: 1.2.3
+*/
+PHP);
+file_put_contents($contentRoot . '/cms/plugins/untracked-plugin/untracked-plugin.php', <<<'PHP'
+<?php
+/*
+Plugin Name: Untracked Plugin
+Version: 9.9.9
 */
 PHP);
 file_put_contents($contentRoot . '/cms/themes/example-theme/style.css', <<<'CSS'
@@ -184,6 +197,21 @@ Plugin Name: Bootstrap Loader
 Version: 1.0.0
 */
 PHP);
+file_put_contents($contentRoot . '/cms/mu-plugins/project-loader.php', <<<'PHP'
+<?php
+/*
+Plugin Name: Project Loader
+Version: 2.0.0
+*/
+PHP);
+file_put_contents($contentRoot . '/cms/mu-plugins/untracked-loader.php', <<<'PHP'
+<?php
+/*
+Plugin Name: Untracked Loader
+Version: 9.9.9
+*/
+PHP);
+file_put_contents($contentRoot . '/cms/shared/object-cache.php', "<?php\n");
 
 $contentManifest = [
     'profile' => 'content-only',
@@ -246,6 +274,34 @@ $contentManifest = [
             'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
             'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => []],
         ],
+        [
+            'name' => 'Project Loader',
+            'slug' => 'project-loader',
+            'kind' => 'mu-plugin-file',
+            'management' => 'local',
+            'source' => 'local',
+            'path' => 'cms/mu-plugins/project-loader.php',
+            'version' => '2.0.0',
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => [],
+            'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+            'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => []],
+        ],
+        [
+            'name' => 'Object Cache',
+            'slug' => 'object-cache',
+            'kind' => 'runtime-file',
+            'management' => 'local',
+            'source' => 'local',
+            'path' => 'cms/shared/object-cache.php',
+            'version' => '1.0.0',
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => [],
+            'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+            'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => []],
+        ],
     ],
 ];
 mkdir($contentRoot . '/.wp-core-base', 0777, true);
@@ -256,9 +312,144 @@ file_put_contents(
 $loadedContentConfig = Config::load($contentRoot);
 $assert($loadedContentConfig->profile === 'content-only', 'Expected content-only manifest to load.');
 $assert(! $loadedContentConfig->coreManaged(), 'Expected content-only manifest to keep core external.');
+$assert($loadedContentConfig->managedKinds() === ['plugin', 'theme', 'mu-plugin-package'], 'Expected older manifests to receive default managed_kinds.');
+$assert($loadedContentConfig->manifestMode() === 'strict', 'Expected older manifests to receive strict manifest mode by default.');
+$undeclaredStrict = (new RuntimeOwnershipInspector($loadedContentConfig))->undeclaredRuntimePaths();
+$assert(count($undeclaredStrict) === 2, 'Expected strict runtime ownership scan to find undeclared plugin and MU paths.');
+$assert(in_array('cms/plugins/untracked-plugin', array_column($undeclaredStrict, 'path'), true), 'Expected strict scan to find undeclared plugin path.');
+$assert(in_array('cms/mu-plugins/untracked-loader.php', array_column($undeclaredStrict, 'path'), true), 'Expected strict scan to find undeclared MU plugin file.');
+$assert(in_array('cms/mu-plugins/project-loader.php', array_column($undeclaredStrict, 'path'), true) === false, 'Expected declared MU file not to appear as undeclared.');
 $contentStager = new RuntimeStager($loadedContentConfig, new RuntimeInspector($loadedContentConfig->runtime));
 $contentPaths = $contentStager->stage('.wp-core-base/build/runtime');
 $assert(in_array('cms/plugins/example-plugin', $contentPaths, true), 'Expected content-only runtime staging to include plugin path.');
+$assert(in_array('cms/mu-plugins/project-loader.php', $contentPaths, true), 'Expected declared local MU plugin file to stage.');
+$assert(in_array('cms/shared/object-cache.php', $contentPaths, true), 'Expected declared local runtime file to stage.');
+$assert(! in_array('cms/plugins/untracked-plugin', $contentPaths, true), 'Expected strict mode not to stage undeclared plugin paths.');
+
+$relaxedRoot = sys_get_temp_dir() . '/wporg-content-relaxed-' . bin2hex(random_bytes(4));
+mkdir($relaxedRoot . '/cms/plugins/example-plugin', 0777, true);
+mkdir($relaxedRoot . '/cms/plugins/untracked-plugin', 0777, true);
+mkdir($relaxedRoot . '/cms/themes/example-theme', 0777, true);
+mkdir($relaxedRoot . '/cms/mu-plugins', 0777, true);
+mkdir($relaxedRoot . '/cms/shared', 0777, true);
+file_put_contents($relaxedRoot . '/cms/plugins/example-plugin/example-plugin.php', "<?php\n/*\nPlugin Name: Example Plugin\nVersion: 1.2.3\n*/\n");
+file_put_contents($relaxedRoot . '/cms/plugins/untracked-plugin/untracked-plugin.php', "<?php\n/*\nPlugin Name: Untracked Plugin\nVersion: 3.0.0\n*/\n");
+file_put_contents($relaxedRoot . '/cms/themes/example-theme/style.css', "/*\nTheme Name: Example Theme\nVersion: 4.5.6\n*/\n");
+file_put_contents($relaxedRoot . '/cms/mu-plugins/local-loader.php', "<?php\n/*\nPlugin Name: Local Loader\nVersion: 1.0.0\n*/\n");
+file_put_contents($relaxedRoot . '/cms/shared/object-cache.php', "<?php\n");
+mkdir($relaxedRoot . '/.wp-core-base', 0777, true);
+$relaxedManifest = [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => [
+        'mode' => 'external',
+        'enabled' => false,
+    ],
+    'runtime' => array_merge($runtimeDefaults, [
+        'manifest_mode' => 'relaxed',
+        'staged_kinds' => ['plugin', 'mu-plugin-file', 'runtime-file'],
+        'validated_kinds' => ['plugin', 'runtime-file'],
+    ]),
+    'github' => ['api_base' => 'https://api.github.com'],
+    'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => ['plugin']],
+    'dependencies' => [
+        [
+            'name' => 'Example Plugin',
+            'slug' => 'example-plugin',
+            'kind' => 'plugin',
+            'management' => 'managed',
+            'source' => 'github-release',
+            'path' => 'cms/plugins/example-plugin',
+            'main_file' => 'example-plugin.php',
+            'version' => '1.2.3',
+            'checksum' => (new RuntimeInspector(array_merge($runtimeDefaults, [
+                'manifest_mode' => 'relaxed',
+                'staged_kinds' => ['plugin', 'mu-plugin-file', 'runtime-file'],
+                'validated_kinds' => ['plugin', 'runtime-file'],
+            ])))->computeChecksum($relaxedRoot . '/cms/plugins/example-plugin'),
+            'archive_subdir' => '',
+            'extra_labels' => [],
+            'source_config' => ['github_repository' => 'owner/example-plugin', 'github_release_asset_pattern' => '*.zip', 'github_token_env' => 'EXAMPLE_TOKEN'],
+            'policy' => ['class' => 'managed-private', 'allow_runtime_paths' => []],
+        ],
+        [
+            'name' => 'Object Cache',
+            'slug' => 'object-cache',
+            'kind' => 'runtime-file',
+            'management' => 'local',
+            'source' => 'local',
+            'path' => 'cms/shared/object-cache.php',
+            'version' => '1.0.0',
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => [],
+            'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+            'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => []],
+        ],
+    ],
+];
+file_put_contents(
+    $relaxedRoot . '/.wp-core-base/manifest.php',
+    "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($relaxedManifest, true) . ";\n"
+);
+$loadedRelaxedConfig = Config::load($relaxedRoot);
+$assert($loadedRelaxedConfig->isRelaxedManifestMode(), 'Expected relaxed manifest mode to load.');
+$assert(count($loadedRelaxedConfig->managedDependencies()) === 1, 'Expected managed_kinds to limit sync scope.');
+$assert(count($loadedRelaxedConfig->validatedDependencies()) === 2, 'Expected validated dependency scope to exclude non-listed kinds.');
+$relaxedUndeclared = (new RuntimeOwnershipInspector($loadedRelaxedConfig))->undeclaredRuntimePaths();
+$assert(in_array('cms/plugins/untracked-plugin', array_column($relaxedUndeclared, 'path'), true), 'Expected relaxed ownership scan to report undeclared plugin path.');
+$assert(in_array('cms/mu-plugins/local-loader.php', array_column($relaxedUndeclared, 'path'), true), 'Expected relaxed ownership scan to report undeclared MU plugin file.');
+$relaxedStager = new RuntimeStager($loadedRelaxedConfig, new RuntimeInspector($loadedRelaxedConfig->runtime));
+$relaxedPaths = $relaxedStager->stage('.wp-core-base/build/runtime');
+$assert(in_array('cms/plugins/untracked-plugin', $relaxedPaths, true), 'Expected relaxed mode to stage undeclared plugin paths when plugin kind is staged.');
+$assert(in_array('cms/mu-plugins/local-loader.php', $relaxedPaths, true), 'Expected relaxed mode to stage undeclared MU plugin files when MU file kind is staged.');
+$assert(! in_array('cms/themes/example-theme', $relaxedPaths, true), 'Expected staged_kinds to prevent theme staging.');
+$assert(in_array('cms/shared/object-cache.php', $relaxedPaths, true), 'Expected runtime-file entries to stage in relaxed mode.');
+
+$invalidKindRoot = sys_get_temp_dir() . '/wporg-invalid-kind-' . bin2hex(random_bytes(4));
+mkdir($invalidKindRoot . '/.wp-core-base', 0777, true);
+file_put_contents(
+    $invalidKindRoot . '/.wp-core-base/manifest.php',
+    "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export([
+        'profile' => 'content-only',
+        'paths' => [
+            'content_root' => 'cms',
+            'plugins_root' => 'cms/plugins',
+            'themes_root' => 'cms/themes',
+            'mu_plugins_root' => 'cms/mu-plugins',
+        ],
+        'core' => ['mode' => 'external', 'enabled' => false],
+        'runtime' => $runtimeDefaults,
+        'github' => ['api_base' => 'https://api.github.com'],
+        'automation' => ['base_branch' => null, 'dry_run' => false],
+        'dependencies' => [[
+            'name' => 'Broken Entry',
+            'slug' => 'broken-entry',
+            'kind' => 'widget',
+            'management' => 'local',
+            'source' => 'local',
+            'path' => 'cms/widgets/broken-entry',
+            'version' => '1.0.0',
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => [],
+            'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+            'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => []],
+        ]],
+    ], true) . ";\n"
+);
+$invalidKindFailed = false;
+try {
+    Config::load($invalidKindRoot);
+} catch (RuntimeException $exception) {
+    $invalidKindFailed = str_contains($exception->getMessage(), 'must be one of');
+}
+$assert($invalidKindFailed, 'Expected invalid dependency kinds to be rejected.');
 
 $tempScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-' . bin2hex(random_bytes(4));
 mkdir($tempScaffoldRoot, 0777, true);
@@ -268,6 +459,9 @@ $scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/w
 $scaffoldedValidate = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml');
 $assert(str_contains($scaffoldedManifest, "'profile' => 'content-only'"), 'Expected scaffolded manifest to set the requested profile.');
 $assert(str_contains($scaffoldedManifest, "'content_root' => 'cms'"), 'Expected scaffolded manifest to set the requested content root.');
+$assert(str_contains($scaffoldedManifest, "'manifest_mode' => 'strict'"), 'Expected scaffolded manifest to include manifest mode.');
+$assert(str_contains($scaffoldedManifest, "'managed_kinds' => ["), 'Expected scaffolded manifest to include managed_kinds.');
+$assert(str_contains($scaffoldedManifest, "'kind' => 'mu-plugin-file'"), 'Expected scaffolded manifest to document local MU plugin files.');
 $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
 $assert(str_contains($scaffoldedValidate, 'stage-runtime'), 'Expected scaffolded validation workflow to stage runtime output.');
 

@@ -41,7 +41,7 @@ Suggested order:
 1. scaffold a `content-only` manifest
 2. set `core.mode` to `external`
 3. declare managed third-party dependencies explicitly
-4. declare repo-owned plugins, themes, and MU packages as `local`
+4. declare repo-owned plugins, themes, MU packages, and MU plugin files as `local`
 5. stage runtime output and point your image build at that staged directory
 
 ## From Mixed Source Trees
@@ -61,8 +61,15 @@ then normalize it in this order:
 4. mark anything intentionally out of scope as `ignored`
 5. validate with `doctor` and `stage-runtime`
 
+If the repo has too much undeclared runtime code to switch directly to strict ownership, start with:
+
+- `runtime.manifest_mode: relaxed`
+
+Then move paths into explicit `managed`, `local`, or `ignored` entries until you can switch back to `strict`.
+
 ## What To Avoid
 
 - relying on folder discovery instead of manifest entries
 - keeping local patches inside managed dependency trees
+- assuming MU plugins must be updater-managed
 - shipping runtime artifacts directly from the raw working tree when `stage-runtime` is part of your contract

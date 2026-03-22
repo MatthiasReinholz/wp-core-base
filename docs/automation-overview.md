@@ -39,6 +39,11 @@ The CLI supports:
 
 Managed dependencies are explicit. Folder presence alone never makes something updateable.
 
+`sync` only considers manifest entries that are:
+
+- `management: managed`
+- included in `automation.managed_kinds`
+
 ## Dependency Update Sources
 
 Supported automated sources:
@@ -68,6 +73,8 @@ Key behavior:
 - managed and local dependencies are checked for forbidden files and directories
 - managed dependencies must match their manifest checksum
 - `stage-runtime` assembles the runtime payload and validates the staged tree
+- undeclared runtime paths are errors in `strict` mode and warnings in `relaxed` mode
+- file-level runtime entries such as `mu-plugin-file` and `runtime-file` are supported
 
 ## Pull Request Behavior
 
@@ -92,6 +99,13 @@ Profiles:
 
 - `full-core`
 - `content-only`
+
+Scaffolded manifests include:
+
+- `automation.managed_kinds`
+- `runtime.manifest_mode`
+- `runtime.staged_kinds`
+- `runtime.validated_kinds`
 
 ## Tests
 

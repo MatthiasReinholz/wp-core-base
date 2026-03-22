@@ -12,6 +12,7 @@ The manifest defines:
 - content roots
 - whether WordPress core is managed or external
 - runtime staging rules
+- kind-level sync, staging, and validation scope
 - every dependency the updater is allowed to touch
 
 The updater does not infer managed dependencies by scanning folders.
@@ -57,10 +58,45 @@ Use `local` when:
 - the code is owned by your project
 - the framework must never overwrite it
 
+`local` is a normal downstream ownership model. It is expected that many real projects will keep substantial custom runtime code in `local` entries.
+
 Use `ignored` when:
 
 - the path should be documented in the manifest
 - but it should stay out of update automation and runtime staging
+
+## File-Level Runtime Entries
+
+Use these kinds when a whole directory is not the right shape:
+
+- `mu-plugin-file`
+- `runtime-file`
+
+This is especially useful for single-file MU plugins in `mu-plugins/`.
+
+## Strict Versus Relaxed Ownership
+
+`runtime.manifest_mode` controls how the framework treats undeclared runtime paths under the configured plugin, theme, and MU plugin roots.
+
+- `strict`: undeclared paths are errors and are not staged
+- `relaxed`: undeclared clean paths are reported and may still be staged as a migration aid
+
+Use `strict` as the steady-state default. Use `relaxed` only while migrating mixed-source repositories toward explicit manifest ownership.
+
+## Kind-Level Controls
+
+The framework separates three scopes:
+
+- `automation.managed_kinds`
+- `runtime.staged_kinds`
+- `runtime.validated_kinds`
+
+That lets a downstream project do things like:
+
+- manage plugins automatically
+- stage MU plugin files
+- validate local themes
+- keep custom runtime files out of updater automation
 
 ## Runtime Staging
 

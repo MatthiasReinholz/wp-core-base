@@ -16,16 +16,27 @@ final class DependencyScanner
     {
         $relativePath = trim((string) $dependency['path'], '/');
         $absolutePath = $repoRoot . '/' . $relativePath;
+        $kind = (string) $dependency['kind'];
+        $isFileKind = in_array($kind, ['mu-plugin-file', 'runtime-file'], true);
 
-        if (! is_dir($absolutePath)) {
-            throw new RuntimeException(sprintf('Dependency path is not a directory: %s', $absolutePath));
-        }
+        if ($isFileKind) {
+            if (! is_file($absolutePath)) {
+                throw new RuntimeException(sprintf('Dependency path is not a file: %s', $absolutePath));
+            }
 
-        $mainFileRelative = ltrim((string) $dependency['main_file'], '/');
-        $mainFile = $absolutePath . '/' . $mainFileRelative;
+            $mainFileRelative = ltrim((string) ($dependency['main_file'] ?? basename($relativePath)), '/');
+            $mainFile = $absolutePath;
+        } else {
+            if (! is_dir($absolutePath)) {
+                throw new RuntimeException(sprintf('Dependency path is not a directory: %s', $absolutePath));
+            }
 
-        if (! is_file($mainFile)) {
-            throw new RuntimeException(sprintf('Main dependency file not found: %s', $mainFile));
+            $mainFileRelative = ltrim((string) $dependency['main_file'], '/');
+            $mainFile = $absolutePath . '/' . $mainFileRelative;
+
+            if (! is_file($mainFile)) {
+                throw new RuntimeException(sprintf('Main dependency file not found: %s', $mainFile));
+            }
         }
 
         $contents = file_get_contents($mainFile);
@@ -34,10 +45,9 @@ final class DependencyScanner
             throw new RuntimeException(sprintf('Failed to read dependency file: %s', $mainFile));
         }
 
-        $kind = (string) $dependency['kind'];
         $nameHeader = $kind === 'theme' ? 'Theme Name' : 'Plugin Name';
         $name = $this->matchHeader($contents, $nameHeader) ?? (string) $dependency['name'];
-        $version = $this->matchHeader($contents, 'Version');
+        $version = $this->matchHeader($contents, 'Version') ?? (($dependency['version'] ?? null) !== null ? (string) $dependency['version'] : null);
 
         return [
             'name' => $name,

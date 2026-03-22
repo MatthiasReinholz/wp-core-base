@@ -12,7 +12,7 @@ use RuntimeException;
 final class RuntimeInspector
 {
     /**
-     * @param array{stage_dir:string, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>} $runtimeConfig
+     * @param array{stage_dir:string, manifest_mode:string, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>} $runtimeConfig
      */
     public function __construct(
         private readonly array $runtimeConfig,
@@ -23,13 +23,13 @@ final class RuntimeInspector
      * @param list<string> $allowRuntimePaths
      * @param list<string> $excludedPaths
      */
-    public function assertTreeIsClean(string $root, array $allowRuntimePaths = [], array $excludedPaths = []): void
+    public function assertPathIsClean(string $path, array $allowRuntimePaths = [], array $excludedPaths = []): void
     {
-        if (! is_dir($root)) {
-            throw new RuntimeException(sprintf('Runtime root does not exist: %s', $root));
+        if (! file_exists($path) && ! is_link($path)) {
+            throw new RuntimeException(sprintf('Runtime path does not exist: %s', $path));
         }
 
-        foreach ($this->iterableEntries($root) as $entry) {
+        foreach ($this->iterableEntries($path) as $entry) {
             $relativePath = $entry['relative_path'];
 
             if ($this->isExcluded($relativePath, $excludedPaths)) {
@@ -49,17 +49,30 @@ final class RuntimeInspector
     }
 
     /**
+     * @param list<string> $allowRuntimePaths
      * @param list<string> $excludedPaths
      */
-    public function computeTreeChecksum(string $root, array $excludedPaths = []): string
+    public function assertTreeIsClean(string $root, array $allowRuntimePaths = [], array $excludedPaths = []): void
     {
         if (! is_dir($root)) {
-            throw new RuntimeException(sprintf('Checksum root does not exist: %s', $root));
+            throw new RuntimeException(sprintf('Runtime root does not exist: %s', $root));
+        }
+
+        $this->assertPathIsClean($root, $allowRuntimePaths, $excludedPaths);
+    }
+
+    /**
+     * @param list<string> $excludedPaths
+     */
+    public function computeChecksum(string $path, array $excludedPaths = []): string
+    {
+        if (! file_exists($path) && ! is_link($path)) {
+            throw new RuntimeException(sprintf('Checksum path does not exist: %s', $path));
         }
 
         $entries = [];
 
-        foreach ($this->iterableEntries($root) as $entry) {
+        foreach ($this->iterableEntries($path) as $entry) {
             if ($this->isExcluded($entry['relative_path'], $excludedPaths) || $entry['is_dir']) {
                 continue;
             }
@@ -81,9 +94,21 @@ final class RuntimeInspector
     /**
      * @param list<string> $excludedPaths
      */
-    public function clearDirectory(string $path, array $excludedPaths = []): void
+    public function computeTreeChecksum(string $root, array $excludedPaths = []): string
     {
-        if (! file_exists($path)) {
+        if (! is_dir($root)) {
+            throw new RuntimeException(sprintf('Checksum root does not exist: %s', $root));
+        }
+
+        return $this->computeChecksum($root, $excludedPaths);
+    }
+
+    /**
+     * @param list<string> $excludedPaths
+     */
+    public function clearPath(string $path, array $excludedPaths = []): void
+    {
+        if (! file_exists($path) && ! is_link($path)) {
             return;
         }
 
@@ -117,10 +142,36 @@ final class RuntimeInspector
     /**
      * @param list<string> $excludedPaths
      */
-    public function copyTree(string $source, string $destination, array $excludedPaths = []): void
+    public function clearDirectory(string $path, array $excludedPaths = []): void
     {
-        if (! is_dir($source)) {
-            throw new RuntimeException(sprintf('Source directory does not exist: %s', $source));
+        $this->clearPath($path, $excludedPaths);
+    }
+
+    /**
+     * @param list<string> $excludedPaths
+     */
+    public function copyPath(string $source, string $destination, array $excludedPaths = []): void
+    {
+        if (! file_exists($source) && ! is_link($source)) {
+            throw new RuntimeException(sprintf('Source path does not exist: %s', $source));
+        }
+
+        if (is_link($source)) {
+            throw new RuntimeException(sprintf('Symlink detected while copying runtime path: %s', $source));
+        }
+
+        if (is_file($source)) {
+            $targetDir = dirname($destination);
+
+            if (! is_dir($targetDir) && ! mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
+                throw new RuntimeException(sprintf('Failed to create directory: %s', $targetDir));
+            }
+
+            if (! copy($source, $destination)) {
+                throw new RuntimeException(sprintf('Failed to copy file to %s', $destination));
+            }
+
+            return;
         }
 
         if (! is_dir($destination) && ! mkdir($destination, 0775, true) && ! is_dir($destination)) {
@@ -165,10 +216,31 @@ final class RuntimeInspector
     }
 
     /**
+     * @param list<string> $excludedPaths
+     */
+    public function copyTree(string $source, string $destination, array $excludedPaths = []): void
+    {
+        if (! is_dir($source)) {
+            throw new RuntimeException(sprintf('Source directory does not exist: %s', $source));
+        }
+
+        $this->copyPath($source, $destination, $excludedPaths);
+    }
+
+    /**
      * @return list<array{absolute_path:string, relative_path:string, is_dir:bool, is_symlink:bool}>
      */
     private function iterableEntries(string $root): array
     {
+        if (is_file($root) || is_link($root)) {
+            return [[
+                'absolute_path' => $root,
+                'relative_path' => basename($root),
+                'is_dir' => false,
+                'is_symlink' => is_link($root),
+            ]];
+        }
+
         $entries = [];
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
@@ -226,6 +298,10 @@ final class RuntimeInspector
         $combined = array_values(array_unique(array_merge($this->runtimeConfig['allow_runtime_paths'], $allowRuntimePaths)));
 
         foreach ($combined as $allowedPath) {
+            if ($allowedPath === '' || $allowedPath === '.') {
+                return true;
+            }
+
             if ($relativePath === $allowedPath || str_starts_with($relativePath, $allowedPath . '/')) {
                 return true;
             }

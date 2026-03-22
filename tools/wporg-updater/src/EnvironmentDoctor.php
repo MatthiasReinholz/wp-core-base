@@ -46,6 +46,7 @@ final class EnvironmentDoctor
         if ($config !== null) {
             $this->inspectConfiguredStructure($config);
             $this->inspectDependencies($config);
+            $this->inspectRuntimeOwnership($config);
             $this->inspectRuntimeStaging($config);
         }
 
@@ -59,17 +60,19 @@ final class EnvironmentDoctor
     private function inspectConfiguredStructure(Config $config): void
     {
         foreach ($config->paths as $key => $path) {
-            if ($key === 'content_root') {
-                $this->ok(sprintf('Configured %s is %s.', $key, $path));
-                continue;
-            }
-
             $this->okIf(
                 $this->isSafeRelativePath($path),
                 sprintf('Configured %s path is valid: %s', $key, $path),
                 sprintf('Configured %s path is not a safe relative path: %s', $key, $path)
             );
         }
+
+        $this->ok(sprintf(
+            'Runtime ownership mode is `%s`; staged kinds: %s; validated kinds: %s.',
+            $config->manifestMode(),
+            implode(', ', $config->stagedKinds()),
+            implode(', ', $config->validatedKinds())
+        ));
 
         if ($config->profile === 'content-only') {
             $this->okIf(
@@ -105,12 +108,13 @@ final class EnvironmentDoctor
 
         foreach ($config->dependencies() as $dependency) {
             $absolutePath = $config->repoRoot . '/' . $dependency['path'];
-            $mainFile = $absolutePath . '/' . $dependency['main_file'];
+            $kind = (string) $dependency['kind'];
+            $classification = sprintf('%s %s', $dependency['management'], $kind);
 
             $this->okIf(
-                is_dir($absolutePath),
-                sprintf('Dependency path exists: %s', $dependency['path']),
-                sprintf('Dependency path does not exist: %s', $dependency['path'])
+                file_exists($absolutePath) || is_link($absolutePath),
+                sprintf('Declared %s path exists: %s', $classification, $dependency['path']),
+                sprintf('Declared %s path does not exist: %s', $classification, $dependency['path'])
             );
 
             if ($dependency['management'] === 'ignored') {
@@ -118,26 +122,36 @@ final class EnvironmentDoctor
                 continue;
             }
 
-            $this->okIf(
-                is_file($mainFile),
-                sprintf('Main file exists for %s: %s', $dependency['slug'], $dependency['main_file']),
-                sprintf('Main file not found for %s: %s', $dependency['slug'], $dependency['main_file'])
-            );
+            if ($config->isDirectoryKind($kind)) {
+                $mainFile = $absolutePath . '/' . $dependency['main_file'];
+                $this->okIf(
+                    is_file($mainFile),
+                    sprintf('Main file exists for %s: %s', $dependency['slug'], $dependency['main_file']),
+                    sprintf('Main file not found for %s: %s', $dependency['slug'], (string) $dependency['main_file'])
+                );
+            }
 
             try {
                 $state = $scanner->inspect($config->repoRoot, $dependency);
                 $this->ok(sprintf(
-                    'Dependency %s detected at %s (%s).',
+                    'Declared %s dependency %s detected at %s (%s).',
+                    $dependency['management'],
                     $dependency['component_key'],
-                    $state['version'],
+                    $state['version'] ?? 'unknown',
                     $state['path']
                 ));
             } catch (RuntimeException $exception) {
                 $this->error($exception->getMessage());
+                continue;
+            }
+
+            if (! $config->shouldValidateDependency($dependency)) {
+                $this->ok(sprintf('Validation skipped for %s because kind `%s` is not in runtime.validated_kinds.', $dependency['component_key'], $kind));
+                continue;
             }
 
             try {
-                $runtimeInspector->assertTreeIsClean($absolutePath, (array) $dependency['policy']['allow_runtime_paths']);
+                $runtimeInspector->assertPathIsClean($absolutePath, (array) $dependency['policy']['allow_runtime_paths']);
                 $this->ok(sprintf('Runtime hygiene passed for %s.', $dependency['component_key']));
             } catch (RuntimeException $exception) {
                 $this->error($exception->getMessage());
@@ -148,7 +162,7 @@ final class EnvironmentDoctor
             }
 
             try {
-                $checksum = $runtimeInspector->computeTreeChecksum($absolutePath);
+                $checksum = $runtimeInspector->computeChecksum($absolutePath);
 
                 if ($checksum !== $dependency['checksum']) {
                     $this->error(sprintf(
@@ -162,6 +176,31 @@ final class EnvironmentDoctor
                 }
             } catch (RuntimeException $exception) {
                 $this->error($exception->getMessage());
+            }
+        }
+    }
+
+    private function inspectRuntimeOwnership(Config $config): void
+    {
+        $ownershipInspector = new RuntimeOwnershipInspector($config);
+        $undeclaredPaths = $ownershipInspector->undeclaredRuntimePaths();
+
+        if ($undeclaredPaths === []) {
+            $this->ok('No undeclared runtime paths were detected under the configured managed roots.');
+            return;
+        }
+
+        foreach ($undeclaredPaths as $entry) {
+            $message = sprintf(
+                'Undeclared runtime path detected: %s (inferred kind `%s`). Declare it as managed/local/ignored or move to runtime.allow_runtime_paths.',
+                $entry['path'],
+                $entry['kind']
+            );
+
+            if ($config->isStrictManifestMode()) {
+                $this->error($message);
+            } else {
+                $this->warn($message);
             }
         }
     }
@@ -182,7 +221,7 @@ final class EnvironmentDoctor
         } catch (RuntimeException $exception) {
             $this->error($exception->getMessage());
         } finally {
-            $runtimeInspector->clearDirectory($stagePath);
+            $runtimeInspector->clearPath($stagePath);
         }
     }
 
@@ -347,14 +386,14 @@ final class EnvironmentDoctor
         fwrite(STDOUT, "[error] " . $message . "\n");
     }
 
-    private function okIf(bool $condition, string $successMessage, string $failureMessage): void
+    private function okIf(bool $condition, string $okMessage, string $errorMessage): void
     {
         if ($condition) {
-            $this->ok($successMessage);
+            $this->ok($okMessage);
             return;
         }
 
-        $this->error($failureMessage);
+        $this->error($errorMessage);
     }
 
     private function warnIf(bool $condition, string $message): void

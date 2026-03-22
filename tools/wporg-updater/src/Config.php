@@ -8,13 +8,17 @@ use RuntimeException;
 
 final class Config
 {
+    private const MANAGED_KINDS = ['plugin', 'theme', 'mu-plugin-package'];
+    private const RUNTIME_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'];
+    private const ALL_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'];
+
     /**
      * @param list<array<string, mixed>> $dependencies
      * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
      * @param array{mode:string, enabled:bool} $core
-     * @param array{stage_dir:string, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>} $runtime
+     * @param array{stage_dir:string, manifest_mode:string, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>} $runtime
      * @param array{api_base:string} $github
-     * @param array{base_branch:?string, dry_run:bool} $automation
+     * @param array{base_branch:?string, dry_run:bool, managed_kinds:list<string>} $automation
      */
     public function __construct(
         public readonly string $repoRoot,
@@ -60,7 +64,7 @@ final class Config
         $defaultPaths = self::defaultPaths($profile);
         $paths = self::normalizePaths($data['paths'] ?? [], $defaultPaths);
         $core = self::normalizeCore($data['core'] ?? [], $profile);
-        $runtime = self::normalizeRuntime($data['runtime'] ?? [], $profile);
+        $runtime = self::normalizeRuntime($data['runtime'] ?? []);
         $github = self::normalizeGithub($data['github'] ?? []);
         $automation = self::normalizeAutomation($data['automation'] ?? []);
         $dependencies = self::normalizeDependencies($data['dependencies'] ?? [], $paths);
@@ -76,6 +80,11 @@ final class Config
             automation: $automation,
             dependencies: $dependencies,
         );
+    }
+
+    public static function runtimeKinds(): array
+    {
+        return self::RUNTIME_KINDS;
     }
 
     public function baseBranch(): ?string
@@ -103,6 +112,61 @@ final class Config
         return $this->core['mode'] === 'managed' && $this->core['enabled'];
     }
 
+    public function manifestMode(): string
+    {
+        return $this->runtime['manifest_mode'];
+    }
+
+    public function isStrictManifestMode(): bool
+    {
+        return $this->manifestMode() === 'strict';
+    }
+
+    public function isRelaxedManifestMode(): bool
+    {
+        return $this->manifestMode() === 'relaxed';
+    }
+
+    public function managedKinds(): array
+    {
+        return $this->automation['managed_kinds'];
+    }
+
+    public function stagedKinds(): array
+    {
+        return $this->runtime['staged_kinds'];
+    }
+
+    public function validatedKinds(): array
+    {
+        return $this->runtime['validated_kinds'];
+    }
+
+    public function isKindManagedEnabled(string $kind): bool
+    {
+        return in_array($kind, $this->automation['managed_kinds'], true);
+    }
+
+    public function isKindStaged(string $kind): bool
+    {
+        return in_array($kind, $this->runtime['staged_kinds'], true);
+    }
+
+    public function isKindValidated(string $kind): bool
+    {
+        return in_array($kind, $this->runtime['validated_kinds'], true);
+    }
+
+    public function isFileKind(string $kind): bool
+    {
+        return in_array($kind, ['mu-plugin-file', 'runtime-file'], true);
+    }
+
+    public function isDirectoryKind(string $kind): bool
+    {
+        return ! $this->isFileKind($kind);
+    }
+
     /**
      * @return list<array<string, mixed>>
      */
@@ -116,9 +180,7 @@ final class Config
      */
     public function managedDependencies(): array
     {
-        return array_values(array_filter($this->dependencies, static function (array $dependency): bool {
-            return $dependency['management'] === 'managed';
-        }));
+        return array_values(array_filter($this->dependencies, fn (array $dependency): bool => $this->shouldManageDependency($dependency)));
     }
 
     /**
@@ -134,11 +196,44 @@ final class Config
     /**
      * @return list<array<string, mixed>>
      */
+    public function stagedDependencies(): array
+    {
+        return array_values(array_filter($this->runtimeDependencies(), fn (array $dependency): bool => $this->shouldStageDependency($dependency)));
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function validatedDependencies(): array
+    {
+        return array_values(array_filter($this->runtimeDependencies(), fn (array $dependency): bool => $this->shouldValidateDependency($dependency)));
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
     public function ignoredDependencies(): array
     {
         return array_values(array_filter($this->dependencies, static function (array $dependency): bool {
             return $dependency['management'] === 'ignored';
         }));
+    }
+
+    public function shouldManageDependency(array $dependency): bool
+    {
+        return $dependency['management'] === 'managed' && $this->isKindManagedEnabled((string) $dependency['kind']);
+    }
+
+    public function shouldStageDependency(array $dependency): bool
+    {
+        return in_array($dependency['management'], ['managed', 'local'], true)
+            && $this->isKindStaged((string) $dependency['kind']);
+    }
+
+    public function shouldValidateDependency(array $dependency): bool
+    {
+        return in_array($dependency['management'], ['managed', 'local'], true)
+            && $this->isKindValidated((string) $dependency['kind']);
     }
 
     public function stageDir(string $outputOverride = ''): string
@@ -155,7 +250,8 @@ final class Config
         return match ($kind) {
             'plugin' => $this->paths['plugins_root'],
             'theme' => $this->paths['themes_root'],
-            'mu-plugin-package' => $this->paths['mu_plugins_root'],
+            'mu-plugin-package', 'mu-plugin-file' => $this->paths['mu_plugins_root'],
+            'runtime-file' => $this->paths['content_root'],
             default => throw new RuntimeException(sprintf('Unknown dependency kind: %s', $kind)),
         };
     }
@@ -253,12 +349,20 @@ final class Config
      */
     private static function normalizePaths(array $value, array $defaults): array
     {
-        return [
+        $paths = [
             'content_root' => self::normalizedRelativePath($value['content_root'] ?? $defaults['content_root'], 'paths.content_root'),
             'plugins_root' => self::normalizedRelativePath($value['plugins_root'] ?? $defaults['plugins_root'], 'paths.plugins_root'),
             'themes_root' => self::normalizedRelativePath($value['themes_root'] ?? $defaults['themes_root'], 'paths.themes_root'),
             'mu_plugins_root' => self::normalizedRelativePath($value['mu_plugins_root'] ?? $defaults['mu_plugins_root'], 'paths.mu_plugins_root'),
         ];
+
+        foreach (['plugins_root', 'themes_root', 'mu_plugins_root'] as $key) {
+            if (! self::pathStartsWith($paths[$key], $paths['content_root'])) {
+                throw new RuntimeException(sprintf('%s must live under paths.content_root.', $key));
+            }
+        }
+
+        return $paths;
     }
 
     /**
@@ -284,14 +388,15 @@ final class Config
 
     /**
      * @param array<string, mixed> $value
-     * @return array{stage_dir:string, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>}
+     * @return array{stage_dir:string, manifest_mode:string, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>}
      */
-    private static function normalizeRuntime(array $value, string $profile): array
+    private static function normalizeRuntime(array $value): array
     {
-        $defaultStageDir = '.wp-core-base/build/runtime';
-
         return [
-            'stage_dir' => self::normalizedRelativePath($value['stage_dir'] ?? $defaultStageDir, 'runtime.stage_dir'),
+            'stage_dir' => self::normalizedRelativePath($value['stage_dir'] ?? '.wp-core-base/build/runtime', 'runtime.stage_dir'),
+            'manifest_mode' => self::enumValue($value['manifest_mode'] ?? 'strict', 'runtime.manifest_mode', ['strict', 'relaxed']),
+            'staged_kinds' => self::kindList($value['staged_kinds'] ?? self::RUNTIME_KINDS, 'runtime.staged_kinds'),
+            'validated_kinds' => self::kindList($value['validated_kinds'] ?? self::RUNTIME_KINDS, 'runtime.validated_kinds'),
             'forbidden_paths' => self::stringList(
                 $value['forbidden_paths'] ?? [
                     '.git',
@@ -345,13 +450,14 @@ final class Config
 
     /**
      * @param array<string, mixed> $value
-     * @return array{base_branch:?string, dry_run:bool}
+     * @return array{base_branch:?string, dry_run:bool, managed_kinds:list<string>}
      */
     private static function normalizeAutomation(array $value): array
     {
         return [
             'base_branch' => self::nullableString($value['base_branch'] ?? null),
             'dry_run' => (bool) ($value['dry_run'] ?? (bool) getenv('WPORG_UPDATE_DRY_RUN')),
+            'managed_kinds' => self::kindList($value['managed_kinds'] ?? self::MANAGED_KINDS, 'automation.managed_kinds'),
         ];
     }
 
@@ -374,33 +480,39 @@ final class Config
             }
 
             $slug = self::string($dependency['slug'] ?? null, sprintf('dependencies[%d].slug', (int) $index));
-            $kind = self::string($dependency['kind'] ?? null, sprintf('dependencies[%d].kind', (int) $index));
-            $management = self::string($dependency['management'] ?? null, sprintf('dependencies[%d].management', (int) $index));
-            $source = self::string($dependency['source'] ?? null, sprintf('dependencies[%d].source', (int) $index));
-
-            if (! in_array($kind, ['plugin', 'theme', 'mu-plugin-package'], true)) {
-                throw new RuntimeException(sprintf('Dependency %s has invalid kind %s.', $slug, $kind));
-            }
-
-            if (! in_array($management, ['managed', 'local', 'ignored'], true)) {
-                throw new RuntimeException(sprintf('Dependency %s has invalid management %s.', $slug, $management));
-            }
-
-            if (! in_array($source, ['wordpress.org', 'github-release', 'local'], true)) {
-                throw new RuntimeException(sprintf('Dependency %s has invalid source %s.', $slug, $source));
-            }
+            $kind = self::enumValue($dependency['kind'] ?? null, sprintf('dependencies[%d].kind', (int) $index), self::ALL_KINDS);
+            $management = self::enumValue($dependency['management'] ?? null, sprintf('dependencies[%d].management', (int) $index), ['managed', 'local', 'ignored']);
+            $source = self::enumValue($dependency['source'] ?? null, sprintf('dependencies[%d].source', (int) $index), ['wordpress.org', 'github-release', 'local']);
 
             $path = self::normalizedRelativePath($dependency['path'] ?? null, sprintf('dependencies[%s].path', $slug));
-            $mainFile = self::normalizedRelativePath($dependency['main_file'] ?? null, sprintf('dependencies[%s].main_file', $slug));
-
+            $mainFile = self::nullableNormalizedRelativePath($dependency['main_file'] ?? null, sprintf('dependencies[%s].main_file', $slug));
             $name = self::string($dependency['name'] ?? $slug, sprintf('dependencies[%s].name', $slug));
             $version = self::nullableString($dependency['version'] ?? null);
             $checksum = self::nullableString($dependency['checksum'] ?? null);
             $archiveSubdir = self::nullableString($dependency['archive_subdir'] ?? '') ?? '';
             $extraLabels = self::stringList($dependency['extra_labels'] ?? [], sprintf('dependencies[%s].extra_labels', $slug));
-
             $sourceConfig = is_array($dependency['source_config'] ?? null) ? $dependency['source_config'] : [];
             $policy = is_array($dependency['policy'] ?? null) ? $dependency['policy'] : [];
+
+            if (self::isDirectoryKindValue($kind) && $mainFile === null) {
+                throw new RuntimeException(sprintf('Dependency %s must define main_file for kind %s.', $slug, $kind));
+            }
+
+            if ($management === 'managed' && ($version === null || $checksum === null)) {
+                throw new RuntimeException(sprintf('Managed dependency %s must define version and checksum.', $slug));
+            }
+
+            if ($management !== 'managed' && $source !== 'local' && $management !== 'ignored') {
+                throw new RuntimeException(sprintf('Only managed dependencies may use remote source %s (%s).', $source, $slug));
+            }
+
+            if ($management === 'ignored' && $source !== 'local') {
+                throw new RuntimeException(sprintf('Ignored dependency %s must use source "local".', $slug));
+            }
+
+            if ($source === 'wordpress.org' && ! in_array($kind, ['plugin', 'theme'], true)) {
+                throw new RuntimeException(sprintf('WordPress.org source is only supported for plugin and theme dependencies (%s).', $slug));
+            }
 
             $policyClass = self::string(
                 $policy['class'] ?? self::defaultPolicyClass($management, $source),
@@ -417,18 +529,6 @@ final class Config
                 ));
             }
 
-            if ($management === 'managed' && ($version === null || $checksum === null)) {
-                throw new RuntimeException(sprintf('Managed dependency %s must define version and checksum.', $slug));
-            }
-
-            if ($management !== 'managed' && $source !== 'local' && $management !== 'ignored') {
-                throw new RuntimeException(sprintf('Only managed dependencies may use remote source %s (%s).', $source, $slug));
-            }
-
-            if ($management === 'ignored' && $source !== 'local') {
-                throw new RuntimeException(sprintf('Ignored dependency %s must use source "local".', $slug));
-            }
-
             $githubRepository = self::nullableString($sourceConfig['github_repository'] ?? null);
             $githubReleaseAssetPattern = self::nullableString($sourceConfig['github_release_asset_pattern'] ?? null);
             $githubTokenEnv = self::nullableString($sourceConfig['github_token_env'] ?? null);
@@ -437,11 +537,7 @@ final class Config
                 throw new RuntimeException(sprintf('GitHub release dependency %s must define source_config.github_repository.', $slug));
             }
 
-            $expectedPrefix = self::normalizedRelativePath($paths[match ($kind) {
-                'plugin' => 'plugins_root',
-                'theme' => 'themes_root',
-                'mu-plugin-package' => 'mu_plugins_root',
-            }], 'internal.expected_prefix');
+            $expectedPrefix = self::rootForKindFromPaths($kind, $paths);
 
             if (! self::pathStartsWith($path, $expectedPrefix)) {
                 throw new RuntimeException(sprintf(
@@ -483,6 +579,17 @@ final class Config
         return $dependencies;
     }
 
+    private static function rootForKindFromPaths(string $kind, array $paths): string
+    {
+        return match ($kind) {
+            'plugin' => $paths['plugins_root'],
+            'theme' => $paths['themes_root'],
+            'mu-plugin-package', 'mu-plugin-file' => $paths['mu_plugins_root'],
+            'runtime-file' => $paths['content_root'],
+            default => throw new RuntimeException(sprintf('Unsupported dependency kind %s.', $kind)),
+        };
+    }
+
     private static function defaultPolicyClass(string $management, string $source): string
     {
         return match (true) {
@@ -492,6 +599,11 @@ final class Config
             $management === 'ignored' && $source === 'local' => 'ignored',
             default => throw new RuntimeException(sprintf('Invalid management/source combination: %s/%s', $management, $source)),
         };
+    }
+
+    private static function isDirectoryKindValue(string $kind): bool
+    {
+        return ! in_array($kind, ['mu-plugin-file', 'runtime-file'], true);
     }
 
     private static function string(mixed $value, string $key): string
@@ -515,6 +627,21 @@ final class Config
 
         $trimmed = trim($value);
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    private static function enumValue(mixed $value, string $key, array $allowed): string
+    {
+        $normalized = self::string($value, $key);
+
+        if (! in_array($normalized, $allowed, true)) {
+            throw new RuntimeException(sprintf(
+                'Config value "%s" must be one of: %s.',
+                $key,
+                implode(', ', $allowed)
+            ));
+        }
+
+        return $normalized;
     }
 
     /**
@@ -545,6 +672,23 @@ final class Config
         return array_map(static fn (string $path): string => self::normalizedRelativePath($path, $key), self::stringList($value, $key));
     }
 
+    /**
+     * @param mixed $value
+     * @return list<string>
+     */
+    private static function kindList(mixed $value, string $key): array
+    {
+        $items = self::stringList($value, $key);
+
+        foreach ($items as $kind) {
+            if (! in_array($kind, self::ALL_KINDS, true)) {
+                throw new RuntimeException(sprintf('Config value "%s" contains invalid kind %s.', $key, $kind));
+            }
+        }
+
+        return array_values(array_unique($items));
+    }
+
     private static function normalizedRelativePath(mixed $value, string $key): string
     {
         $path = self::string($value, $key);
@@ -556,6 +700,15 @@ final class Config
         }
 
         return $normalized;
+    }
+
+    private static function nullableNormalizedRelativePath(mixed $value, string $key): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return self::normalizedRelativePath($value, $key);
     }
 
     private static function pathStartsWith(string $path, string $prefix): bool
