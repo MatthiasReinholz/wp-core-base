@@ -2,6 +2,8 @@
 
 This guide is for downstream users who already understand the basics and need the operational model in more detail.
 
+If you need the terminology first, read [concepts.md](concepts.md). If you are evaluating fit rather than implementing, read [evaluation-guide.md](evaluation-guide.md).
+
 ## The Manifest Is The Contract
 
 The downstream source of truth is `.wp-core-base/manifest.php`.
@@ -37,7 +39,7 @@ These map to manifest values like this:
 
 Today the framework supports automated updates from:
 
-- `wordpress.org`
+- `WordPress.org`
 - `github-release`
 
 GitHub support is release-backed. The repository must publish stable GitHub Releases. Raw tags without Releases are not treated as the source of truth.

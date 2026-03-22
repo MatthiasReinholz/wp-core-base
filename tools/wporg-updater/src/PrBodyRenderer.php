@@ -44,7 +44,7 @@ final class PrBodyRenderer
         ));
         $automationNote = match ($metadata['source'] ?? '') {
             'github-release' => 'This PR is managed by the GitHub release updater automation.',
-            default => 'This PR is managed by the wordpress.org updater automation.',
+            default => 'This PR is managed by the WordPress.org updater automation.',
         };
 
         return trim(<<<MARKDOWN

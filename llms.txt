@@ -1,0 +1,32 @@
+# wp-core-base LLM Index
+
+Primary human entry point:
+- README.md
+
+Primary agent entry point:
+- AGENTS.md
+
+Core evaluation docs:
+- docs/concepts.md
+- docs/support-matrix.md
+- docs/faq.md
+- docs/evaluation-guide.md
+
+Core implementation docs:
+- docs/getting-started.md
+- docs/manifest-reference.md
+- docs/downstream-usage.md
+- docs/migration-guide.md
+- docs/operations.md
+
+Framework maintenance docs:
+- docs/contributing.md
+- docs/automation-overview.md
+- docs/release-process.md
+
+Key framework facts:
+- Supports `full-core` and `content-only` downstreams.
+- GitHub is required only for automated PR workflows, not for using the base itself.
+- Managed dependency sources supported today: `WordPress.org` and `github-release`.
+- Local project-owned code is first-class and must not be overwritten by updater automation.
+- Runtime staging is a first-class deployment contract.

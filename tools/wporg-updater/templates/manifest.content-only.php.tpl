@@ -68,7 +68,7 @@ return [
     'dependencies' => [
         // content-only repos should declare every managed dependency explicitly.
         // local entries are first-class and are the normal way to keep project-owned code in the repo.
-        // Example managed wordpress.org plugin:
+        // Example managed WordPress.org plugin:
         // [
         //     'name' => 'WooCommerce',
         //     'slug' => 'woocommerce',

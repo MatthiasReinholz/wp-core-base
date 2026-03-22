@@ -68,7 +68,7 @@ return [
     'dependencies' => [
         // Add managed, local, and ignored dependencies here.
         // local entries are first-class and are the right way to keep project-owned code in the repo.
-        // Example managed wordpress.org plugin:
+        // Example managed WordPress.org plugin:
         // [
         //     'name' => 'Contact Form 7',
         //     'slug' => 'contact-form-7',

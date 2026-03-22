@@ -61,7 +61,7 @@ final class Updater
             'kind:mu-plugin-file' => ['color' => 'c5def5', 'description' => 'MU plugin file dependency'],
             'kind:runtime-file' => ['color' => 'bfd4f2', 'description' => 'Runtime file dependency'],
             'kind:runtime-directory' => ['color' => 'd4c5f9', 'description' => 'Runtime directory dependency'],
-            'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from wordpress.org'],
+            'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from WordPress.org'],
             'source:github-release' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
             'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],
             'release:minor' => ['color' => 'fbca04', 'description' => 'Minor release'],
@@ -492,7 +492,7 @@ final class Updater
         $info = $catalog['info'] ?? null;
 
         if (! is_array($info)) {
-            throw new RuntimeException(sprintf('Missing wordpress.org catalog metadata for %s.', (string) $dependency['slug']));
+            throw new RuntimeException(sprintf('Missing WordPress.org catalog metadata for %s.', (string) $dependency['slug']));
         }
 
         $notesMarkup = $this->wordPressOrgClient->extractReleaseNotes((string) $dependency['kind'], $info, $targetVersion);

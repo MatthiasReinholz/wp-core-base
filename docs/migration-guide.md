@@ -49,7 +49,7 @@ Suggested order:
 If your runtime currently mixes:
 
 - repo-owned custom code
-- wordpress.org snapshots
+- WordPress.org snapshots
 - GitHub-sourced private plugins
 - symlinks or submodules
 

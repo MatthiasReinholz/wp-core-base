@@ -3,6 +3,7 @@
 This guide is for downstream users of `wp-core-base`.
 
 If you are contributing to `wp-core-base` itself, use [contributing.md](contributing.md).
+If you want the vocabulary before the setup steps, read [concepts.md](concepts.md).
 
 ## Choose Your Starting Point
 
@@ -200,6 +201,10 @@ You can use GitHub while still:
 
 ## What To Read Next
 
+- concepts and glossary: [concepts.md](concepts.md)
+- FAQ and objections: [faq.md](faq.md)
+- evaluation checklist: [evaluation-guide.md](evaluation-guide.md)
+- support boundaries: [support-matrix.md](support-matrix.md)
 - architecture choices: [deployment-models.md](deployment-models.md)
 - dependency and manifest design: [downstream-usage.md](downstream-usage.md)
 - day-to-day usage: [operations.md](operations.md)

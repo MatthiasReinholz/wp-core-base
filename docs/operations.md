@@ -2,6 +2,8 @@
 
 This document is for downstream users working with `wp-core-base` on an ongoing basis.
 
+If you are evaluating whether the framework fits your repo, start with [evaluation-guide.md](evaluation-guide.md). If you are new to the terminology, read [concepts.md](concepts.md).
+
 ## Core Commands
 
 ```bash
@@ -29,7 +31,7 @@ For dependency update PRs, pay attention to:
 
 - release scope
 - release notes
-- support topics listed after the release timestamp for wordpress.org plugins
+- support topics listed after the release timestamp for WordPress.org plugins
 - whether the dependency is actually safe to overwrite
 
 For WordPress core PRs, pay attention to:

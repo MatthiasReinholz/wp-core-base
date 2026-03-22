@@ -9,6 +9,8 @@ It supports two downstream styles:
 
 This README is written for people adopting `wp-core-base` in their own WordPress projects. If you are contributing to `wp-core-base` itself, use [docs/contributing.md](docs/contributing.md).
 
+If you are an AI agent or you are asking an AI agent to evaluate or implement the framework, start with [AGENTS.md](/Users/matthias/DEV/wp-core-base/AGENTS.md).
+
 ## What You Get
 
 - a versioned WordPress base repository
@@ -19,6 +21,21 @@ This README is written for people adopting `wp-core-base` in their own WordPress
 - optional staged-clean runtime assembly for richer local source trees
 - managed-dependency sanitation during update ingestion when upstream archives contain non-runtime metadata
 - runtime staging for image-first or immutable deployment flows
+
+## Why This Is Valuable
+
+`wp-core-base` is not just a starter repository. It gives a WordPress project a stronger operational model.
+
+- explicit dependency ownership through the manifest, so managed, local, and ignored runtime code are clearly separated. See [manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md).
+- first-class support for both `full-core` and `content-only` downstreams, including image-first deployments. See [deployment-models.md](/Users/matthias/DEV/wp-core-base/docs/deployment-models.md).
+- reviewable update PRs instead of silent in-dashboard changes, so every dependency change becomes a normal Git review event. See [operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md).
+- richer PR context for reviewers, including release scope, release notes, release timestamp, and support-topic signals for WordPress.org plugins. See [operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md#reviewing-update-prs).
+- intelligent PR lifecycle behavior: patch releases can refresh an existing PR, while later minor or major releases can queue behind unresolved work. See [automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md#pull-request-behavior).
+- support for both WordPress.org and GitHub Release backed dependencies, including private GitHub release assets. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#source-types).
+- local project-owned code remains first-class, so custom plugins, themes, MU plugins, runtime files, and runtime directories do not need to be forced through updater automation. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#managed-versus-local).
+- normalized runtime snapshots, because managed dependencies can be sanitized during update ingestion and local code can use staged-clean strip rules when needed. See [manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md#managed-sanitation).
+- deterministic runtime staging for Docker, immutable images, and other build pipelines, so deployments can use a clean staged payload instead of the raw working tree. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#runtime-staging).
+- migration support for real-world repos, including strict vs relaxed ownership modes, manifest suggestions, and scaffolding presets for common downstream patterns. See [getting-started.md](/Users/matthias/DEV/wp-core-base/docs/getting-started.md) and [migration-guide.md](/Users/matthias/DEV/wp-core-base/docs/migration-guide.md).
 
 ## Start Here
 
@@ -31,6 +48,8 @@ Choose the path that matches your project:
 - local development and validation: [docs/getting-started.md#local-development](docs/getting-started.md#local-development)
 
 If you need help choosing an architecture first, read [docs/deployment-models.md](docs/deployment-models.md).
+
+If you want the framework vocabulary first, read [docs/concepts.md](docs/concepts.md).
 
 ## GitHub And Non-GitHub Use
 
@@ -84,6 +103,11 @@ These versions describe the code committed in this repository, not a floating la
 
 ## Documentation Map
 
+- AI and agent entry point: [AGENTS.md](/Users/matthias/DEV/wp-core-base/AGENTS.md)
+- concepts and glossary: [docs/concepts.md](docs/concepts.md)
+- FAQ and objections: [docs/faq.md](docs/faq.md)
+- evaluation checklist: [docs/evaluation-guide.md](docs/evaluation-guide.md)
+- support boundaries: [docs/support-matrix.md](docs/support-matrix.md)
 - onboarding and implementation: [docs/getting-started.md](docs/getting-started.md)
 - deployment and architecture choices: [docs/deployment-models.md](docs/deployment-models.md)
 - advanced downstream usage: [docs/downstream-usage.md](docs/downstream-usage.md)

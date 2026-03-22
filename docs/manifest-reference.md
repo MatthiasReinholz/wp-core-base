@@ -2,6 +2,8 @@
 
 This document is for downstream users configuring `.wp-core-base/manifest.php`.
 
+If you need plain-language definitions before the schema details, read [concepts.md](concepts.md).
+
 ## Top-Level Keys
 
 The manifest returns a PHP array with these sections:

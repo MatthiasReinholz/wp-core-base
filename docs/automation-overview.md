@@ -50,7 +50,7 @@ Managed dependencies are explicit. Folder presence alone never makes something u
 
 Supported automated sources:
 
-- `wordpress.org`
+- `WordPress.org`
 - `github-release`
 
 GitHub source handling uses stable Releases as the source of truth. It does not infer release state from raw tags or commit history.
@@ -88,7 +88,7 @@ Rules:
 
 - same release line + newer patch => update existing PR in place
 - newer minor or major while older PR still open => open a later blocked PR
-- support topics refresh incrementally for wordpress.org plugins
+- support topics refresh incrementally for WordPress.org plugins
 
 ## Scaffolding
 

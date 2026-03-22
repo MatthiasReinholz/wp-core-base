@@ -24,7 +24,7 @@ final class WordPressOrgClient
         return match ($kind) {
             'plugin', 'mu-plugin-package' => $this->fetchPluginInfo($slug),
             'theme' => $this->fetchThemeInfo($slug),
-            default => throw new RuntimeException(sprintf('Unsupported wordpress.org kind: %s', $kind)),
+            default => throw new RuntimeException(sprintf('Unsupported WordPress.org kind: %s', $kind)),
         };
     }
 
@@ -69,7 +69,7 @@ final class WordPressOrgClient
                 return $downloadLink;
             }
 
-            throw new RuntimeException(sprintf('No download URL found for wordpress.org theme version %s.', $version));
+            throw new RuntimeException(sprintf('No download URL found for WordPress.org theme version %s.', $version));
         }
 
         $versions = $info['versions'] ?? null;
@@ -115,7 +115,7 @@ final class WordPressOrgClient
         return match ($kind) {
             'plugin', 'mu-plugin-package' => sprintf('https://wordpress.org/plugins/%s/', rawurlencode($slug)),
             'theme' => sprintf('https://wordpress.org/themes/%s/', rawurlencode($slug)),
-            default => throw new RuntimeException(sprintf('Unsupported wordpress.org kind: %s', $kind)),
+            default => throw new RuntimeException(sprintf('Unsupported WordPress.org kind: %s', $kind)),
         };
     }
 
