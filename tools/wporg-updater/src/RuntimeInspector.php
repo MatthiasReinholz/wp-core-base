@@ -12,7 +12,7 @@ use RuntimeException;
 final class RuntimeInspector
 {
     /**
-     * @param array{stage_dir:string, manifest_mode:string, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>} $runtimeConfig
+     * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>} $runtimeConfig
      */
     public function __construct(
         private readonly array $runtimeConfig,
@@ -22,9 +22,16 @@ final class RuntimeInspector
     /**
      * @param list<string> $allowRuntimePaths
      * @param list<string> $excludedPaths
+     * @param list<string> $stripPaths
+     * @param list<string> $stripFiles
      */
-    public function assertPathIsClean(string $path, array $allowRuntimePaths = [], array $excludedPaths = []): void
-    {
+    public function assertPathIsClean(
+        string $path,
+        array $allowRuntimePaths = [],
+        array $excludedPaths = [],
+        array $stripPaths = [],
+        array $stripFiles = [],
+    ): void {
         if (! file_exists($path) && ! is_link($path)) {
             throw new RuntimeException(sprintf('Runtime path does not exist: %s', $path));
         }
@@ -32,7 +39,10 @@ final class RuntimeInspector
         foreach ($this->iterableEntries($path) as $entry) {
             $relativePath = $entry['relative_path'];
 
-            if ($this->isExcluded($relativePath, $excludedPaths)) {
+            if (
+                $this->isExcluded($relativePath, $excludedPaths)
+                || $this->isStripped($relativePath, $stripPaths, $stripFiles)
+            ) {
                 continue;
             }
 
@@ -51,14 +61,21 @@ final class RuntimeInspector
     /**
      * @param list<string> $allowRuntimePaths
      * @param list<string> $excludedPaths
+     * @param list<string> $stripPaths
+     * @param list<string> $stripFiles
      */
-    public function assertTreeIsClean(string $root, array $allowRuntimePaths = [], array $excludedPaths = []): void
-    {
+    public function assertTreeIsClean(
+        string $root,
+        array $allowRuntimePaths = [],
+        array $excludedPaths = [],
+        array $stripPaths = [],
+        array $stripFiles = [],
+    ): void {
         if (! is_dir($root)) {
             throw new RuntimeException(sprintf('Runtime root does not exist: %s', $root));
         }
 
-        $this->assertPathIsClean($root, $allowRuntimePaths, $excludedPaths);
+        $this->assertPathIsClean($root, $allowRuntimePaths, $excludedPaths, $stripPaths, $stripFiles);
     }
 
     /**
@@ -228,6 +245,44 @@ final class RuntimeInspector
     }
 
     /**
+     * @param list<string> $stripPaths
+     * @param list<string> $stripFiles
+     */
+    public function stripPath(string $path, array $stripPaths = [], array $stripFiles = []): void
+    {
+        if (($stripPaths === [] && $stripFiles === []) || (! file_exists($path) && ! is_link($path))) {
+            return;
+        }
+
+        if (is_file($path) || is_link($path)) {
+            if ($this->isStripped(basename($path), $stripPaths, $stripFiles)) {
+                unlink($path);
+            }
+
+            return;
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            $relative = ltrim(str_replace('\\', '/', substr($item->getPathname(), strlen($path))), '/');
+
+            if (! $this->isStripped($relative, $stripPaths, $stripFiles)) {
+                continue;
+            }
+
+            if ($item->isLink() || $item->isFile()) {
+                unlink($item->getPathname());
+            } elseif ($item->isDir()) {
+                $this->clearPath($item->getPathname());
+            }
+        }
+    }
+
+    /**
      * @return list<array{absolute_path:string, relative_path:string, is_dir:bool, is_symlink:bool}>
      */
     private function iterableEntries(string $root): array
@@ -317,6 +372,29 @@ final class RuntimeInspector
     {
         foreach ($excludedPaths as $excludedPath) {
             if ($relativePath === $excludedPath || str_starts_with($relativePath, $excludedPath . '/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<string> $stripPaths
+     * @param list<string> $stripFiles
+     */
+    private function isStripped(string $relativePath, array $stripPaths, array $stripFiles): bool
+    {
+        foreach ($stripPaths as $stripPath) {
+            if ($relativePath === $stripPath || str_starts_with($relativePath, $stripPath . '/')) {
+                return true;
+            }
+        }
+
+        $basename = basename($relativePath);
+
+        foreach ($stripFiles as $pattern) {
+            if (fnmatch($pattern, $basename)) {
                 return true;
             }
         }

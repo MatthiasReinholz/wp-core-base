@@ -68,11 +68,13 @@ final class EnvironmentDoctor
         }
 
         $this->ok(sprintf(
-            'Runtime ownership mode is `%s`; staged kinds: %s; validated kinds: %s.',
+            'Runtime ownership mode is `%s`; validation mode is `%s`; staged kinds: %s; validated kinds: %s.',
             $config->manifestMode(),
+            $config->validationMode(),
             implode(', ', $config->stagedKinds()),
             implode(', ', $config->validatedKinds())
         ));
+        $this->ok(sprintf('Ownership roots: %s.', implode(', ', $config->ownershipRoots())));
 
         if ($config->profile === 'content-only') {
             $this->okIf(
@@ -122,7 +124,7 @@ final class EnvironmentDoctor
                 continue;
             }
 
-            if ($config->isDirectoryKind($kind)) {
+            if (in_array($kind, ['plugin', 'theme', 'mu-plugin-package'], true)) {
                 $mainFile = $absolutePath . '/' . $dependency['main_file'];
                 $this->okIf(
                     is_file($mainFile),
@@ -150,8 +152,16 @@ final class EnvironmentDoctor
                 continue;
             }
 
+            [$globalAllowPaths, $stripPaths, $stripFiles] = $this->sourceValidationRules($config, $dependency);
+
             try {
-                $runtimeInspector->assertPathIsClean($absolutePath, (array) $dependency['policy']['allow_runtime_paths']);
+                $runtimeInspector->assertPathIsClean(
+                    $absolutePath,
+                    array_values(array_unique(array_merge((array) $dependency['policy']['allow_runtime_paths'], $globalAllowPaths))),
+                    [],
+                    $stripPaths,
+                    $stripFiles
+                );
                 $this->ok(sprintf('Runtime hygiene passed for %s.', $dependency['component_key']));
             } catch (RuntimeException $exception) {
                 $this->error($exception->getMessage());
@@ -186,22 +196,36 @@ final class EnvironmentDoctor
         $undeclaredPaths = $ownershipInspector->undeclaredRuntimePaths();
 
         if ($undeclaredPaths === []) {
-            $this->ok('No undeclared runtime paths were detected under the configured managed roots.');
+            $this->ok('No undeclared runtime paths were detected under the configured ownership roots.');
             return;
         }
 
         foreach ($undeclaredPaths as $entry) {
             $message = sprintf(
-                'Undeclared runtime path detected: %s (inferred kind `%s`). Declare it as managed/local/ignored or move to runtime.allow_runtime_paths.',
+                'Undeclared runtime path detected: %s (inferred kind `%s`).',
                 $entry['path'],
                 $entry['kind']
             );
+
+            if ($entry['is_symlink']) {
+                $message .= ' It is a symlink; convert it into local code, a release-backed managed dependency, or an ignored path.';
+            } else {
+                $message .= ' Declare it as managed, local, ignored, or move it to runtime.allow_runtime_paths.';
+            }
 
             if ($config->isStrictManifestMode()) {
                 $this->error($message);
             } else {
                 $this->warn($message);
             }
+
+            $suggestion = $ownershipInspector->suggestedManifestEntry($entry);
+            $this->note(sprintf(
+                'Suggested manifest entry for %s: kind=%s, management=local, path=%s',
+                $entry['path'],
+                $suggestion['kind'],
+                $suggestion['path']
+            ));
         }
     }
 
@@ -326,6 +350,74 @@ final class EnvironmentDoctor
         $this->okIf($hasValidationWorkflow, 'Found a GitHub workflow that stages runtime output.', 'No GitHub workflow found that runs `wporg-updater.php stage-runtime`.');
     }
 
+    /**
+     * @param array<string, mixed> $dependency
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function sourceValidationRules(Config $config, array $dependency): array
+    {
+        $allowPaths = $this->translatedRuntimeAllowRulesForRoot($config, (string) $dependency['path']);
+
+        if (! $config->isStagedCleanValidationMode()) {
+            return [$allowPaths, [], []];
+        }
+
+        [$globalStripPaths, $globalStripFiles] = $this->translatedRuntimeStripRulesForRoot($config, (string) $dependency['path']);
+        $dependencyStripPaths = $config->shouldAllowStripOnStage($dependency) ? $config->dependencyStripPaths($dependency) : [];
+        $dependencyStripFiles = $config->shouldAllowStripOnStage($dependency) ? $config->dependencyStripFiles($dependency) : [];
+
+        return [
+            $allowPaths,
+            array_values(array_unique(array_merge($dependencyStripPaths, $globalStripPaths))),
+            array_values(array_unique(array_merge($dependencyStripFiles, $globalStripFiles))),
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function translatedRuntimeAllowRulesForRoot(Config $config, string $rootPath): array
+    {
+        $allowPaths = [];
+
+        foreach ((array) $config->runtime['allow_runtime_paths'] as $allowPath) {
+            if ($allowPath === $rootPath) {
+                $allowPaths[] = '';
+                continue;
+            }
+
+            if (str_starts_with($allowPath, $rootPath . '/')) {
+                $allowPaths[] = substr($allowPath, strlen($rootPath) + 1);
+            }
+        }
+
+        return array_values(array_unique($allowPaths));
+    }
+
+    /**
+     * @return array{0:list<string>,1:list<string>}
+     */
+    private function translatedRuntimeStripRulesForRoot(Config $config, string $rootPath): array
+    {
+        $stripPaths = [];
+
+        foreach ((array) $config->runtime['strip_paths'] as $stripPath) {
+            if ($stripPath === $rootPath) {
+                $stripPaths[] = '';
+                continue;
+            }
+
+            if (str_starts_with($stripPath, $rootPath . '/')) {
+                $stripPaths[] = substr($stripPath, strlen($rootPath) + 1);
+            }
+        }
+
+        return [
+            array_values(array_unique($stripPaths)),
+            array_values(array_unique($config->stripFiles())),
+        ];
+    }
+
     private function isGitRepository(): bool
     {
         if (! $this->commandExists('git')) {
@@ -384,6 +476,11 @@ final class EnvironmentDoctor
     {
         $this->errors++;
         fwrite(STDOUT, "[error] " . $message . "\n");
+    }
+
+    private function note(string $message): void
+    {
+        fwrite(STDOUT, "[note] " . $message . "\n");
     }
 
     private function okIf(bool $condition, string $okMessage, string $errorMessage): void

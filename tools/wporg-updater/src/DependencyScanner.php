@@ -31,6 +31,17 @@ final class DependencyScanner
                 throw new RuntimeException(sprintf('Dependency path is not a directory: %s', $absolutePath));
             }
 
+            if ($kind === 'runtime-directory') {
+                return [
+                    'name' => (string) $dependency['name'],
+                    'version' => ($dependency['version'] ?? null) !== null ? (string) $dependency['version'] : null,
+                    'path' => $relativePath,
+                    'absolute_path' => $absolutePath,
+                    'main_file' => '',
+                    'kind' => $kind,
+                ];
+            }
+
             $mainFileRelative = ltrim((string) $dependency['main_file'], '/');
             $mainFile = $absolutePath . '/' . $mainFileRelative;
 

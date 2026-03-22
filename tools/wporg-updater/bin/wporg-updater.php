@@ -13,6 +13,7 @@ use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\ManifestWriter;
+use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
@@ -63,7 +64,9 @@ Usage:
   php tools/wporg-updater/bin/wporg-updater.php sync
   php tools/wporg-updater/bin/wporg-updater.php doctor [--repo-root=/path] [--github]
   php tools/wporg-updater/bin/wporg-updater.php stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
-  php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only] [--content-root=cms] [--force]
+  php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force]
+  php tools/wporg-updater/bin/wporg-updater.php suggest-manifest [--repo-root=/path]
+  php tools/wporg-updater/bin/wporg-updater.php format-manifest [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php pr-blocker
 
 Modes:
@@ -71,12 +74,14 @@ Modes:
   doctor            Validate the manifest, repo structure, runtime hygiene, and optional GitHub environment.
   stage-runtime     Assemble a clean runtime payload for image builds.
   scaffold-downstream  Create a manifest and workflow files from the bundled templates.
+  suggest-manifest  Print suggested manifest entries for undeclared runtime paths.
+  format-manifest   Rewrite the manifest into the normalized framework format.
   pr-blocker        Evaluate whether the current PR should remain blocked.
 
 Flags and environment:
   --repo-root=PATH       Override the repository root to inspect or update.
   --tool-path=PATH       Path from the downstream repo root to the wp-core-base checkout for scaffold mode.
-  --profile=PROFILE      Downstream scaffold profile: full-core or content-only.
+  --profile=PROFILE      Downstream scaffold profile or preset: full-core, content-only, content-only-default, content-only-migration, or content-only-local-mu.
   --content-root=PATH    Override the scaffolded content root.
   --output=PATH          Override the stage-runtime output path.
   --force                Overwrite scaffolded files when they already exist.
@@ -93,7 +98,7 @@ TEXT);
     }
 
     if ($mode === 'scaffold-downstream') {
-        $profile = $options['profile'] ?? 'content-only';
+        $profile = $options['profile'] ?? 'content-only-default';
         $contentRoot = $options['content-root'] ?? null;
         $scaffolder = new DownstreamScaffolder($frameworkRoot, $repoRoot);
         exit($scaffolder->scaffold((string) $toolPath, (string) $profile, is_string($contentRoot) ? $contentRoot : null, $force));
@@ -114,6 +119,17 @@ TEXT);
             fwrite(STDOUT, sprintf("- %s\n", $path));
         }
 
+        exit(0);
+    }
+
+    if ($mode === 'suggest-manifest') {
+        fwrite(STDOUT, (new ManifestSuggester($config))->render());
+        exit(0);
+    }
+
+    if ($mode === 'format-manifest') {
+        (new ManifestWriter())->write($config);
+        fwrite(STDOUT, sprintf("Formatted manifest: %s\n", $config->manifestPath));
         exit(0);
     }
 

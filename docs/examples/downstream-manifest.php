@@ -17,8 +17,10 @@ return [
     'runtime' => [
         'stage_dir' => '.wp-core-base/build/runtime',
         'manifest_mode' => 'strict',
-        'staged_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
-        'validated_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
+        'validation_mode' => 'source-clean',
+        'ownership_roots' => ['cms/plugins', 'cms/themes', 'cms/mu-plugins', 'cms/shared-assets'],
+        'staged_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'],
+        'validated_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'],
         'forbidden_paths' => [
             '.git',
             '.github',
@@ -50,6 +52,8 @@ return [
             'yarn.lock',
         ],
         'allow_runtime_paths' => [],
+        'strip_paths' => [],
+        'strip_files' => [],
     ],
     'github' => [
         'api_base' => getenv('GITHUB_API_URL') ?: 'https://api.github.com',
@@ -57,7 +61,7 @@ return [
     'automation' => [
         'base_branch' => null,
         'dry_run' => (bool) getenv('WPORG_UPDATE_DRY_RUN'),
-        'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
+        'managed_kinds' => ['plugin', 'theme'],
     ],
     'dependencies' => [
         [
@@ -124,6 +128,8 @@ return [
             'policy' => [
                 'class' => 'local-owned',
                 'allow_runtime_paths' => [],
+                'strip_paths' => [],
+                'strip_files' => ['README*', 'package.json'],
             ],
         ],
         [
@@ -145,6 +151,31 @@ return [
             'policy' => [
                 'class' => 'local-owned',
                 'allow_runtime_paths' => [],
+                'strip_paths' => [],
+                'strip_files' => [],
+            ],
+        ],
+        [
+            'name' => 'Shared Assets',
+            'slug' => 'shared-assets',
+            'kind' => 'runtime-directory',
+            'management' => 'local',
+            'source' => 'local',
+            'path' => 'cms/shared-assets',
+            'version' => null,
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => [],
+            'source_config' => [
+                'github_repository' => null,
+                'github_release_asset_pattern' => null,
+                'github_token_env' => null,
+            ],
+            'policy' => [
+                'class' => 'local-owned',
+                'allow_runtime_paths' => [],
+                'strip_paths' => [],
+                'strip_files' => [],
             ],
         ],
     ],

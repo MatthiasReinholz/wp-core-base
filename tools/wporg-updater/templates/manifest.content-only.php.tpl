@@ -16,9 +16,11 @@ return [
     ],
     'runtime' => [
         'stage_dir' => '.wp-core-base/build/runtime',
-        'manifest_mode' => 'strict',
-        'staged_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
-        'validated_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'],
+        'manifest_mode' => '__MANIFEST_MODE__',
+        'validation_mode' => '__VALIDATION_MODE__',
+        'ownership_roots' => __OWNERSHIP_ROOTS__,
+        'staged_kinds' => __STAGED_KINDS__,
+        'validated_kinds' => __VALIDATED_KINDS__,
         'forbidden_paths' => [
             '.git',
             '.github',
@@ -50,6 +52,8 @@ return [
             'yarn.lock',
         ],
         'allow_runtime_paths' => [],
+        'strip_paths' => [],
+        'strip_files' => [],
     ],
     'github' => [
         'api_base' => getenv('GITHUB_API_URL') ?: 'https://api.github.com',
@@ -57,7 +61,7 @@ return [
     'automation' => [
         'base_branch' => null,
         'dry_run' => false,
-        'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
+        'managed_kinds' => __MANAGED_KINDS__,
     ],
     'dependencies' => [
         // content-only repos should declare every managed dependency explicitly.
@@ -129,6 +133,8 @@ return [
         //     'policy' => [
         //         'class' => 'local-owned',
         //         'allow_runtime_paths' => [],
+        //         'strip_paths' => [],
+        //         'strip_files' => ['README*', 'package.json'],
         //     ],
         // ],
         // Example local single-file MU plugin:
@@ -151,6 +157,32 @@ return [
         //     'policy' => [
         //         'class' => 'local-owned',
         //         'allow_runtime_paths' => [],
+        //         'strip_paths' => [],
+        //         'strip_files' => [],
+        //     ],
+        // ],
+        // Example local runtime directory outside plugins/themes:
+        // [
+        //     'name' => 'Shared Assets',
+        //     'slug' => 'shared-assets',
+        //     'kind' => 'runtime-directory',
+        //     'management' => 'local',
+        //     'source' => 'local',
+        //     'path' => '__CONTENT_ROOT__/shared-assets',
+        //     'version' => null,
+        //     'checksum' => null,
+        //     'archive_subdir' => '',
+        //     'extra_labels' => [],
+        //     'source_config' => [
+        //         'github_repository' => null,
+        //         'github_release_asset_pattern' => null,
+        //         'github_token_env' => null,
+        //     ],
+        //     'policy' => [
+        //         'class' => 'local-owned',
+        //         'allow_runtime_paths' => [],
+        //         'strip_paths' => [],
+        //         'strip_files' => [],
         //     ],
         // ],
     ],

@@ -16,6 +16,7 @@ This README is written for people adopting `wp-core-base` in their own WordPress
 - scheduled GitHub update PRs for WordPress core and managed dependencies
 - support for WordPress.org and GitHub Release backed dependencies
 - support for project-owned custom code as first-class `local` runtime entries
+- optional staged-clean runtime assembly for richer local source trees
 - runtime staging for image-first or immutable deployment flows
 
 ## Start Here
@@ -55,13 +56,13 @@ php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-ba
 If you are onboarding a downstream repository and want the framework to generate the initial manifest and workflows:
 
 ```bash
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only --content-root=cms
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-default --content-root=cms
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
 ```
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
 
-The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, and runtime files owned directly by the downstream project.
+The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, runtime files, and runtime directories owned directly by the downstream project.
 
 ## Current Baseline
 

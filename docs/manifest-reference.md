@@ -59,6 +59,8 @@ Keys:
 
 - `stage_dir`
 - `manifest_mode`
+- `validation_mode`
+- `ownership_roots`
 - `staged_kinds`
 - `validated_kinds`
 - `forbidden_paths`
@@ -71,6 +73,11 @@ These define the runtime hygiene contract for staging and validation.
 
 - `strict`: undeclared runtime paths under the managed roots are validation errors and are not staged
 - `relaxed`: undeclared clean runtime paths under the managed roots are reported and may be staged as a migration aid
+
+`validation_mode` may be:
+
+- `source-clean`: source paths must already be runtime-clean
+- `staged-clean`: local source paths may contain strip-on-stage files, but staged output must be clean
 
 ## `github`
 
@@ -127,6 +134,7 @@ Each dependency entry supports:
   - `mu-plugin-package`
   - `mu-plugin-file`
   - `runtime-file`
+  - `runtime-directory`
 - `management` must be `managed`, `local`, or `ignored`
 - `source` must be `wordpress.org`, `github-release`, or `local`
 - `managed` entries must define `version` and `checksum`
@@ -134,6 +142,7 @@ Each dependency entry supports:
 - `ignored` entries are excluded from runtime staging
 - directory kinds require `main_file`
 - file kinds may omit `main_file`; when omitted, the file at `path` is the runtime entry
+- `runtime-directory` entries may be `local` or `ignored`, but are not updater-managed today
 
 ## Kind-Level Controls
 
@@ -144,6 +153,31 @@ The manifest separates update control from staging and validation:
 - `runtime.validated_kinds` controls which declared kinds get runtime hygiene and checksum enforcement
 
 This lets a downstream project stage `local` MU plugin files, for example, without allowing updater automation to manage them.
+
+## Ownership Roots
+
+`runtime.ownership_roots` controls where undeclared runtime-path detection runs.
+
+Defaults:
+
+- `plugins_root`
+- `themes_root`
+- `mu_plugins_root`
+
+You can add extra content roots such as:
+
+- `cms/languages`
+- `cms/shared-assets`
+
+Under custom ownership roots, undeclared directories are inferred as `runtime-directory` and undeclared files are inferred as `runtime-file`.
+
+## Strip-On-Stage Rules
+
+Use `runtime.strip_paths` and `runtime.strip_files` for global strip-on-stage rules.
+
+Use `dependencies[].policy.strip_paths` and `dependencies[].policy.strip_files` for local dependency-specific strip rules.
+
+Strip-on-stage is currently supported for `local` entries. Managed dependencies should arrive runtime-ready.
 
 ## Managed Versus Local
 
@@ -156,6 +190,7 @@ Use `local` for project-owned runtime code such as:
 - MU plugin packages
 - MU plugin files
 - explicitly tracked runtime files
+- runtime directories such as `cms/languages`
 
 `sync` never mutates `local` entries.
 
@@ -175,6 +210,13 @@ The token value itself should stay in environment or repository secrets, not in 
 Use `strict` when you want every runtime path under the managed roots to be declared in the manifest.
 
 Use `relaxed` when you are migrating an older repository and still need to surface undeclared runtime paths without blocking adoption immediately.
+
+## Helper Commands
+
+Useful CLI helpers:
+
+- `suggest-manifest`
+- `format-manifest`
 
 ## Example
 

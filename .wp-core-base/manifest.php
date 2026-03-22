@@ -20,6 +20,13 @@ return array (
   array (
     'stage_dir' => '.wp-core-base/build/runtime',
     'manifest_mode' => 'strict',
+    'validation_mode' => 'source-clean',
+    'ownership_roots' => 
+    array (
+      0 => 'wp-content/plugins',
+      1 => 'wp-content/themes',
+      2 => 'wp-content/mu-plugins',
+    ),
     'staged_kinds' => 
     array (
       0 => 'plugin',
@@ -27,6 +34,7 @@ return array (
       2 => 'mu-plugin-package',
       3 => 'mu-plugin-file',
       4 => 'runtime-file',
+      5 => 'runtime-directory',
     ),
     'validated_kinds' => 
     array (
@@ -35,6 +43,7 @@ return array (
       2 => 'mu-plugin-package',
       3 => 'mu-plugin-file',
       4 => 'runtime-file',
+      5 => 'runtime-directory',
     ),
     'forbidden_paths' => 
     array (
@@ -73,6 +82,12 @@ return array (
       0 => 'wp-content/plugins/hello.php',
       1 => 'wp-content/plugins/index.php',
       2 => 'wp-content/themes/index.php',
+    ),
+    'strip_paths' => 
+    array (
+    ),
+    'strip_files' => 
+    array (
     ),
   ),
   'github' => 

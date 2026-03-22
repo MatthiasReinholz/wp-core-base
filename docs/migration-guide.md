@@ -64,8 +64,16 @@ then normalize it in this order:
 If the repo has too much undeclared runtime code to switch directly to strict ownership, start with:
 
 - `runtime.manifest_mode: relaxed`
+- `php tools/wporg-updater/bin/wporg-updater.php suggest-manifest`
 
 Then move paths into explicit `managed`, `local`, or `ignored` entries until you can switch back to `strict`.
+
+If local source trees contain deployment-irrelevant files that you still want to keep in Git, consider:
+
+- `runtime.validation_mode: staged-clean`
+- `runtime.strip_paths`
+- `runtime.strip_files`
+- dependency-level `policy.strip_paths` and `policy.strip_files`
 
 ## What To Avoid
 

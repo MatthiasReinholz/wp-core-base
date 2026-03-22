@@ -9,14 +9,14 @@ use RuntimeException;
 final class Config
 {
     private const MANAGED_KINDS = ['plugin', 'theme', 'mu-plugin-package'];
-    private const RUNTIME_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'];
-    private const ALL_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file'];
+    private const RUNTIME_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'];
+    private const ALL_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'];
 
     /**
      * @param list<array<string, mixed>> $dependencies
      * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
      * @param array{mode:string, enabled:bool} $core
-     * @param array{stage_dir:string, manifest_mode:string, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>} $runtime
+     * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>} $runtime
      * @param array{api_base:string} $github
      * @param array{base_branch:?string, dry_run:bool, managed_kinds:list<string>} $automation
      */
@@ -64,7 +64,7 @@ final class Config
         $defaultPaths = self::defaultPaths($profile);
         $paths = self::normalizePaths($data['paths'] ?? [], $defaultPaths);
         $core = self::normalizeCore($data['core'] ?? [], $profile);
-        $runtime = self::normalizeRuntime($data['runtime'] ?? []);
+        $runtime = self::normalizeRuntime($data['runtime'] ?? [], $paths);
         $github = self::normalizeGithub($data['github'] ?? []);
         $automation = self::normalizeAutomation($data['automation'] ?? []);
         $dependencies = self::normalizeDependencies($data['dependencies'] ?? [], $paths);
@@ -127,6 +127,26 @@ final class Config
         return $this->manifestMode() === 'relaxed';
     }
 
+    public function validationMode(): string
+    {
+        return $this->runtime['validation_mode'];
+    }
+
+    public function isSourceCleanValidationMode(): bool
+    {
+        return $this->validationMode() === 'source-clean';
+    }
+
+    public function isStagedCleanValidationMode(): bool
+    {
+        return $this->validationMode() === 'staged-clean';
+    }
+
+    public function ownershipRoots(): array
+    {
+        return $this->runtime['ownership_roots'];
+    }
+
     public function managedKinds(): array
     {
         return $this->automation['managed_kinds'];
@@ -140,6 +160,16 @@ final class Config
     public function validatedKinds(): array
     {
         return $this->runtime['validated_kinds'];
+    }
+
+    public function stripPaths(): array
+    {
+        return $this->runtime['strip_paths'];
+    }
+
+    public function stripFiles(): array
+    {
+        return $this->runtime['strip_files'];
     }
 
     public function isKindManagedEnabled(string $kind): bool
@@ -236,6 +266,22 @@ final class Config
             && $this->isKindValidated((string) $dependency['kind']);
     }
 
+    public function dependencyStripPaths(array $dependency): array
+    {
+        return (array) ($dependency['policy']['strip_paths'] ?? []);
+    }
+
+    public function dependencyStripFiles(array $dependency): array
+    {
+        return (array) ($dependency['policy']['strip_files'] ?? []);
+    }
+
+    public function shouldAllowStripOnStage(array $dependency): bool
+    {
+        return $dependency['management'] === 'local'
+            && ($this->dependencyStripPaths($dependency) !== [] || $this->dependencyStripFiles($dependency) !== []);
+    }
+
     public function stageDir(string $outputOverride = ''): string
     {
         if ($outputOverride !== '') {
@@ -251,7 +297,7 @@ final class Config
             'plugin' => $this->paths['plugins_root'],
             'theme' => $this->paths['themes_root'],
             'mu-plugin-package', 'mu-plugin-file' => $this->paths['mu_plugins_root'],
-            'runtime-file' => $this->paths['content_root'],
+            'runtime-file', 'runtime-directory' => $this->paths['content_root'],
             default => throw new RuntimeException(sprintf('Unknown dependency kind: %s', $kind)),
         };
     }
@@ -388,13 +434,31 @@ final class Config
 
     /**
      * @param array<string, mixed> $value
-     * @return array{stage_dir:string, manifest_mode:string, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>}
+     * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @return array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>}
      */
-    private static function normalizeRuntime(array $value): array
+    private static function normalizeRuntime(array $value, array $paths): array
     {
+        $ownershipRoots = self::normalizedPathList(
+            $value['ownership_roots'] ?? [
+                $paths['plugins_root'],
+                $paths['themes_root'],
+                $paths['mu_plugins_root'],
+            ],
+            'runtime.ownership_roots'
+        );
+
+        foreach ($ownershipRoots as $ownershipRoot) {
+            if (! self::pathStartsWith($ownershipRoot, $paths['content_root'])) {
+                throw new RuntimeException(sprintf('runtime.ownership_roots entry %s must live under paths.content_root.', $ownershipRoot));
+            }
+        }
+
         return [
             'stage_dir' => self::normalizedRelativePath($value['stage_dir'] ?? '.wp-core-base/build/runtime', 'runtime.stage_dir'),
             'manifest_mode' => self::enumValue($value['manifest_mode'] ?? 'strict', 'runtime.manifest_mode', ['strict', 'relaxed']),
+            'validation_mode' => self::enumValue($value['validation_mode'] ?? 'source-clean', 'runtime.validation_mode', ['source-clean', 'staged-clean']),
+            'ownership_roots' => array_values(array_unique($ownershipRoots)),
             'staged_kinds' => self::kindList($value['staged_kinds'] ?? self::RUNTIME_KINDS, 'runtime.staged_kinds'),
             'validated_kinds' => self::kindList($value['validated_kinds'] ?? self::RUNTIME_KINDS, 'runtime.validated_kinds'),
             'forbidden_paths' => self::stringList(
@@ -434,6 +498,8 @@ final class Config
                 'runtime.forbidden_files'
             ),
             'allow_runtime_paths' => self::normalizedPathList($value['allow_runtime_paths'] ?? [], 'runtime.allow_runtime_paths'),
+            'strip_paths' => self::normalizedPathList($value['strip_paths'] ?? [], 'runtime.strip_paths'),
+            'strip_files' => self::stringList($value['strip_files'] ?? [], 'runtime.strip_files'),
         ];
     }
 
@@ -483,7 +549,6 @@ final class Config
             $kind = self::enumValue($dependency['kind'] ?? null, sprintf('dependencies[%d].kind', (int) $index), self::ALL_KINDS);
             $management = self::enumValue($dependency['management'] ?? null, sprintf('dependencies[%d].management', (int) $index), ['managed', 'local', 'ignored']);
             $source = self::enumValue($dependency['source'] ?? null, sprintf('dependencies[%d].source', (int) $index), ['wordpress.org', 'github-release', 'local']);
-
             $path = self::normalizedRelativePath($dependency['path'] ?? null, sprintf('dependencies[%s].path', $slug));
             $mainFile = self::nullableNormalizedRelativePath($dependency['main_file'] ?? null, sprintf('dependencies[%s].main_file', $slug));
             $name = self::string($dependency['name'] ?? $slug, sprintf('dependencies[%s].name', $slug));
@@ -494,7 +559,7 @@ final class Config
             $sourceConfig = is_array($dependency['source_config'] ?? null) ? $dependency['source_config'] : [];
             $policy = is_array($dependency['policy'] ?? null) ? $dependency['policy'] : [];
 
-            if (self::isDirectoryKindValue($kind) && $mainFile === null) {
+            if (in_array($kind, ['plugin', 'theme', 'mu-plugin-package'], true) && $mainFile === null) {
                 throw new RuntimeException(sprintf('Dependency %s must define main_file for kind %s.', $slug, $kind));
             }
 
@@ -514,6 +579,10 @@ final class Config
                 throw new RuntimeException(sprintf('WordPress.org source is only supported for plugin and theme dependencies (%s).', $slug));
             }
 
+            if ($kind === 'runtime-directory' && $management === 'managed') {
+                throw new RuntimeException(sprintf('runtime-directory entries may not be updater-managed today (%s).', $slug));
+            }
+
             $policyClass = self::string(
                 $policy['class'] ?? self::defaultPolicyClass($management, $source),
                 sprintf('dependencies[%s].policy.class', $slug)
@@ -527,6 +596,19 @@ final class Config
                     $management,
                     $source
                 ));
+            }
+
+            $stripPaths = self::normalizedPathList(
+                $policy['strip_paths'] ?? [],
+                sprintf('dependencies[%s].policy.strip_paths', $slug)
+            );
+            $stripFiles = self::stringList(
+                $policy['strip_files'] ?? [],
+                sprintf('dependencies[%s].policy.strip_files', $slug)
+            );
+
+            if (($stripPaths !== [] || $stripFiles !== []) && $management !== 'local') {
+                throw new RuntimeException(sprintf('Strip-on-stage rules are only supported for local dependencies (%s).', $slug));
             }
 
             $githubRepository = self::nullableString($sourceConfig['github_repository'] ?? null);
@@ -571,6 +653,8 @@ final class Config
                         $policy['allow_runtime_paths'] ?? [],
                         sprintf('dependencies[%s].policy.allow_runtime_paths', $slug)
                     ),
+                    'strip_paths' => $stripPaths,
+                    'strip_files' => $stripFiles,
                 ],
                 'component_key' => sprintf('%s:%s:%s', $kind, $source, $slug),
             ];
@@ -585,7 +669,7 @@ final class Config
             'plugin' => $paths['plugins_root'],
             'theme' => $paths['themes_root'],
             'mu-plugin-package', 'mu-plugin-file' => $paths['mu_plugins_root'],
-            'runtime-file' => $paths['content_root'],
+            'runtime-file', 'runtime-directory' => $paths['content_root'],
             default => throw new RuntimeException(sprintf('Unsupported dependency kind %s.', $kind)),
         };
     }
@@ -599,11 +683,6 @@ final class Config
             $management === 'ignored' && $source === 'local' => 'ignored',
             default => throw new RuntimeException(sprintf('Invalid management/source combination: %s/%s', $management, $source)),
         };
-    }
-
-    private static function isDirectoryKindValue(string $kind): bool
-    {
-        return ! in_array($kind, ['mu-plugin-file', 'runtime-file'], true);
     }
 
     private static function string(mixed $value, string $key): string

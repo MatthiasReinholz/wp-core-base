@@ -60,6 +60,7 @@ final class Updater
             'kind:mu-plugin-package' => ['color' => 'fbca04', 'description' => 'MU plugin package dependency'],
             'kind:mu-plugin-file' => ['color' => 'c5def5', 'description' => 'MU plugin file dependency'],
             'kind:runtime-file' => ['color' => 'bfd4f2', 'description' => 'Runtime file dependency'],
+            'kind:runtime-directory' => ['color' => 'd4c5f9', 'description' => 'Runtime directory dependency'],
             'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from wordpress.org'],
             'source:github-release' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
             'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],

@@ -28,6 +28,8 @@ The CLI supports:
 - `sync`
 - `stage-runtime`
 - `scaffold-downstream`
+- `suggest-manifest`
+- `format-manifest`
 - `pr-blocker`
 
 ## Sync Behavior
@@ -75,6 +77,8 @@ Key behavior:
 - `stage-runtime` assembles the runtime payload and validates the staged tree
 - undeclared runtime paths are errors in `strict` mode and warnings in `relaxed` mode
 - file-level runtime entries such as `mu-plugin-file` and `runtime-file` are supported
+- content-root runtime directories can be modeled explicitly as `runtime-directory`
+- staged-clean validation can strip configured files and directories from local code before final runtime validation
 
 ## Pull Request Behavior
 
@@ -99,13 +103,28 @@ Profiles:
 
 - `full-core`
 - `content-only`
+- `content-only-default`
+- `content-only-migration`
+- `content-only-local-mu`
 
 Scaffolded manifests include:
 
 - `automation.managed_kinds`
 - `runtime.manifest_mode`
+- `runtime.validation_mode`
+- `runtime.ownership_roots`
 - `runtime.staged_kinds`
 - `runtime.validated_kinds`
+
+## Managed Dependency Packaging Contract
+
+Managed dependencies should arrive as runtime-ready artifacts.
+
+Recommended discipline:
+
+- publish release archives, not raw source checkouts, as deployable inputs
+- exclude docs, tests, screenshots, and build-only files from managed runtime artifacts
+- use strip-on-stage primarily for `local` downstream-owned code, not as the normal packaging strategy for managed releases
 
 ## Tests
 

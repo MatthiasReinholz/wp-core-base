@@ -14,18 +14,15 @@ final class DownstreamScaffolder
     ) {
     }
 
-    public function scaffold(string $toolPath, string $profile = 'content-only', ?string $contentRoot = null, bool $force = false): int
+    public function scaffold(string $toolPath, string $profile = 'content-only-default', ?string $contentRoot = null, bool $force = false): int
     {
         if (! is_dir($this->repoRoot)) {
             throw new RuntimeException(sprintf('Repository root does not exist: %s', $this->repoRoot));
         }
 
-        if (! in_array($profile, ['full-core', 'content-only'], true)) {
-            throw new RuntimeException(sprintf('Invalid scaffold profile: %s', $profile));
-        }
-
-        $contentRoot = $this->normalizeContentRoot($contentRoot ?? ($profile === 'content-only' ? 'cms' : 'wp-content'));
-        $paths = $this->pathsForProfile($profile, $contentRoot);
+        $preset = $this->presetForProfile($profile);
+        $contentRoot = $this->normalizeContentRoot($contentRoot ?? ($preset['profile'] === 'content-only' ? 'cms' : 'wp-content'));
+        $paths = $this->pathsForProfile($preset['profile'], $contentRoot);
 
         $this->printHeading('wp-core-base scaffold-downstream');
 
@@ -36,16 +33,22 @@ final class DownstreamScaffolder
 
         $writes = [
             [
-                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/manifest.' . $profile . '.php.tpl',
+                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/manifest.' . $preset['template'] . '.php.tpl',
                 'target' => $this->repoRoot . '/.wp-core-base/manifest.php',
                 'replacements' => [
-                    '__PROFILE__' => $profile,
+                    '__PROFILE__' => $preset['profile'],
                     '__CONTENT_ROOT__' => $paths['content_root'],
                     '__PLUGINS_ROOT__' => $paths['plugins_root'],
                     '__THEMES_ROOT__' => $paths['themes_root'],
                     '__MU_PLUGINS_ROOT__' => $paths['mu_plugins_root'],
-                    '__CORE_MODE__' => $profile === 'content-only' ? 'external' : 'managed',
-                    '__CORE_ENABLED__' => $profile === 'content-only' ? 'false' : 'true',
+                    '__CORE_MODE__' => $preset['core_mode'],
+                    '__CORE_ENABLED__' => $preset['core_enabled'] ? 'true' : 'false',
+                    '__MANIFEST_MODE__' => $preset['manifest_mode'],
+                    '__VALIDATION_MODE__' => $preset['validation_mode'],
+                    '__OWNERSHIP_ROOTS__' => $this->exportInlineArray($preset['ownership_roots']),
+                    '__MANAGED_KINDS__' => $this->exportInlineArray($preset['managed_kinds']),
+                    '__STAGED_KINDS__' => $this->exportInlineArray($preset['staged_kinds']),
+                    '__VALIDATED_KINDS__' => $this->exportInlineArray($preset['validated_kinds']),
                 ],
             ],
             [
@@ -81,7 +84,7 @@ final class DownstreamScaffolder
         fwrite(STDOUT, "Next steps:\n");
         fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $doctorCommand));
-        fwrite(STDOUT, "[next] Classify your runtime trees as managed, local, or ignored before enabling the scheduled workflow.\n");
+        fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 
         return 0;
     }
@@ -166,6 +169,61 @@ final class DownstreamScaffolder
             trim($normalized, '/'),
             $mode
         );
+    }
+
+    /**
+     * @return array{template:string, profile:string, core_mode:string, core_enabled:bool, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, managed_kinds:list<string>, staged_kinds:list<string>, validated_kinds:list<string>}
+     */
+    private function presetForProfile(string $profile): array
+    {
+        return match ($profile) {
+            'full-core' => [
+                'template' => 'full-core',
+                'profile' => 'full-core',
+                'core_mode' => 'managed',
+                'core_enabled' => true,
+                'manifest_mode' => 'strict',
+                'validation_mode' => 'source-clean',
+                'ownership_roots' => ['__PLUGINS_ROOT__', '__THEMES_ROOT__', '__MU_PLUGINS_ROOT__'],
+                'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
+                'staged_kinds' => Config::runtimeKinds(),
+                'validated_kinds' => Config::runtimeKinds(),
+            ],
+            'content-only', 'content-only-default', 'content-only-local-mu' => [
+                'template' => 'content-only',
+                'profile' => 'content-only',
+                'core_mode' => 'external',
+                'core_enabled' => false,
+                'manifest_mode' => 'strict',
+                'validation_mode' => 'source-clean',
+                'ownership_roots' => ['__PLUGINS_ROOT__', '__THEMES_ROOT__', '__MU_PLUGINS_ROOT__'],
+                'managed_kinds' => ['plugin', 'theme'],
+                'staged_kinds' => Config::runtimeKinds(),
+                'validated_kinds' => Config::runtimeKinds(),
+            ],
+            'content-only-migration' => [
+                'template' => 'content-only',
+                'profile' => 'content-only',
+                'core_mode' => 'external',
+                'core_enabled' => false,
+                'manifest_mode' => 'relaxed',
+                'validation_mode' => 'source-clean',
+                'ownership_roots' => ['__PLUGINS_ROOT__', '__THEMES_ROOT__', '__MU_PLUGINS_ROOT__'],
+                'managed_kinds' => ['plugin', 'theme'],
+                'staged_kinds' => Config::runtimeKinds(),
+                'validated_kinds' => Config::runtimeKinds(),
+            ],
+            default => throw new RuntimeException(sprintf('Invalid scaffold profile: %s', $profile)),
+        };
+    }
+
+    /**
+     * @param list<string> $items
+     */
+    private function exportInlineArray(array $items): string
+    {
+        $quoted = array_map(static fn (string $item): string => "'" . $item . "'", $items);
+        return '[' . implode(', ', $quoted) . ']';
     }
 
     private function printHeading(string $heading): void

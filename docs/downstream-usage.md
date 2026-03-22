@@ -60,6 +60,8 @@ Use `local` when:
 
 `local` is a normal downstream ownership model. It is expected that many real projects will keep substantial custom runtime code in `local` entries.
 
+This framework is tooling, not a repo-ownership layer. Manual additions are normal as long as they are modeled clearly in the manifest.
+
 Use `ignored` when:
 
 - the path should be documented in the manifest
@@ -71,6 +73,7 @@ Use these kinds when a whole directory is not the right shape:
 
 - `mu-plugin-file`
 - `runtime-file`
+- `runtime-directory`
 
 This is especially useful for single-file MU plugins in `mu-plugins/`.
 
@@ -82,6 +85,40 @@ This is especially useful for single-file MU plugins in `mu-plugins/`.
 - `relaxed`: undeclared clean paths are reported and may still be staged as a migration aid
 
 Use `strict` as the steady-state default. Use `relaxed` only while migrating mixed-source repositories toward explicit manifest ownership.
+
+## Source-Clean Versus Staged-Clean
+
+`runtime.validation_mode` controls where cleanliness is enforced.
+
+- `source-clean`: repo paths themselves must already be deployable
+- `staged-clean`: local paths may keep strip-on-stage files, but staged output must be clean
+
+Use `staged-clean` when local-owned code legitimately contains source-adjacent files like `README.md`, tests, or build metadata.
+
+## Strip-On-Stage
+
+Use strip-on-stage when local source trees are intentionally richer than the runtime payload.
+
+Available knobs:
+
+- `runtime.strip_paths`
+- `runtime.strip_files`
+- `dependencies[].policy.strip_paths`
+- `dependencies[].policy.strip_files`
+
+Managed dependencies should still arrive runtime-ready. Strip-on-stage is primarily for `local` code.
+
+## Ownership Roots
+
+`runtime.ownership_roots` defines where undeclared runtime-path inspection runs.
+
+Defaults cover:
+
+- plugins
+- themes
+- MU plugins
+
+You can extend them with content-root paths like `cms/languages` or `cms/shared-assets`.
 
 ## Kind-Level Controls
 
@@ -115,6 +152,15 @@ Use the staged directory as the input to:
 - immutable artifact builds
 
 Do not build release artifacts from the raw repository tree when runtime staging is part of your contract.
+
+## Helper Commands
+
+Useful migration helpers:
+
+```bash
+php tools/wporg-updater/bin/wporg-updater.php suggest-manifest
+php tools/wporg-updater/bin/wporg-updater.php format-manifest
+```
 
 ## Daily Commands
 

@@ -30,6 +30,8 @@ If you are contributing to `wp-core-base` itself, use [contributing.md](contribu
 
 Project-owned plugins, themes, MU plugins, and runtime files can stay downstream-owned as `local` entries.
 
+That also applies to runtime directories such as `cms/languages` or shared content-root asset trees.
+
 ## Full-Core Project From Scratch
 
 Use this model when your downstream repository should contain WordPress core directly.
@@ -66,7 +68,7 @@ This is the right fit for:
 Fastest bootstrap:
 
 ```bash
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only --content-root=cms
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-default --content-root=cms
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
 ```
 
@@ -77,15 +79,23 @@ Then:
 3. use `management: local` for repo-owned code that the updater must never replace
 4. use `management: ignored` only for paths you intentionally want outside runtime staging
 5. keep `runtime.manifest_mode` at `strict` if you want full manifest ownership from day one, or set it to `relaxed` temporarily while migrating mixed-source trees
-5. run:
+6. keep `validation_mode` at `source-clean` if your source trees are already runtime-ready, or switch to `staged-clean` when local code needs strip-on-stage rules
+7. run:
 
 ```bash
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 ```
 
-6. point your image build at the staged runtime directory instead of the raw working tree
+8. point your image build at the staged runtime directory instead of the raw working tree
 
 Use `local` freely. It is the intended way to keep custom plugins, themes, MU plugin files, and other downstream-owned runtime code in the project.
+
+If you are migrating a mixed repository, these helper commands are useful:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php suggest-manifest --repo-root=.
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php format-manifest --repo-root=.
+```
 
 ## Existing Git-Managed Project
 

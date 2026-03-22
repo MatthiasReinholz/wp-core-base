@@ -47,7 +47,16 @@ final class RuntimeStager
 
             $relativePath = (string) $dependency['path'];
             $source = $this->config->repoRoot . '/' . $relativePath;
-            $this->runtimeInspector->assertPathIsClean($source, (array) $dependency['policy']['allow_runtime_paths']);
+            [$globalAllowPaths, $globalStripPaths, $globalStripFiles] = $this->translatedRuntimeRulesForRoot($relativePath);
+            [$sourceStripPaths, $sourceStripFiles] = $this->sourceValidationStripRules($dependency, $globalStripPaths, $globalStripFiles);
+
+            $this->runtimeInspector->assertPathIsClean(
+                $source,
+                array_values(array_unique(array_merge((array) $dependency['policy']['allow_runtime_paths'], $globalAllowPaths))),
+                [],
+                $sourceStripPaths,
+                $sourceStripFiles
+            );
 
             if ($dependency['management'] === 'managed') {
                 $checksum = $this->runtimeInspector->computeChecksum($source);
@@ -62,31 +71,59 @@ final class RuntimeStager
                 }
             }
 
-            $this->runtimeInspector->copyPath($source, $absoluteOutput . '/' . $relativePath);
+            $destination = $absoluteOutput . '/' . $relativePath;
+            $this->runtimeInspector->copyPath($source, $destination);
+            $this->runtimeInspector->stripPath(
+                $destination,
+                array_values(array_unique(array_merge($this->config->dependencyStripPaths($dependency), $globalStripPaths))),
+                array_values(array_unique(array_merge($this->config->dependencyStripFiles($dependency), $globalStripFiles)))
+            );
             $stagedPaths[] = $relativePath;
         }
 
-        if ($this->config->isKindStaged('runtime-file')) {
-            foreach ((new RuntimeOwnershipInspector($this->config))->allowedRuntimePaths() as $path) {
+        $ownershipInspector = new RuntimeOwnershipInspector($this->config);
+
+        if ($this->config->isKindStaged('runtime-file') || $this->config->isKindStaged('runtime-directory')) {
+            foreach ($ownershipInspector->allowedRuntimePaths() as $path) {
                 if (! file_exists($path['absolute_path']) && ! is_link($path['absolute_path'])) {
                     continue;
                 }
 
-                $translatedAllowList = $this->translatedAllowPathsForRoot($path['path'], (array) $this->config->runtime['allow_runtime_paths']);
-                $this->runtimeInspector->assertPathIsClean($path['absolute_path'], $translatedAllowList);
-                $this->runtimeInspector->copyPath($path['absolute_path'], $absoluteOutput . '/' . $path['path']);
+                [$allowPaths, $stripPaths, $stripFiles] = $this->translatedRuntimeRulesForRoot($path['path']);
+
+                $this->runtimeInspector->assertPathIsClean(
+                    $path['absolute_path'],
+                    $allowPaths,
+                    [],
+                    $this->config->isStagedCleanValidationMode() ? $stripPaths : [],
+                    $this->config->isStagedCleanValidationMode() ? $stripFiles : []
+                );
+
+                $destination = $absoluteOutput . '/' . $path['path'];
+                $this->runtimeInspector->copyPath($path['absolute_path'], $destination);
+                $this->runtimeInspector->stripPath($destination, $stripPaths, $stripFiles);
                 $stagedPaths[] = $path['path'];
             }
         }
 
         if ($this->config->isRelaxedManifestMode()) {
-            foreach ((new RuntimeOwnershipInspector($this->config))->undeclaredRuntimePaths() as $entry) {
+            foreach ($ownershipInspector->undeclaredRuntimePaths() as $entry) {
                 if (! $this->config->isKindStaged($entry['kind'])) {
                     continue;
                 }
 
-                $this->runtimeInspector->assertPathIsClean($entry['absolute_path']);
-                $this->runtimeInspector->copyPath($entry['absolute_path'], $absoluteOutput . '/' . $entry['path']);
+                [$allowPaths, $stripPaths, $stripFiles] = $this->translatedRuntimeRulesForRoot($entry['path']);
+                $this->runtimeInspector->assertPathIsClean(
+                    $entry['absolute_path'],
+                    $allowPaths,
+                    [],
+                    $this->config->isStagedCleanValidationMode() ? $stripPaths : [],
+                    $this->config->isStagedCleanValidationMode() ? $stripFiles : []
+                );
+
+                $destination = $absoluteOutput . '/' . $entry['path'];
+                $this->runtimeInspector->copyPath($entry['absolute_path'], $destination);
+                $this->runtimeInspector->stripPath($destination, $stripPaths, $stripFiles);
                 $stagedPaths[] = $entry['path'];
             }
         }
@@ -100,25 +137,60 @@ final class RuntimeStager
     }
 
     /**
-     * @param list<string> $allowPaths
-     * @return list<string>
+     * @param array<string, mixed> $dependency
+     * @return array{0:list<string>,1:list<string>}
      */
-    private function translatedAllowPathsForRoot(string $rootPath, array $allowPaths): array
+    private function sourceValidationStripRules(array $dependency, array $globalStripPaths, array $globalStripFiles): array
     {
-        $translated = [];
+        if (! $this->config->isStagedCleanValidationMode()) {
+            return [[], []];
+        }
 
-        foreach ($allowPaths as $allowPath) {
+        $dependencyStripPaths = $this->config->shouldAllowStripOnStage($dependency) ? $this->config->dependencyStripPaths($dependency) : [];
+        $dependencyStripFiles = $this->config->shouldAllowStripOnStage($dependency) ? $this->config->dependencyStripFiles($dependency) : [];
+
+        return [
+            array_values(array_unique(array_merge($dependencyStripPaths, $globalStripPaths))),
+            array_values(array_unique(array_merge($dependencyStripFiles, $globalStripFiles))),
+        ];
+    }
+
+    /**
+     * @return array{0:list<string>,1:list<string>,2:list<string>}
+     */
+    private function translatedRuntimeRulesForRoot(string $rootPath): array
+    {
+        $allowPaths = [];
+        $stripPaths = [];
+        $stripFiles = $this->config->stripFiles();
+
+        foreach ((array) $this->config->runtime['allow_runtime_paths'] as $allowPath) {
             if ($allowPath === $rootPath) {
-                $translated[] = '';
+                $allowPaths[] = '';
                 continue;
             }
 
             if (str_starts_with($allowPath, $rootPath . '/')) {
-                $translated[] = substr($allowPath, strlen($rootPath) + 1);
+                $allowPaths[] = substr($allowPath, strlen($rootPath) + 1);
             }
         }
 
-        return array_values(array_unique($translated));
+        foreach ((array) $this->config->runtime['strip_paths'] as $stripPath) {
+            if ($stripPath === $rootPath) {
+                $stripPaths[] = '';
+                continue;
+            }
+
+            if (str_starts_with($stripPath, $rootPath . '/')) {
+                $stripPaths[] = substr($stripPath, strlen($rootPath) + 1);
+            }
+        }
+
+        return [
+            array_values(array_unique($allowPaths)),
+            array_values(array_unique($stripPaths)),
+            array_values(array_unique($stripFiles)),
+        ];
     }
 
     /**

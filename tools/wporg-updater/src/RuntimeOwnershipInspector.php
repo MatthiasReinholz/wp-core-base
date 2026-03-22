@@ -41,11 +41,7 @@ final class RuntimeOwnershipInspector
 
                 $isSymlink = is_link($absolutePath);
                 $isDir = is_dir($absolutePath);
-                $kind = $spec['kind'];
-
-                if ($spec['root'] === $this->config->paths['mu_plugins_root']) {
-                    $kind = $isDir ? 'mu-plugin-package' : 'mu-plugin-file';
-                }
+                $kind = $this->inferredKindForSpec($spec, $isDir);
 
                 $entries[] = [
                     'path' => $relativePath,
@@ -61,6 +57,40 @@ final class RuntimeOwnershipInspector
         usort($entries, static fn (array $left, array $right): int => strcmp($left['path'], $right['path']));
 
         return $entries;
+    }
+
+    /**
+     * @param array{path:string, absolute_path:string, kind:string, root:string, is_dir:bool, is_symlink:bool} $entry
+     * @return array<string, mixed>
+     */
+    public function suggestedManifestEntry(array $entry): array
+    {
+        $basename = basename($entry['path']);
+
+        return [
+            'name' => $this->displayNameFromPath($basename),
+            'slug' => pathinfo($basename, PATHINFO_FILENAME) ?: $basename,
+            'kind' => $entry['kind'],
+            'management' => 'local',
+            'source' => 'local',
+            'path' => $entry['path'],
+            'main_file' => $this->suggestedMainFile($entry),
+            'version' => null,
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => [],
+            'source_config' => [
+                'github_repository' => null,
+                'github_release_asset_pattern' => null,
+                'github_token_env' => null,
+            ],
+            'policy' => [
+                'class' => 'local-owned',
+                'allow_runtime_paths' => [],
+                'strip_paths' => [],
+                'strip_files' => [],
+            ],
+        ];
     }
 
     /**
@@ -85,11 +115,51 @@ final class RuntimeOwnershipInspector
      */
     private function rootSpecifications(): array
     {
-        return [
-            ['root' => $this->config->paths['plugins_root'], 'kind' => 'plugin'],
-            ['root' => $this->config->paths['themes_root'], 'kind' => 'theme'],
-            ['root' => $this->config->paths['mu_plugins_root'], 'kind' => 'mu-plugin-package'],
-        ];
+        $specs = [];
+
+        foreach ($this->config->ownershipRoots() as $root) {
+            $kind = match ($root) {
+                $this->config->paths['plugins_root'] => 'plugin',
+                $this->config->paths['themes_root'] => 'theme',
+                $this->config->paths['mu_plugins_root'] => 'mu-root',
+                default => 'runtime-root',
+            };
+
+            $specs[] = [
+                'root' => $root,
+                'kind' => $kind,
+            ];
+        }
+
+        return $specs;
+    }
+
+    private function inferredKindForSpec(array $spec, bool $isDir): string
+    {
+        return match ($spec['kind']) {
+            'plugin' => 'plugin',
+            'theme' => 'theme',
+            'mu-root' => $isDir ? 'mu-plugin-package' : 'mu-plugin-file',
+            default => $isDir ? 'runtime-directory' : 'runtime-file',
+        };
+    }
+
+    private function suggestedMainFile(array $entry): ?string
+    {
+        return match ($entry['kind']) {
+            'plugin', 'theme', 'mu-plugin-package' => null,
+            'mu-plugin-file', 'runtime-file' => null,
+            'runtime-directory' => null,
+            default => null,
+        };
+    }
+
+    private function displayNameFromPath(string $basename): string
+    {
+        $name = preg_replace('/\.[^.]+$/', '', $basename) ?? $basename;
+        $name = str_replace(['-', '_'], ' ', $name);
+        $name = preg_replace('/\s+/', ' ', $name) ?? $name;
+        return ucwords(trim($name));
     }
 
     /**
