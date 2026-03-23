@@ -9,6 +9,7 @@ use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
+use WpOrgPluginUpdater\FrameworkReleasePreparer;
 use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\GitHubReleaseClient;
@@ -160,6 +161,26 @@ $releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/1
 $assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
 $assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v1.0.0', 'Expected framework release verification to succeed.');
+
+$releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
+mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);
+mkdir($releasePrepRoot . '/docs/releases', 0777, true);
+(new FrameworkWriter())->write($frameworkConfig->withInstalledRelease(
+    version: $frameworkConfig->version,
+    wordPressCoreVersion: $frameworkConfig->baseline['wordpress_core'],
+    managedComponents: $frameworkConfig->baseline['managed_components'],
+    managedFiles: $frameworkConfig->managedFiles(),
+    repoRoot: $releasePrepRoot,
+    path: $releasePrepRoot . '/.wp-core-base/framework.php',
+));
+$preparedRelease = (new FrameworkReleasePreparer($releasePrepRoot))->prepare('patch');
+$assert($preparedRelease['version'] === 'v1.0.1', 'Expected prepare-framework-release to derive the next patch version.');
+$assert($preparedRelease['release_notes_created'] === true, 'Expected prepare-framework-release to scaffold release notes.');
+$preparedFramework = FrameworkConfig::load($releasePrepRoot);
+$assert($preparedFramework->version === '1.0.1', 'Expected prepare-framework-release to bump framework.php.');
+$preparedNotes = (string) file_get_contents($releasePrepRoot . '/docs/releases/1.0.1.md');
+$assert($preparedNotes !== '', 'Expected scaffolded release notes to be written.');
+$assert(FrameworkReleaseNotes::missingRequiredSections($preparedNotes) === [], 'Expected scaffolded release notes to include required sections.');
 
 $config = Config::load($repoRoot);
 $assert($config->profile === 'full-core', 'Expected repository manifest to load as full-core.');
@@ -650,6 +671,7 @@ mkdir($tempScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
 $scaffoldedManifest = (string) file_get_contents($tempScaffoldRoot . '/.wp-core-base/manifest.php');
 $scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+$scaffoldedBlocker = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
 $scaffoldedValidate = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml');
 $assert(str_contains($scaffoldedManifest, "'profile' => 'content-only'"), 'Expected scaffolded manifest to set the requested profile.');
 $assert(str_contains($scaffoldedManifest, "'content_root' => 'cms'"), 'Expected scaffolded manifest to set the requested content root.');
@@ -660,6 +682,7 @@ $assert(str_contains($scaffoldedManifest, "'managed_kinds' => ["), 'Expected sca
 $assert(str_contains($scaffoldedManifest, "'kind' => 'mu-plugin-file'"), 'Expected scaffolded manifest to document local MU plugin files.');
 $assert(str_contains($scaffoldedManifest, "'kind' => 'runtime-directory'"), 'Expected scaffolded manifest to document runtime directories.');
 $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
+$assert(str_contains($scaffoldedBlocker, 'contents: read'), 'Expected scaffolded blocker workflow to grant contents: read for actions/checkout.');
 $assert(str_contains($scaffoldedValidate, 'stage-runtime'), 'Expected scaffolded validation workflow to stage runtime output.');
 $scaffoldedFramework = FrameworkConfig::load($tempScaffoldRoot);
 $assert($scaffoldedFramework->distributionPath() === 'vendor/wp-core-base', 'Expected scaffolded framework metadata to point at the vendored framework path.');

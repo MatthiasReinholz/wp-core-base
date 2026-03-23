@@ -11,6 +11,7 @@ use WpOrgPluginUpdater\EnvironmentDoctor;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseClient;
+use WpOrgPluginUpdater\FrameworkReleasePreparer;
 use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkSyncer;
 use WpOrgPluginUpdater\GitCommandRunner;
@@ -71,6 +72,7 @@ Usage:
   php tools/wporg-updater/bin/wporg-updater.php stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
   php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force]
   php tools/wporg-updater/bin/wporg-updater.php framework-sync [--repo-root=/path] [--check-only]
+  php tools/wporg-updater/bin/wporg-updater.php prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
   php tools/wporg-updater/bin/wporg-updater.php release-verify [--repo-root=/path] [--tag=v1.0.0]
   php tools/wporg-updater/bin/wporg-updater.php suggest-manifest [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php format-manifest [--repo-root=/path]
@@ -82,6 +84,7 @@ Modes:
   stage-runtime     Assemble a clean runtime payload for image builds.
   scaffold-downstream  Create a manifest and workflow files from the bundled templates.
   framework-sync    Update the vendored wp-core-base framework snapshot from GitHub Releases.
+  prepare-framework-release  Bump framework release metadata and scaffold release notes for a release PR.
   release-verify    Validate framework release metadata and release notes before publishing.
   suggest-manifest  Print suggested manifest entries for undeclared runtime paths.
   format-manifest   Rewrite the manifest into the normalized framework format.
@@ -94,7 +97,9 @@ Flags and environment:
   --content-root=PATH    Override the scaffolded content root.
   --output=PATH          Override the stage-runtime output path.
   --check-only           Print framework update availability without changing files.
+  --release-type=TYPE    Release bump type for prepare-framework-release: patch, minor, major, or custom.
   --tag=TAG              Expected release tag for release-verify mode.
+  --version=VERSION      Custom release version for prepare-framework-release.
   --force                Overwrite scaffolded files when they already exist.
   WPORG_REPO_ROOT        Environment alternative to --repo-root.
   WPORG_UPDATE_DRY_RUN   Enable dry-run behavior for sync mode.
@@ -112,6 +117,26 @@ TEXT);
         $tag = isset($options['tag']) && is_string($options['tag']) ? $options['tag'] : null;
         $resolvedTag = (new FrameworkReleaseVerifier($repoRoot))->verify($tag);
         fwrite(STDOUT, sprintf("Release verification passed for %s\n", $resolvedTag));
+        exit(0);
+    }
+
+    if ($mode === 'prepare-framework-release') {
+        $releaseType = $options['release-type'] ?? null;
+
+        if (! is_string($releaseType) || $releaseType === '') {
+            throw new RuntimeException('prepare-framework-release requires --release-type=patch|minor|major|custom.');
+        }
+
+        $customVersion = isset($options['version']) && is_string($options['version']) ? $options['version'] : null;
+        $result = (new FrameworkReleasePreparer($repoRoot))->prepare($releaseType, $customVersion);
+
+        fwrite(STDOUT, sprintf("Prepared framework release %s\n", $result['version']));
+        fwrite(STDOUT, sprintf("Release notes: %s\n", $result['release_notes_path']));
+
+        if ($result['release_notes_created']) {
+            fwrite(STDOUT, "Release notes template created.\n");
+        }
+
         exit(0);
     }
 

@@ -10,6 +10,7 @@ on:
       - ready_for_review
 
 permissions:
+  contents: read
   pull-requests: read
   issues: read
 

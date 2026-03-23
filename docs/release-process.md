@@ -31,12 +31,11 @@ The release-notes file must contain:
 
 ## Maintainer Flow
 
-1. prepare a normal PR that updates:
-   - `.wp-core-base/framework.php`
-   - `docs/releases/<version>.md`
-   - any user-facing baseline references that changed
-2. merge that PR only after the normal CI checks pass on the protected default branch
-3. publish the release through the manual GitHub Actions release workflow
+1. run the manual `prepare-wp-core-base-release` workflow
+2. review the generated `release/vX.Y.Z` pull request like any normal code change
+3. merge that release PR only after the normal CI checks pass on the protected default branch
+4. `finalize-wp-core-base-release` creates and pushes the annotated tag automatically
+5. `release-wp-core-base` runs from that tag and publishes the GitHub Release asset
 
 Do not cut ad hoc tags by hand.
 
@@ -61,13 +60,13 @@ php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.
 
 ## GitHub Flow
 
-The release workflow is intentionally hybrid-gated:
+The release flow is intentionally staged:
 
-- CI is automated
-- publishing is manual through `workflow_dispatch`
-- the workflow checks out the protected default branch, re-runs the release gates, creates the annotated tag, and publishes the GitHub Release
+- `prepare-wp-core-base-release` derives the version bump, updates `.wp-core-base/framework.php`, scaffolds `docs/releases/<version>.md` when needed, and opens `release/vX.Y.Z`
+- `finalize-wp-core-base-release` reacts only to a merged release PR into `main` and creates the annotated tag from the merge commit
+- `release-wp-core-base` runs only from pushed SemVer tags, re-runs the release gates, and publishes the vendorable snapshot asset `wp-core-base-vendor-snapshot.zip`
 
-The published release attaches the vendorable snapshot asset `wp-core-base-vendor-snapshot.zip`.
+This keeps release intent reviewable in a PR instead of bundling version bumps, tagging, and publishing into one manual step.
 
 ## Branch Protection Expectations
 
