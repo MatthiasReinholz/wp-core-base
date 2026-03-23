@@ -643,13 +643,13 @@ final class Updater
 
         $labels[] = 'automation:dependency-update';
         $labels[] = 'kind:' . $dependency['kind'];
-        $labels = array_values(array_unique(array_merge($labels, (array) ($dependency['extra_labels'] ?? []))));
+        $labels = LabelHelper::normalizeList(array_merge($labels, (array) ($dependency['extra_labels'] ?? [])));
 
         if ($blockedBy !== []) {
             $labels[] = 'status:blocked';
         }
 
-        $labels = array_values(array_unique($labels));
+        $labels = LabelHelper::normalizeList($labels);
         sort($labels);
         return $labels;
     }
@@ -702,7 +702,7 @@ final class Updater
             }
         }
 
-        return $definitions;
+        return LabelHelper::normalizeDefinitions($definitions);
     }
 
     /**

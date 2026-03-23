@@ -653,7 +653,9 @@ final class Config
             $version = self::nullableString($dependency['version'] ?? null);
             $checksum = self::nullableString($dependency['checksum'] ?? null);
             $archiveSubdir = self::nullableString($dependency['archive_subdir'] ?? '') ?? '';
-            $extraLabels = self::stringList($dependency['extra_labels'] ?? [], sprintf('dependencies[%s].extra_labels', $slug));
+            $extraLabels = LabelHelper::normalizeList(
+                self::stringList($dependency['extra_labels'] ?? [], sprintf('dependencies[%s].extra_labels', $slug))
+            );
             $sourceConfig = is_array($dependency['source_config'] ?? null) ? $dependency['source_config'] : [];
             $policy = is_array($dependency['policy'] ?? null) ? $dependency['policy'] : [];
 

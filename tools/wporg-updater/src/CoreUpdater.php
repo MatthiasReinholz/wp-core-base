@@ -171,7 +171,7 @@ final class CoreUpdater
             $labels[] = 'status:blocked';
         }
 
-        $labels = array_values(array_unique($labels));
+        $labels = LabelHelper::normalizeList($labels);
         sort($labels);
 
         $metadata['kind'] = 'core';
@@ -227,7 +227,7 @@ final class CoreUpdater
             $labels[] = 'status:blocked';
         }
 
-        $labels = array_values(array_unique($labels));
+        $labels = LabelHelper::normalizeList($labels);
         sort($labels);
 
         $metadata = [

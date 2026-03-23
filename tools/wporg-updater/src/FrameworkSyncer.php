@@ -424,7 +424,7 @@ final class FrameworkSyncer
             $labels[] = 'status:blocked';
         }
 
-        $labels = array_values(array_unique($labels));
+        $labels = LabelHelper::normalizeList($labels);
         sort($labels);
 
         return $labels;

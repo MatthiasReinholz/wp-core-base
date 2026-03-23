@@ -51,6 +51,8 @@ final class GitHubClient
      */
     public function ensureLabels(array $definitions): void
     {
+        $definitions = LabelHelper::normalizeDefinitions($definitions);
+
         if ($this->dryRun) {
             fwrite(STDOUT, "[dry-run] Ensuring GitHub labels\n");
             return;
@@ -154,13 +156,15 @@ final class GitHubClient
      */
     public function setLabels(int $issueNumber, array $labels): void
     {
+        $labels = LabelHelper::normalizeList($labels);
+
         if ($this->dryRun) {
             fwrite(STDOUT, sprintf("[dry-run] Set labels on PR #%d: %s\n", $issueNumber, implode(', ', $labels)));
             return;
         }
 
         $this->requestJson('PUT', sprintf('/repos/%s/issues/%d/labels', $this->repository, $issueNumber), [
-            'labels' => array_values(array_unique($labels)),
+            'labels' => $labels,
         ]);
     }
 

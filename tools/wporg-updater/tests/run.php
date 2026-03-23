@@ -16,6 +16,7 @@ use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
+use WpOrgPluginUpdater\LabelHelper;
 use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\ReleaseClassifier;
 use WpOrgPluginUpdater\RuntimeInspector;
@@ -78,6 +79,12 @@ $assert($classifier->classifyScope('5.4.0', '6.0.0') === 'major', 'Expected majo
 
 $labels = $classifier->deriveLabels('source:wordpress.org', 'patch', 'Security fix for comment validation.', []);
 $assert(in_array('type:security-bugfix', $labels, true), 'Patch releases must be labeled as security-bugfix.');
+
+$longLabel = 'plugin:this-is-an-extremely-long-plugin-slug-that-would-exceed-github-label-limits-by-a-wide-margin';
+$normalizedLongLabel = LabelHelper::normalize($longLabel);
+$assert(strlen($normalizedLongLabel) <= LabelHelper::MAX_LENGTH, 'Expected normalized labels to respect the GitHub label-length limit.');
+$assert(str_starts_with($normalizedLongLabel, 'plugin:'), 'Expected normalized labels to preserve short semantic prefixes when possible.');
+$assert(LabelHelper::normalize($normalizedLongLabel) === $normalizedLongLabel, 'Expected label normalization to be idempotent.');
 
 $pluginInfo = json_decode((string) file_get_contents($fixtureDir . '/akismet-plugin-info.json'), true, 512, JSON_THROW_ON_ERROR);
 $changelog = $wpClient->extractReleaseNotes('plugin', $pluginInfo, '5.6');
@@ -202,6 +209,62 @@ $assert(in_array('runtime-file', $config->stagedKinds(), true), 'Expected runtim
 $assert(in_array('runtime-directory', $config->stagedKinds(), true), 'Expected runtime-directory to be stageable by default.');
 $assert(in_array('plugin', $config->managedKinds(), true), 'Expected plugins to remain managed by default.');
 $assert(count($config->managedDependencies()) === 4, 'Expected four managed baseline dependencies.');
+
+$longLabelManifestRoot = sys_get_temp_dir() . '/wporg-long-label-' . bin2hex(random_bytes(4));
+mkdir($longLabelManifestRoot . '/.wp-core-base', 0777, true);
+file_put_contents(
+    $longLabelManifestRoot . '/.wp-core-base/manifest.php',
+    "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export([
+        'profile' => 'content-only',
+        'paths' => [
+            'content_root' => 'cms',
+            'plugins_root' => 'cms/plugins',
+            'themes_root' => 'cms/themes',
+            'mu_plugins_root' => 'cms/mu-plugins',
+        ],
+        'core' => [
+            'mode' => 'external',
+            'enabled' => false,
+        ],
+        'runtime' => $runtimeDefaults,
+        'github' => [
+            'api_base' => 'https://api.github.com',
+        ],
+        'automation' => [
+            'base_branch' => null,
+            'dry_run' => false,
+            'managed_kinds' => ['plugin', 'theme'],
+        ],
+        'dependencies' => [[
+            'name' => 'Example Long Label Plugin',
+            'slug' => 'example-long-label-plugin',
+            'kind' => 'plugin',
+            'management' => 'local',
+            'source' => 'local',
+            'path' => 'cms/plugins/example-long-label-plugin',
+            'main_file' => 'example-long-label-plugin.php',
+            'version' => null,
+            'checksum' => null,
+            'archive_subdir' => '',
+            'extra_labels' => [$longLabel],
+            'source_config' => [
+                'github_repository' => null,
+                'github_release_asset_pattern' => null,
+                'github_token_env' => null,
+            ],
+            'policy' => [
+                'class' => 'local-owned',
+                'allow_runtime_paths' => [],
+                'strip_paths' => [],
+                'strip_files' => [],
+            ],
+        ]],
+    ], true) . ";\n"
+);
+$longLabelConfig = Config::load($longLabelManifestRoot);
+$normalizedManifestLabel = $longLabelConfig->dependencies()[0]['extra_labels'][0];
+$assert(strlen($normalizedManifestLabel) <= LabelHelper::MAX_LENGTH, 'Expected manifest extra_labels to be normalized on load.');
+$assert($normalizedManifestLabel === $normalizedLongLabel, 'Expected manifest label normalization to match the shared helper output.');
 
 $scanner = new DependencyScanner();
 $woocommerce = $config->dependencyByKey('plugin:wordpress.org:woocommerce');
