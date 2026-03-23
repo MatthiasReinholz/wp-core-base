@@ -155,12 +155,13 @@ $assert(in_array('type:security-bugfix', $gitHubLabels, true), 'Expected GitHub 
 $assert(in_array('type:feature', $gitHubLabels, true), 'Expected GitHub release notes with add language to set the feature label.');
 
 $frameworkConfig = FrameworkConfig::load($repoRoot);
-$assert($frameworkConfig->version === '1.0.0', 'Expected framework metadata to load the current framework version.');
+$currentFrameworkVersion = $frameworkConfig->version;
+$assert(preg_match('/^\d+\.\d+\.\d+$/', $currentFrameworkVersion) === 1, 'Expected framework metadata to load a valid current framework version.');
 $assert($frameworkConfig->distributionPath() === '.', 'Expected upstream framework metadata to point at the repository root.');
-$releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/1.0.0.md');
+$releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/' . $currentFrameworkVersion . '.md');
 $assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
-$assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v1.0.0', 'Expected framework release verification to succeed.');
+$assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v' . $currentFrameworkVersion, 'Expected framework release verification to succeed.');
 
 $releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
 mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);
@@ -174,15 +175,22 @@ mkdir($releasePrepRoot . '/docs/releases', 0777, true);
     path: $releasePrepRoot . '/.wp-core-base/framework.php',
 ));
 $preparedRelease = (new FrameworkReleasePreparer($releasePrepRoot))->prepare('patch');
-$assert($preparedRelease['version'] === 'v1.0.1', 'Expected prepare-framework-release to derive the next patch version.');
+$expectedPreparedVersion = 'v' . preg_replace_callback('/^(\d+)\.(\d+)\.(\d+)$/', static fn (array $m): string => sprintf('%d.%d.%d', (int) $m[1], (int) $m[2], (int) $m[3] + 1), $currentFrameworkVersion);
+$assert($preparedRelease['version'] === $expectedPreparedVersion, 'Expected prepare-framework-release to derive the next patch version.');
 $assert($preparedRelease['release_notes_created'] === true, 'Expected prepare-framework-release to scaffold release notes.');
 $preparedFramework = FrameworkConfig::load($releasePrepRoot);
-$assert($preparedFramework->version === '1.0.1', 'Expected prepare-framework-release to bump framework.php.');
-$preparedNotes = (string) file_get_contents($releasePrepRoot . '/docs/releases/1.0.1.md');
+$preparedPlainVersion = ltrim($expectedPreparedVersion, 'v');
+$assert($preparedFramework->version === $preparedPlainVersion, 'Expected prepare-framework-release to bump framework.php.');
+$preparedNotes = (string) file_get_contents($releasePrepRoot . '/docs/releases/' . $preparedPlainVersion . '.md');
 $assert($preparedNotes !== '', 'Expected scaffolded release notes to be written.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($preparedNotes) === [], 'Expected scaffolded release notes to include required sections.');
-$refreshedRelease = (new FrameworkReleasePreparer($releasePrepRoot))->prepare('custom', 'v1.0.1', true);
-$assert($refreshedRelease['version'] === 'v1.0.1', 'Expected prepare-framework-release to allow refreshing the current version when explicitly requested.');
+$assert(str_contains($preparedNotes, sprintf('This is the `patch` framework release from `v%s` to `%s`', $currentFrameworkVersion, $expectedPreparedVersion)), 'Expected scaffolded release notes summary to be prefilled with the version transition.');
+$assert(str_contains($preparedNotes, sprintf('Downstream repositories pinned to an older `wp-core-base` release can update to `%s`', $expectedPreparedVersion)), 'Expected scaffolded release notes to include downstream impact guidance.');
+$assert(str_contains($preparedNotes, 'The published framework asset for this release is `wp-core-base-vendor-snapshot.zip`.'), 'Expected scaffolded release notes to include operational asset details.');
+$assert(str_contains($preparedNotes, '- WooCommerce `10.6.1`'), 'Expected scaffolded release notes to include the bundled baseline component list.');
+$assert(! str_contains($preparedNotes, 'Describe the framework changes in this release.'), 'Expected scaffolded release notes to avoid placeholder prose.');
+$refreshedRelease = (new FrameworkReleasePreparer($releasePrepRoot))->prepare('custom', $expectedPreparedVersion, true);
+$assert($refreshedRelease['version'] === $expectedPreparedVersion, 'Expected prepare-framework-release to allow refreshing the current version when explicitly requested.');
 $assert($refreshedRelease['release_notes_created'] === false, 'Expected refresh of existing release notes to avoid recreating the file.');
 
 $config = Config::load($repoRoot);

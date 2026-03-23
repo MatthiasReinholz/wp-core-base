@@ -19,12 +19,13 @@ final class FrameworkReleasePreparer
     public function prepare(string $releaseType, ?string $customVersion = null, bool $allowCurrentVersion = false): array
     {
         $framework = FrameworkConfig::load($this->repoRoot);
-        $version = $this->resolveVersion($framework->normalizedVersion(), $releaseType, $customVersion, $allowCurrentVersion);
+        $currentVersion = $framework->normalizedVersion();
+        $version = $this->resolveVersion($currentVersion, $releaseType, $customVersion, $allowCurrentVersion);
         $releaseNotesPath = $this->repoRoot . '/docs/releases/' . $version . '.md';
         $releaseNotesCreated = false;
 
         if (! is_file($releaseNotesPath)) {
-            $this->writeReleaseNotesTemplate($framework, $version, $releaseNotesPath);
+            $this->writeReleaseNotesTemplate($framework, $currentVersion, $version, $releaseNotesPath);
             $releaseNotesCreated = true;
         }
 
@@ -95,7 +96,7 @@ final class FrameworkReleasePreparer
         return $normalized;
     }
 
-    private function writeReleaseNotesTemplate(FrameworkConfig $framework, string $version, string $path): void
+    private function writeReleaseNotesTemplate(FrameworkConfig $framework, string $currentVersion, string $targetVersion, string $path): void
     {
         $directory = dirname($path);
 
@@ -103,24 +104,72 @@ final class FrameworkReleasePreparer
             throw new RuntimeException(sprintf('Unable to create release notes directory: %s', $directory));
         }
 
+        $scope = $this->releaseScope($currentVersion, $targetVersion);
         $components = array_map(
             static fn (array $component): string => sprintf(
-                '- %s %s',
+                '- %s `%s`',
                 $component['name'],
                 $component['version']
             ),
             $framework->baseline['managed_components']
         );
 
+        $summary = sprintf(
+            'This is the `%s` framework release from `v%s` to `v%s` for `wp-core-base`.' . "\n\n" .
+            'It publishes the current validated framework state for downstream adoption and framework self-update PRs.',
+            $scope,
+            $currentVersion,
+            $targetVersion
+        );
+
+        $downstreamImpact = sprintf(
+            'Downstream repositories pinned to an older `wp-core-base` release can update to `v%s` through `framework-sync` or by vendoring the published snapshot manually.' . "\n\n" .
+            'Review any framework-managed workflow refreshes, release automation changes, and documentation updates in the release PR before rollout.',
+            $targetVersion
+        );
+
+        $migrationNotes = sprintf(
+            'No special migration steps are expected by default for `v%s`.' . "\n\n" .
+            'If your downstream repository has locally customized scaffolded workflow files, review upstream workflow diffs manually before adopting this release.',
+            $targetVersion
+        );
+
+        $operationalNotes = sprintf(
+            'The published framework asset for this release is `%s`.' . "\n\n" .
+            'Normal release flow: run `prepare-wp-core-base-release`, review and merge `release/v%s`, then let `finalize-wp-core-base-release` create the tag and publish the GitHub Release.',
+            $framework->assetName(),
+            $targetVersion
+        );
+
         $contents = sprintf(
-            "# wp-core-base %s\n\n## Summary\n\nDescribe the framework changes in this release.\n\n## Downstream Impact\n\nDescribe what downstream repos need to know before adopting this release.\n\n## Migration Notes\n\nDocument any migration steps or confirm that no special migration is required.\n\n## Bundled Baseline\n\n- WordPress core: `%s`\n%s\n\n## Operational Notes\n\nAdd any notes about release packaging, workflow behavior, or review expectations.\n",
-            $version,
+            "# wp-core-base %s\n\n## Summary\n\n%s\n\n## Downstream Impact\n\n%s\n\n## Migration Notes\n\n%s\n\n## Bundled Baseline\n\n- WordPress core: `%s`\n%s\n\n## Operational Notes\n\n%s\n",
+            $targetVersion,
+            $summary,
+            $downstreamImpact,
+            $migrationNotes,
             $framework->baseline['wordpress_core'],
-            $components === [] ? '' : implode("\n", $components)
+            $components === [] ? '' : implode("\n", $components),
+            $operationalNotes
         );
 
         if (file_put_contents($path, $contents) === false) {
             throw new RuntimeException(sprintf('Unable to write release notes template: %s', $path));
         }
+    }
+
+    private function releaseScope(string $currentVersion, string $targetVersion): string
+    {
+        [$currentMajor, $currentMinor] = array_map('intval', array_slice(explode('.', $currentVersion), 0, 2));
+        [$targetMajor, $targetMinor] = array_map('intval', array_slice(explode('.', $targetVersion), 0, 2));
+
+        if ($targetMajor > $currentMajor) {
+            return 'major';
+        }
+
+        if ($targetMinor > $currentMinor) {
+            return 'minor';
+        }
+
+        return 'patch';
     }
 }
