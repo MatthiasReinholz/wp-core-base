@@ -155,6 +155,7 @@ Each dependency entry supports:
 - directory kinds require `main_file`
 - file kinds may omit `main_file`; when omitted, the file at `path` is the runtime entry
 - `runtime-directory` entries may be `local` or `ignored`, but are not updater-managed today
+- `extra_labels` are normalized to GitHub's 50-character label limit; overlong labels are shortened deterministically with a hash suffix so workflow runs do not fail on long slugs
 
 ## Kind-Level Controls
 
