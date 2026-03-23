@@ -19,6 +19,7 @@ It is not trying to be:
 - a framework that requires WordPress core in Git for every downstream
 - a Composer-only dependency model
 - a system that treats every folder under a plugins directory as safe to overwrite
+- a one-time starter copy with no versioned maintenance path
 
 ## Read In This Order
 
@@ -48,6 +49,8 @@ If you are changing the framework itself:
 
 Treat the manifest at `.wp-core-base/manifest.php` as the downstream source of truth.
 
+Treat `.wp-core-base/framework.php` as the installed framework lock file.
+
 Every runtime path should be understood as one of:
 
 - `managed`: the framework may update it from a trusted upstream archive
@@ -70,6 +73,7 @@ Do not blur those contracts when reasoning about the system.
 - `full-core` and `content-only` are both first-class.
 - GitHub is required only for automated PR flows, not for using the code base itself.
 - `stage-runtime` is the deployment contract whenever staged runtime is part of the architecture.
+- `framework-sync` updates the vendored `wp-core-base` framework snapshot, not the runtime manifest.
 
 ## Unsafe Assumptions
 
@@ -106,6 +110,7 @@ Do not assume:
 6. Check whether GitHub is available for PR automation.
 7. Recommend:
    - profile
+   - framework consumption mode
    - scaffold preset
    - manifest mode
    - validation mode
@@ -133,6 +138,7 @@ Use [docs/support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matri
 - treating `relaxed` manifest mode as the ideal steady state instead of a migration aid
 - suggesting deployment directly from the raw working tree when staged runtime is part of the contract
 - ignoring blocked PR behavior when evaluating operational impact
+- ignoring the pinned framework version in `.wp-core-base/framework.php`
 
 ## Preferred Outputs For Agent Evaluations
 

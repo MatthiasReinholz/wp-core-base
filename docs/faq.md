@@ -86,6 +86,19 @@ For dependency PRs, the framework can include:
 - support topics opened after release for WordPress.org plugins
 - labels that classify patch/minor/major and bugfix/feature signals
 
+Framework update PRs also include:
+
+- current and target `wp-core-base` version
+- bundled WordPress baseline before and after the framework update
+- parsed framework release-note sections
+- any scaffolded workflow files that were skipped because they were locally customized
+
+## How are framework updates different from plugin or core updates?
+
+Framework updates operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.
+
+They do not rewrite `.wp-core-base/manifest.php`, and they do not directly change runtime dependency ownership. They refresh the framework tooling layer that downstream automation runs through.
+
 ## Do managed dependencies have to arrive perfectly runtime-clean?
 
 Ideally, yes.
@@ -109,6 +122,8 @@ Check [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.m
 No. That is not the intended managed-dependency model.
 
 Managed dependencies should come from release-backed archives, not live Git working trees.
+
+The same principle applies to automated framework self-updates. The supported install/update path is a vendored release snapshot, not a live submodule update flow.
 
 ## Is `relaxed` manifest mode the recommended steady state?
 

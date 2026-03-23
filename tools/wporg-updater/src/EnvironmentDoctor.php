@@ -32,13 +32,27 @@ final class EnvironmentDoctor
         $this->okIf($this->isGitRepository(), 'Repository root is inside a Git worktree.', 'Repository root is not inside a Git worktree.');
 
         $manifestPath = $this->repoRoot . '/.wp-core-base/manifest.php';
+        $frameworkPath = $this->repoRoot . '/.wp-core-base/framework.php';
         $this->okIf(is_file($manifestPath), 'Manifest file exists.', sprintf('Manifest file not found: %s', $manifestPath));
+        $this->okIf(is_file($frameworkPath), 'Framework metadata file exists.', sprintf('Framework metadata file not found: %s', $frameworkPath));
 
         $config = null;
+        $framework = null;
 
         try {
             $config = Config::load($this->repoRoot);
             $this->ok(sprintf('Manifest loaded successfully for profile `%s`.', $config->profile));
+        } catch (RuntimeException $exception) {
+            $this->error($exception->getMessage());
+        }
+
+        try {
+            $framework = FrameworkConfig::load($this->repoRoot);
+            $this->ok(sprintf(
+                'Framework metadata loaded successfully for `%s` at version %s.',
+                $framework->repository,
+                $framework->version
+            ));
         } catch (RuntimeException $exception) {
             $this->error($exception->getMessage());
         }
@@ -51,7 +65,7 @@ final class EnvironmentDoctor
         }
 
         $this->inspectGitHubEnvironment($config, $requireGitHub);
-        $this->inspectGitHubWorkflows($requireGitHub);
+        $this->inspectGitHubWorkflows($framework, $requireGitHub);
         $this->printSummary();
 
         return $this->errors === 0 ? 0 : 1;
@@ -314,7 +328,7 @@ final class EnvironmentDoctor
         }
     }
 
-    private function inspectGitHubWorkflows(bool $requireGitHub): void
+    private function inspectGitHubWorkflows(?FrameworkConfig $framework, bool $requireGitHub): void
     {
         if (! $requireGitHub) {
             return;
@@ -340,6 +354,7 @@ final class EnvironmentDoctor
         $hasSyncWorkflow = false;
         $hasBlockerWorkflow = false;
         $hasValidationWorkflow = false;
+        $hasFrameworkSyncWorkflow = $framework === null || $framework->distributionPath() === '.';
 
         foreach ($workflowFiles as $workflowFile) {
             $contents = file_get_contents($workflowFile);
@@ -351,11 +366,13 @@ final class EnvironmentDoctor
             $hasSyncWorkflow = $hasSyncWorkflow || str_contains($contents, 'wporg-updater.php sync');
             $hasBlockerWorkflow = $hasBlockerWorkflow || str_contains($contents, 'wporg-updater.php pr-blocker');
             $hasValidationWorkflow = $hasValidationWorkflow || str_contains($contents, 'wporg-updater.php stage-runtime');
+            $hasFrameworkSyncWorkflow = $hasFrameworkSyncWorkflow || str_contains($contents, 'wporg-updater.php framework-sync');
         }
 
         $this->okIf($hasSyncWorkflow, 'Found a GitHub workflow that runs sync mode.', 'No GitHub workflow found that runs `wporg-updater.php sync`.');
         $this->okIf($hasBlockerWorkflow, 'Found a GitHub workflow that runs blocker mode.', 'No GitHub workflow found that runs `wporg-updater.php pr-blocker`.');
         $this->okIf($hasValidationWorkflow, 'Found a GitHub workflow that stages runtime output.', 'No GitHub workflow found that runs `wporg-updater.php stage-runtime`.');
+        $this->okIf($hasFrameworkSyncWorkflow, 'Found a GitHub workflow that runs framework-sync mode.', 'No GitHub workflow found that runs `wporg-updater.php framework-sync`.');
     }
 
     /**

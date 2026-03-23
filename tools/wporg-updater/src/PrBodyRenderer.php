@@ -140,6 +140,78 @@ MARKDOWN);
     }
 
     /**
+     * @param list<string> $labels
+     * @param array<string, string> $notesSections
+     * @param list<string> $skippedManagedFiles
+     * @param array<string, mixed> $metadata
+     */
+    public function renderFrameworkUpdate(
+        string $currentVersion,
+        string $targetVersion,
+        string $releaseScope,
+        string $releaseAt,
+        array $labels,
+        string $sourceRepository,
+        string $releaseUrl,
+        string $currentBaseline,
+        string $targetBaseline,
+        array $notesSections,
+        array $skippedManagedFiles,
+        array $metadata,
+    ): string {
+        $releaseDate = new DateTimeImmutable($releaseAt);
+        $blockedBy = $metadata['blocked_by'] ?? [];
+        $blockedLine = $blockedBy === []
+            ? 'None'
+            : implode(', ', array_map(static fn (int $number): string => '#' . $number, $blockedBy));
+        $labelLines = implode("\n", array_map(static fn (string $label): string => '- `' . $label . '`', $labels));
+        $sectionBlocks = [];
+
+        foreach ($notesSections as $heading => $body) {
+            $sectionBlocks[] = sprintf("## %s\n\n%s", $heading, trim($body) === '' ? '_No details provided._' : trim($body));
+        }
+
+        $driftSection = $skippedManagedFiles === []
+            ? 'No managed scaffold files were skipped.'
+            : implode("\n", array_map(static fn (string $path): string => sprintf('- `%s`', $path), $skippedManagedFiles));
+
+        return trim(<<<MARKDOWN
+## Summary
+
+| Field | Value |
+| --- | --- |
+| Component | `wp-core-base` |
+| Source repository | [`{$sourceRepository}`](https://github.com/{$sourceRepository}) |
+| Release | [Open]({$releaseUrl}) |
+| Installed version on base branch | `{$currentVersion}` |
+| Target version | `{$targetVersion}` |
+| Release scope | `{$releaseScope}` |
+| Release timestamp (UTC) | `{$releaseDate->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s \U\T\C')}` |
+| Bundled WordPress baseline on base branch | `{$currentBaseline}` |
+| Bundled WordPress baseline after update | `{$targetBaseline}` |
+| Blocked by older update PRs | {$blockedLine} |
+
+## Derived Labels
+
+{$labelLines}
+
+{$this->joinMarkdownBlocks($sectionBlocks)}
+
+## Scaffold Refresh Notes
+
+{$driftSection}
+
+## Automation Notes
+
+- This PR is managed by the `wp-core-base` framework self-update automation.
+- If a newer patch release lands on the same release line before merge, this PR will be updated in place.
+- If a newer minor or major release lands before merge, the automation will open a separate blocked PR.
+
+<!-- wporg-update-metadata: {$this->encodeMetadata($metadata)} -->
+MARKDOWN);
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public static function extractMetadata(?string $body): ?array
@@ -199,5 +271,13 @@ MARKDOWN);
     private function encodeMetadata(array $metadata): string
     {
         return json_encode($metadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    }
+
+    /**
+     * @param list<string> $blocks
+     */
+    private function joinMarkdownBlocks(array $blocks): string
+    {
+        return implode("\n\n", array_values(array_filter($blocks, static fn (string $block): bool => trim($block) !== '')));
     }
 }

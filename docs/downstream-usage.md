@@ -19,6 +19,32 @@ The manifest defines:
 
 The updater does not infer managed dependencies by scanning folders.
 
+Framework version pinning is separate from runtime ownership. Downstreams should also keep `.wp-core-base/framework.php` so the installed `wp-core-base` version, vendored path, and framework-managed workflow checksums are explicit.
+
+## Framework Version Pinning
+
+Use `.wp-core-base/framework.php` for:
+
+- the pinned installed framework version
+- the source repository for framework releases
+- the vendored install path, usually `vendor/wp-core-base`
+- checksums for framework-managed scaffold files
+
+That file is what `framework-sync` updates when a newer `wp-core-base` release is installed into the downstream repo.
+
+## Framework Self-Update
+
+`framework-sync` is the framework-level equivalent of dependency sync.
+
+It:
+
+- checks GitHub Releases for a newer `wp-core-base` version
+- updates the vendored framework snapshot
+- refreshes framework-managed workflows when they still match the last managed version
+- leaves locally customized workflow files untouched and reports that drift in the PR
+
+The scaffolded downstream setup includes a weekly `wp-core-base` self-update workflow.
+
 ## Dependency Classes
 
 Each dependency should fall into one of these classes:
@@ -194,6 +220,12 @@ php tools/wporg-updater/tests/run.php
 
 If `wp-core-base` is vendored, run the same commands from the vendored path and pass `--repo-root=.`
 
+Framework version checks use:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only
+```
+
 ## Downstream Dependency Strategies
 
 There are two common ways to consume `wp-core-base`.
@@ -216,6 +248,7 @@ Typical layout:
 
 ```text
 project/
+  .wp-core-base/framework.php
   .wp-core-base/manifest.php
   .github/workflows/
   vendor/wp-core-base/
@@ -225,6 +258,7 @@ project/
 
 - example downstream manifest: [examples/downstream-manifest.php](examples/downstream-manifest.php)
 - example sync workflow: [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
+- example framework self-update workflow: [examples/downstream-framework-self-update-workflow.yml](examples/downstream-framework-self-update-workflow.yml)
 - example blocker workflow: [examples/downstream-pr-blocker-workflow.yml](examples/downstream-pr-blocker-workflow.yml)
 - example validation workflow: [examples/downstream-validate-runtime-workflow.yml](examples/downstream-validate-runtime-workflow.yml)
 

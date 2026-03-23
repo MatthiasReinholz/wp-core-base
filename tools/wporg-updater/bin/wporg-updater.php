@@ -8,6 +8,11 @@ use WpOrgPluginUpdater\CoreUpdater;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\EnvironmentDoctor;
+use WpOrgPluginUpdater\FrameworkConfig;
+use WpOrgPluginUpdater\FrameworkInstaller;
+use WpOrgPluginUpdater\FrameworkReleaseClient;
+use WpOrgPluginUpdater\FrameworkReleaseVerifier;
+use WpOrgPluginUpdater\FrameworkSyncer;
 use WpOrgPluginUpdater\GitCommandRunner;
 use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
@@ -65,6 +70,8 @@ Usage:
   php tools/wporg-updater/bin/wporg-updater.php doctor [--repo-root=/path] [--github]
   php tools/wporg-updater/bin/wporg-updater.php stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
   php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force]
+  php tools/wporg-updater/bin/wporg-updater.php framework-sync [--repo-root=/path] [--check-only]
+  php tools/wporg-updater/bin/wporg-updater.php release-verify [--repo-root=/path] [--tag=v1.0.0]
   php tools/wporg-updater/bin/wporg-updater.php suggest-manifest [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php format-manifest [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php pr-blocker
@@ -74,6 +81,8 @@ Modes:
   doctor            Validate the manifest, repo structure, runtime hygiene, and optional GitHub environment.
   stage-runtime     Assemble a clean runtime payload for image builds.
   scaffold-downstream  Create a manifest and workflow files from the bundled templates.
+  framework-sync    Update the vendored wp-core-base framework snapshot from GitHub Releases.
+  release-verify    Validate framework release metadata and release notes before publishing.
   suggest-manifest  Print suggested manifest entries for undeclared runtime paths.
   format-manifest   Rewrite the manifest into the normalized framework format.
   pr-blocker        Evaluate whether the current PR should remain blocked.
@@ -84,6 +93,8 @@ Flags and environment:
   --profile=PROFILE      Downstream scaffold profile or preset: full-core, content-only, content-only-default, content-only-migration, content-only-local-mu, or content-only-image-first.
   --content-root=PATH    Override the scaffolded content root.
   --output=PATH          Override the stage-runtime output path.
+  --check-only           Print framework update availability without changing files.
+  --tag=TAG              Expected release tag for release-verify mode.
   --force                Overwrite scaffolded files when they already exist.
   WPORG_REPO_ROOT        Environment alternative to --repo-root.
   WPORG_UPDATE_DRY_RUN   Enable dry-run behavior for sync mode.
@@ -97,11 +108,45 @@ TEXT);
         exit($doctor->run(isset($options['github'])));
     }
 
+    if ($mode === 'release-verify') {
+        $tag = isset($options['tag']) && is_string($options['tag']) ? $options['tag'] : null;
+        $resolvedTag = (new FrameworkReleaseVerifier($repoRoot))->verify($tag);
+        fwrite(STDOUT, sprintf("Release verification passed for %s\n", $resolvedTag));
+        exit(0);
+    }
+
     if ($mode === 'scaffold-downstream') {
         $profile = $options['profile'] ?? 'content-only-default';
         $contentRoot = $options['content-root'] ?? null;
         $scaffolder = new DownstreamScaffolder($frameworkRoot, $repoRoot);
         exit($scaffolder->scaffold((string) $toolPath, (string) $profile, is_string($contentRoot) ? $contentRoot : null, $force));
+    }
+
+    if ($mode === 'framework-apply') {
+        $payloadRoot = $options['payload-root'] ?? null;
+        $distributionPath = $options['distribution-path'] ?? null;
+        $resultPath = $options['result-path'] ?? null;
+
+        if (! is_string($payloadRoot) || $payloadRoot === '') {
+            throw new RuntimeException('framework-apply requires --payload-root.');
+        }
+
+        if (! is_string($resultPath) || $resultPath === '') {
+            throw new RuntimeException('framework-apply requires --result-path.');
+        }
+
+        $config = Config::load($repoRoot);
+        $runtimeInspector = new RuntimeInspector($config->runtime);
+        $result = (new FrameworkInstaller($repoRoot, $runtimeInspector))->apply(
+            $payloadRoot,
+            is_string($distributionPath) ? $distributionPath : 'vendor/wp-core-base'
+        );
+
+        if (file_put_contents($resultPath, json_encode($result, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT)) === false) {
+            throw new RuntimeException(sprintf('Unable to write framework apply result file: %s', $resultPath));
+        }
+
+        exit(0);
     }
 
     $config = Config::load($repoRoot);
@@ -176,6 +221,28 @@ TEXT);
             throw new RuntimeException(implode("\n\n", $errors));
         }
 
+        exit(0);
+    }
+
+    if ($mode === 'framework-sync') {
+        $framework = FrameworkConfig::load($repoRoot);
+        $checkOnly = isset($options['check-only']);
+        $gitHubClient = $checkOnly
+            ? null
+            : GitHubClient::fromEnvironment($httpClient, $config->githubApiBase(), $config->dryRun());
+        $frameworkSyncer = new FrameworkSyncer(
+            framework: $framework,
+            repoRoot: $repoRoot,
+            frameworkReleaseClient: new FrameworkReleaseClient(
+                new GitHubReleaseClient($httpClient, $config->githubApiBase())
+            ),
+            releaseClassifier: new ReleaseClassifier(),
+            prBodyRenderer: new PrBodyRenderer(),
+            gitHubClient: $gitHubClient,
+            gitRunner: new GitCommandRunner($repoRoot, $config->dryRun()),
+            runtimeInspector: new RuntimeInspector($config->runtime),
+        );
+        $frameworkSyncer->sync($checkOnly);
         exit(0);
     }
 

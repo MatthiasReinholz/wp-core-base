@@ -2,6 +2,8 @@
 
 This document is for downstream users configuring `.wp-core-base/manifest.php`.
 
+Framework release pinning lives separately in `.wp-core-base/framework.php`. The manifest is only for runtime ownership, update scope, and staging policy.
+
 If you need plain-language definitions before the schema details, read [concepts.md](concepts.md).
 
 ## Top-Level Keys

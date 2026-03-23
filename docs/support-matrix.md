@@ -18,6 +18,7 @@ This document lists what `wp-core-base` supports today, what it supports with co
 | GitHub + FTP/SFTP deployment | Supported | GitHub handles PR automation; FTP handles delivery. |
 | GitHub + manual deployment | Supported | Review/update flow still works. |
 | no GitHub, manual usage | Supported with constraints | Base/repo model works; automated PRs do not. |
+| vendored `wp-core-base` self-update PRs | Supported | Uses `.wp-core-base/framework.php` plus GitHub Releases. |
 
 ## Runtime Ownership
 
@@ -63,6 +64,7 @@ This document lists what `wp-core-base` supports today, what it supports with co
 | patch release refreshes existing PR | Supported | Same release line. |
 | later minor/major opens separate blocked PR | Supported | Requires blocker workflow. |
 | support-topic refresh for WordPress.org plugins | Supported | PR body can refresh with newer signals. |
+| framework self-update PRs | Supported | One PR per framework release line, using vendored snapshots. |
 | combined multi-plugin PRs | Not supported | Intentionally one dependency per PR. |
 
 ## Runtime Cleanliness

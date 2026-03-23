@@ -15,7 +15,9 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 
 - a versioned WordPress base repository
 - an explicit manifest at `.wp-core-base/manifest.php`
+- explicit framework release metadata at `.wp-core-base/framework.php`
 - scheduled GitHub update PRs for WordPress core and managed dependencies
+- scheduled GitHub PRs when a newer `wp-core-base` framework release is available
 - support for WordPress.org and GitHub Release backed dependencies
 - support for project-owned custom code as first-class `local` runtime entries
 - optional staged-clean runtime assembly for richer local source trees
@@ -31,6 +33,7 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 - reviewable update PRs instead of silent in-dashboard changes, so every dependency change becomes a normal Git review event. See [operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md).
 - richer PR context for reviewers, including release scope, release notes, release timestamp, and support-topic signals for WordPress.org plugins. See [operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md#reviewing-update-prs).
 - intelligent PR lifecycle behavior: patch releases can refresh an existing PR, while later minor or major releases can queue behind unresolved work. See [automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md#pull-request-behavior).
+- `wp-core-base` itself is versioned and updateable, so downstream repos can pin a framework release and receive dedicated framework-update PRs instead of treating the base as a one-time copy. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#framework-version-pinning).
 - support for both WordPress.org and GitHub Release backed dependencies, including private GitHub release assets. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#source-types).
 - local project-owned code remains first-class, so custom plugins, themes, MU plugins, runtime files, and runtime directories do not need to be forced through updater automation. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#managed-versus-local).
 - normalized runtime snapshots, because managed dependencies can be sanitized during update ingestion and local code can use staged-clean strip rules when needed. See [manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md#managed-sanitation).
@@ -82,6 +85,7 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
 Use `content-only-image-first` if you want a stricter image-first preset with external core, `staged-clean` validation, and starter ownership roots for content repos.
+Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the runtime-update, blocker, validation, and framework self-update workflows.
 
 The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, runtime files, and runtime directories owned directly by the downstream project. `local` is a normal long-term ownership model, not a migration workaround.
 
@@ -89,6 +93,7 @@ The framework is intentionally selective: it can manage chosen dependencies for 
 
 This repository currently ships:
 
+- framework release `1.0.0`
 - WordPress core `6.9.4`
 - Akismet `5.6`
 - WooCommerce `10.6.1`
@@ -115,6 +120,7 @@ These versions describe the code committed in this repository, not a floating la
 - manifest reference: [docs/manifest-reference.md](docs/manifest-reference.md)
 - migration guidance: [docs/migration-guide.md](docs/migration-guide.md)
 - example downstream manifest and workflows: [docs/examples/](docs/examples/)
+- maintainer release flow: [docs/release-process.md](docs/release-process.md)
 - contributor guide: [docs/contributing.md](docs/contributing.md)
 - automation internals: [docs/automation-overview.md](docs/automation-overview.md)
 

@@ -34,12 +34,12 @@ final class PullRequestBlocker
             return 0;
         }
 
-        $slug = (string) ($metadata['slug'] ?? '');
+        $identity = $this->identityForMetadata($metadata);
         $targetVersion = (string) ($metadata['target_version'] ?? '');
         $currentNumber = (int) ($pullRequest['number'] ?? 0);
 
-        if ($slug === '' || $targetVersion === '' || $currentNumber === 0) {
-            throw new RuntimeException('Updater metadata is missing slug, target_version, or pull request number.');
+        if ($identity === '' || $targetVersion === '' || $currentNumber === 0) {
+            throw new RuntimeException('Updater metadata is missing component identity, target_version, or pull request number.');
         }
 
         $olderOpenPrs = [];
@@ -77,7 +77,7 @@ final class PullRequestBlocker
 
             $candidateMetadata = PrBodyRenderer::extractMetadata((string) ($candidate['body'] ?? ''));
 
-            if ($candidateMetadata === null || ($candidateMetadata['slug'] ?? null) !== $slug) {
+            if ($candidateMetadata === null || $this->identityForMetadata($candidateMetadata) !== $identity) {
                 continue;
             }
 
@@ -97,5 +97,21 @@ final class PullRequestBlocker
 
         fwrite(STDOUT, "No older open update PRs found. Passing.\n");
         return 0;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function identityForMetadata(array $metadata): string
+    {
+        $componentKey = $metadata['component_key'] ?? null;
+
+        if (is_string($componentKey) && $componentKey !== '') {
+            return $componentKey;
+        }
+
+        $slug = $metadata['slug'] ?? null;
+
+        return is_string($slug) ? $slug : '';
     }
 }

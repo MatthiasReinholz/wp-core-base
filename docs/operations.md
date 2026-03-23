@@ -11,6 +11,7 @@ php tools/wporg-updater/bin/wporg-updater.php help
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php doctor --github
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
+php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only
 php tools/wporg-updater/tests/run.php
 ```
 
@@ -39,6 +40,15 @@ For WordPress core PRs, pay attention to:
 - release notes
 - patch versus minor versus major scope
 - any site-specific compatibility concerns
+
+For framework update PRs, pay attention to:
+
+- current and target `wp-core-base` version
+- the bundled WordPress baseline before and after the update
+- release-note sections from `wp-core-base` itself
+- any scaffolded workflow files that were intentionally skipped because they were locally customized
+
+Framework update PRs are separate from dependency and core PRs. They update the vendored framework snapshot and `.wp-core-base/framework.php`, not your runtime dependency manifest.
 
 ## Blocked PRs
 
@@ -76,6 +86,12 @@ Check:
 - the main file path
 - the source type
 - GitHub release configuration if the source is `github-release`
+
+### Framework self-update skips a workflow file
+
+That means a scaffolded workflow no longer matches the last framework-managed checksum in `.wp-core-base/framework.php`.
+
+The framework leaves that file untouched on purpose. Review the new version in the vendored snapshot and update the downstream workflow manually if you want to pick up the upstream changes.
 
 ### GitHub env missing
 

@@ -1,4 +1,4 @@
-name: wp-core-base Runtime Validation
+name: wp-core-base CI
 
 on:
   pull_request:
@@ -26,5 +26,14 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
         run: php tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
 
+      - name: Lint PHP sources
+        run: find tools/wporg-updater -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Run test suite
+        run: php tools/wporg-updater/tests/run.php
+
       - name: Stage runtime payload
         run: php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
+
+      - name: Verify release metadata
+        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.

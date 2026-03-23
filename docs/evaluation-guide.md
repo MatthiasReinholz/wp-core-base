@@ -10,6 +10,7 @@ Produce a grounded assessment of:
 - migration effort
 - risks
 - recommended profile and adoption path
+- recommended framework consumption and update path
 
 ## Evaluation Order
 
@@ -85,6 +86,12 @@ Remember:
 - GitHub is required for automated PR workflows
 - GitHub is not required to use the framework’s codebase structure or runtime model
 
+### 6a. Check framework pinning strategy
+
+If the downstream wants ongoing upstream framework maintenance, confirm that it can vendor `wp-core-base` as a release snapshot and keep `.wp-core-base/framework.php` under version control.
+
+That is the supported automated framework-update model.
+
 ### 7. Determine validation and staging needs
 
 Ask:
@@ -121,6 +128,7 @@ A good evaluation should include:
 6. Unsupported or manual areas
 7. Migration risks
 8. Recommended next steps
+9. Framework version/update recommendation
 
 ## Good Adoption Recommendations
 

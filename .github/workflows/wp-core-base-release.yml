@@ -1,0 +1,84 @@
+name: wp-core-base Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Verify release metadata
+        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.
+
+      - name: Read framework version
+        id: framework
+        run: php -r '$framework=require ".wp-core-base/framework.php"; echo "version=".$framework["version"].PHP_EOL; echo "tag=v".$framework["version"].PHP_EOL;' >> "$GITHUB_OUTPUT"
+
+      - name: Re-run validation gates
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          php tools/wporg-updater/tests/run.php
+          php tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+          php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
+          php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.framework.outputs.tag }}
+
+      - name: Build vendored framework snapshot
+        run: |
+          mkdir -p dist/wp-core-base
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.wp-core-base/build/' \
+            --exclude 'dist/' \
+            ./ dist/wp-core-base/
+          cd dist
+          zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create annotated tag and publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.framework.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $TAG"
+            exit 1
+          fi
+
+          git tag -a "$TAG" -m "wp-core-base $TAG"
+
+          rollback() {
+            git tag -d "$TAG" >/dev/null 2>&1 || true
+            git push --delete origin "$TAG" >/dev/null 2>&1 || true
+          }
+
+          git push origin "$TAG"
+
+          if ! gh release create "$TAG" \
+            dist/wp-core-base-vendor-snapshot.zip \
+            --repo "${{ github.repository }}" \
+            --title "wp-core-base $TAG" \
+            --notes-file "docs/releases/${{ steps.framework.outputs.version }}.md"; then
+            rollback
+            exit 1
+          fi

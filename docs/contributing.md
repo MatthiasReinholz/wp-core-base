@@ -30,8 +30,9 @@ Before shipping changes, run:
 
 ```bash
 php tools/wporg-updater/tests/run.php
-php tools/wporg-updater/bin/wporg-updater.php doctor
-php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
+php tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=.
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
+php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.
 ```
 
 Also syntax-check touched PHP files with `php -l`.
@@ -57,5 +58,9 @@ If you change downstream scaffolding, keep these aligned:
 ## Release Discipline
 
 Treat tags as the contract with downstream users.
+
+The framework release version is pinned in `.wp-core-base/framework.php`, not in the runtime manifest.
+
+Downstream framework self-update depends on that version metadata and on the published vendorable release asset, so release hygiene matters directly for downstream automation.
 
 Use [release-process.md](release-process.md) for the maintainer checklist.

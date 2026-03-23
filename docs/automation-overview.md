@@ -6,9 +6,10 @@ If you only need adoption guidance, start with [../README.md](../README.md) and 
 
 ## Architecture
 
-The framework now revolves around a single manifest:
+The framework now revolves around two explicit metadata files:
 
 - `.wp-core-base/manifest.php`
+- `.wp-core-base/framework.php`
 
 That manifest drives:
 
@@ -17,6 +18,7 @@ That manifest drives:
 - core management mode
 - runtime staging policy
 - dependency ownership and update eligibility
+- installed framework version and vendored distribution path
 
 The legacy `.github/wporg-updates.php` model is no longer the primary configuration surface.
 
@@ -28,6 +30,8 @@ The CLI supports:
 - `sync`
 - `stage-runtime`
 - `scaffold-downstream`
+- `framework-sync`
+- `release-verify`
 - `suggest-manifest`
 - `format-manifest`
 - `pr-blocker`
@@ -90,14 +94,18 @@ Rules:
 - newer minor or major while older PR still open => open a later blocked PR
 - support topics refresh incrementally for WordPress.org plugins
 
+Framework PRs use the same queueing behavior, but operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.
+
 ## Scaffolding
 
 `scaffold-downstream` renders:
 
 - `.wp-core-base/manifest.php`
+- `.wp-core-base/framework.php`
 - `.github/workflows/wporg-updates.yml`
 - `.github/workflows/wporg-update-pr-blocker.yml`
 - `.github/workflows/wporg-validate-runtime.yml`
+- `.github/workflows/wp-core-base-self-update.yml`
 
 Profiles:
 
@@ -141,8 +149,11 @@ php tools/wporg-updater/tests/run.php
 That test suite covers:
 
 - manifest loading
+- framework metadata loading
+- framework release-note validation
 - release parsing
 - support-forum parsing
 - runtime staging
 - scaffolding
+- framework install behavior for vendored downstreams
 - migration guardrails

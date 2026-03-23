@@ -6,6 +6,11 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
+use WpOrgPluginUpdater\FrameworkConfig;
+use WpOrgPluginUpdater\FrameworkInstaller;
+use WpOrgPluginUpdater\FrameworkReleaseNotes;
+use WpOrgPluginUpdater\FrameworkReleaseVerifier;
+use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\ManifestWriter;
@@ -147,6 +152,14 @@ $assert($gitHubReleaseClient->repository($dependencyConfig) === 'example/example
 $gitHubLabels = $classifier->deriveLabels('source:github-release', 'minor', $gitHubReleaseClient->markdownToText((string) $gitHubRelease['body']), []);
 $assert(in_array('type:security-bugfix', $gitHubLabels, true), 'Expected GitHub release notes with fix language to set the bugfix label.');
 $assert(in_array('type:feature', $gitHubLabels, true), 'Expected GitHub release notes with add language to set the feature label.');
+
+$frameworkConfig = FrameworkConfig::load($repoRoot);
+$assert($frameworkConfig->version === '1.0.0', 'Expected framework metadata to load the current framework version.');
+$assert($frameworkConfig->distributionPath() === '.', 'Expected upstream framework metadata to point at the repository root.');
+$releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/1.0.0.md');
+$assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist.');
+$assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
+$assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v1.0.0', 'Expected framework release verification to succeed.');
 
 $config = Config::load($repoRoot);
 $assert($config->profile === 'full-core', 'Expected repository manifest to load as full-core.');
@@ -648,6 +661,10 @@ $assert(str_contains($scaffoldedManifest, "'kind' => 'mu-plugin-file'"), 'Expect
 $assert(str_contains($scaffoldedManifest, "'kind' => 'runtime-directory'"), 'Expected scaffolded manifest to document runtime directories.');
 $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
 $assert(str_contains($scaffoldedValidate, 'stage-runtime'), 'Expected scaffolded validation workflow to stage runtime output.');
+$scaffoldedFramework = FrameworkConfig::load($tempScaffoldRoot);
+$assert($scaffoldedFramework->distributionPath() === 'vendor/wp-core-base', 'Expected scaffolded framework metadata to point at the vendored framework path.');
+$scaffoldedFrameworkWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wp-core-base-self-update.yml');
+$assert(str_contains($scaffoldedFrameworkWorkflow, 'framework-sync --repo-root=.'), 'Expected scaffolded self-update workflow to run framework-sync.');
 
 $migrationScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-migration-' . bin2hex(random_bytes(4));
 mkdir($migrationScaffoldRoot, 0777, true);
@@ -662,6 +679,34 @@ $imageFirstManifest = (string) file_get_contents($imageFirstScaffoldRoot . '/.wp
 $assert(str_contains($imageFirstManifest, "'validation_mode' => 'staged-clean'"), 'Expected image-first scaffold preset to use staged-clean validation.');
 $assert(str_contains($imageFirstManifest, "'cms/languages'"), 'Expected image-first scaffold preset to include languages ownership roots.');
 $assert(str_contains($imageFirstManifest, "'managed_sanitize_paths' =>"), 'Expected image-first scaffold preset to include managed sanitation paths.');
+
+$payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
+mkdir($payloadRoot, 0777, true);
+(new RuntimeInspector($config->runtime))->copyPath($repoRoot, $payloadRoot);
+(new RuntimeInspector($config->runtime))->clearPath($payloadRoot . '/.git');
+$payloadFramework = FrameworkConfig::load($payloadRoot)->withInstalledRelease(
+    version: '1.0.1',
+    wordPressCoreVersion: '6.9.4',
+    managedComponents: $frameworkConfig->baseline['managed_components'],
+    managedFiles: [],
+    distributionPath: '.'
+);
+(new FrameworkWriter())->write($payloadFramework);
+$payloadTemplatePath = $payloadRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl';
+file_put_contents($payloadTemplatePath, str_replace('scheduled update PRs', 'scheduled update PRs from a newer framework release', (string) file_get_contents($payloadTemplatePath)));
+$customizedWorkflowPath = $tempScaffoldRoot . '/.github/workflows/wp-core-base-self-update.yml';
+file_put_contents($customizedWorkflowPath, (string) file_get_contents($customizedWorkflowPath) . "\n# local customization\n");
+$installer = new FrameworkInstaller($tempScaffoldRoot, new RuntimeInspector(Config::load($tempScaffoldRoot)->runtime));
+$installResult = $installer->apply($payloadRoot, 'vendor/wp-core-base');
+$updatedFramework = FrameworkConfig::load($tempScaffoldRoot);
+$assert($updatedFramework->version === '1.0.1', 'Expected framework installer to update the pinned framework version.');
+$assert(in_array('.github/workflows/wp-core-base-self-update.yml', $installResult['skipped_files'], true), 'Expected customized framework-managed workflow to be skipped as drift.');
+$assert(in_array('.github/workflows/wporg-updates.yml', $installResult['refreshed_files'], true), 'Expected unchanged framework-managed workflow to refresh during framework install.');
+$assert(
+    $updatedFramework->managedFiles()['.github/workflows/wp-core-base-self-update.yml'] === $scaffoldedFramework->managedFiles()['.github/workflows/wp-core-base-self-update.yml'],
+    'Expected skipped managed file checksum to remain pinned to the previous managed version.'
+);
+$assert(file_exists($tempScaffoldRoot . '/vendor/wp-core-base/.wp-core-base/framework.php'), 'Expected framework installer to replace the vendored framework snapshot.');
 
 $corePayload = json_decode((string) file_get_contents($fixtureDir . '/wp-core-version-check.json'), true, 512, JSON_THROW_ON_ERROR);
 $coreOffer = $coreClient->parseLatestStableOffer($corePayload);
@@ -691,6 +736,35 @@ $coreMetadata = PrBodyRenderer::extractMetadata($renderer->renderCoreUpdate(
     ],
 ));
 $assert(is_array($coreMetadata) && $coreMetadata['kind'] === 'core', 'Expected core PR body metadata round-trip to work.');
+
+$frameworkMetadata = PrBodyRenderer::extractMetadata($renderer->renderFrameworkUpdate(
+    currentVersion: '1.0.0',
+    targetVersion: '1.0.1',
+    releaseScope: 'patch',
+    releaseAt: '2026-03-22T10:00:00+00:00',
+    labels: ['automation:framework-update', 'component:framework', 'release:patch'],
+    sourceRepository: 'MatthiasReinholz/wp-core-base',
+    releaseUrl: 'https://github.com/MatthiasReinholz/wp-core-base/releases/tag/v1.0.1',
+    currentBaseline: '6.9.4',
+    targetBaseline: '6.9.4',
+    notesSections: [
+        'Summary' => 'Patch release.',
+        'Downstream Impact' => 'Safe update.',
+        'Migration Notes' => 'None.',
+        'Bundled Baseline' => 'WordPress core 6.9.4',
+    ],
+    skippedManagedFiles: [],
+    metadata: [
+        'component_key' => 'framework:wp-core-base',
+        'slug' => 'wp-core-base',
+        'target_version' => '1.0.1',
+        'release_at' => '2026-03-22T10:00:00+00:00',
+        'scope' => 'patch',
+        'branch' => 'codex/framework-1-0-1',
+        'blocked_by' => [],
+    ],
+));
+$assert(is_array($frameworkMetadata) && $frameworkMetadata['slug'] === 'wp-core-base', 'Expected framework PR metadata to include a slug for blocker compatibility.');
 
 ZipExtractor::assertSafeEntryName('wordpress/wp-includes/version.php');
 $zipTraversalRejected = false;

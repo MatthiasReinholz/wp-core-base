@@ -28,10 +28,7 @@ final class DownstreamScaffolder
 
         $this->printHeading('wp-core-base scaffold-downstream');
 
-        $syncCommand = $this->updaterCommand($toolPath, 'sync');
-        $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
         $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --github');
-        $stageCommand = $this->updaterCommand($toolPath, 'stage-runtime --repo-root=. --output=.wp-core-base/build/runtime');
 
         $writes = [
             [
@@ -55,34 +52,47 @@ final class DownstreamScaffolder
                     '__MANAGED_SANITIZE_FILES__' => $this->exportInlineArray($preset['managed_sanitize_files']),
                 ],
             ],
-            [
-                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
-                'target' => $this->repoRoot . '/.github/workflows/wporg-updates.yml',
-                'replacements' => ['__WPORG_SYNC_COMMAND__' => $syncCommand],
-            ],
-            [
-                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
-                'target' => $this->repoRoot . '/.github/workflows/wporg-update-pr-blocker.yml',
-                'replacements' => ['__WPORG_BLOCKER_COMMAND__' => $blockerCommand],
-            ],
-            [
-                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-validate-runtime-workflow.yml.tpl',
-                'target' => $this->repoRoot . '/.github/workflows/wporg-validate-runtime.yml',
-                'replacements' => [
-                    '__WPORG_DOCTOR_COMMAND__' => $doctorCommand,
-                    '__WPORG_STAGE_RUNTIME_COMMAND__' => $stageCommand,
-                ],
-            ],
         ];
 
-        foreach ($writes as $write) {
-            $this->writeFile(
-                $write['source'],
-                $write['target'],
-                $write['replacements'],
-                $force
-            );
+        $managedFiles = $this->renderFrameworkManagedFiles($toolPath);
+
+        foreach ($managedFiles as $relativePath => $rendered) {
+            $writes[] = [
+                'rendered' => $rendered,
+                'target' => $this->repoRoot . '/' . $relativePath,
+                'replacements' => [],
+            ];
         }
+
+        foreach ($writes as $write) {
+            if (isset($write['rendered'])) {
+                $this->writeRenderedFile((string) $write['rendered'], $write['target'], $force);
+            } else {
+                $this->writeFile(
+                    $write['source'],
+                    $write['target'],
+                    $write['replacements'],
+                    $force
+                );
+            }
+        }
+
+        $managedFileChecksums = [];
+
+        foreach (array_keys($managedFiles) as $relativePath) {
+            $absolutePath = $this->repoRoot . '/' . $relativePath;
+            $contents = file_get_contents($absolutePath);
+
+            if ($contents === false) {
+                throw new RuntimeException(sprintf('Unable to read scaffolded file for checksum: %s', $absolutePath));
+            }
+
+            $managedFileChecksums[$relativePath] = 'sha256:' . hash('sha256', $contents);
+        }
+
+        $frameworkConfig = $this->frameworkMetadataForDownstream($toolPath, $managedFileChecksums);
+        (new FrameworkWriter())->write($frameworkConfig);
+        fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/.wp-core-base/framework.php'));
 
         fwrite(STDOUT, "\n");
         fwrite(STDOUT, "Next steps:\n");
@@ -91,6 +101,40 @@ final class DownstreamScaffolder
         fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 
         return 0;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function renderFrameworkManagedFiles(string $toolPath): array
+    {
+        $syncCommand = $this->updaterCommand($toolPath, 'sync');
+        $frameworkSyncCommand = $this->updaterCommand($toolPath, 'framework-sync --repo-root=.');
+        $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
+        $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --github');
+        $stageCommand = $this->updaterCommand($toolPath, 'stage-runtime --repo-root=. --output=.wp-core-base/build/runtime');
+
+        return [
+            '.github/workflows/wporg-updates.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
+                ['__WPORG_SYNC_COMMAND__' => $syncCommand]
+            ),
+            '.github/workflows/wporg-update-pr-blocker.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
+                ['__WPORG_BLOCKER_COMMAND__' => $blockerCommand]
+            ),
+            '.github/workflows/wporg-validate-runtime.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-validate-runtime-workflow.yml.tpl',
+                [
+                    '__WPORG_DOCTOR_COMMAND__' => $doctorCommand,
+                    '__WPORG_STAGE_RUNTIME_COMMAND__' => $stageCommand,
+                ]
+            ),
+            '.github/workflows/wp-core-base-self-update.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-framework-self-update-workflow.yml.tpl',
+                ['__WPORG_FRAMEWORK_SYNC_COMMAND__' => $frameworkSyncCommand]
+            ),
+        ];
     }
 
     /**
@@ -109,6 +153,11 @@ final class DownstreamScaffolder
         }
 
         $rendered = str_replace(array_keys($replacements), array_values($replacements), $contents);
+        $this->writeRenderedFile($rendered, $target, $force);
+    }
+
+    private function writeRenderedFile(string $rendered, string $target, bool $force): void
+    {
         $targetDir = dirname($target);
 
         if (! is_dir($targetDir) && ! mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
@@ -134,6 +183,42 @@ final class DownstreamScaffolder
         }
 
         fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $target));
+    }
+
+    /**
+     * @param array<string, string> $replacements
+     */
+    private function renderTemplate(string $source, array $replacements): string
+    {
+        if (! is_file($source)) {
+            throw new RuntimeException(sprintf('Scaffold template not found: %s', $source));
+        }
+
+        $contents = file_get_contents($source);
+
+        if ($contents === false) {
+            throw new RuntimeException(sprintf('Unable to read scaffold template: %s', $source));
+        }
+
+        return str_replace(array_keys($replacements), array_values($replacements), $contents);
+    }
+
+    /**
+     * @param array<string, string> $managedFiles
+     */
+    private function frameworkMetadataForDownstream(string $toolPath, array $managedFiles): FrameworkConfig
+    {
+        $upstreamFramework = FrameworkConfig::load($this->frameworkRoot);
+
+        return $upstreamFramework->withInstalledRelease(
+            version: $upstreamFramework->version,
+            wordPressCoreVersion: $upstreamFramework->baseline['wordpress_core'],
+            managedComponents: $upstreamFramework->baseline['managed_components'],
+            managedFiles: $managedFiles,
+            distributionPath: $toolPath === '' ? 'vendor/wp-core-base' : trim($toolPath, '/'),
+            repoRoot: $this->repoRoot,
+            path: $this->repoRoot . '/.wp-core-base/framework.php',
+        );
     }
 
     /**

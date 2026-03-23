@@ -18,6 +18,7 @@ If you want the vocabulary before the setup steps, read [concepts.md](concepts.m
 
 - repository structure
 - dependency metadata through `.wp-core-base/manifest.php`
+- framework version metadata through `.wp-core-base/framework.php`
 - update pull requests
 - runtime staging for build or deployment pipelines
 
@@ -52,6 +53,8 @@ php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-ba
 ```
 
 7. if you want automated PRs, enable the GitHub workflows
+
+The release version of the framework itself is tracked separately in `.wp-core-base/framework.php`.
 
 Use this model when you want the simplest “WordPress in Git” mental model.
 
@@ -97,6 +100,8 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 
 9. point your image build at the staged runtime directory instead of the raw working tree
 
+If you want ongoing upstream framework maintenance, keep the scaffolded `.wp-core-base/framework.php` file and the `wp-core-base` self-update workflow enabled.
+
 Use `local` freely. It is the intended way to keep custom plugins, themes, MU plugin files, and other downstream-owned runtime code in the project.
 
 Managed dependencies follow a different contract: the updater may normalize them during `sync`, and their manifest checksum represents the sanitized runtime snapshot that the repo should keep in Git.
@@ -121,7 +126,7 @@ Suggested order:
 1. create an adoption branch
 2. decide whether `full-core` or `content-only` matches your architecture
 3. bring in `wp-core-base` through your preferred dependency strategy
-4. create or migrate to `.wp-core-base/manifest.php`
+4. create or migrate to `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`
 5. declare every managed and local dependency explicitly
 6. run `doctor` and `stage-runtime`
 7. enable GitHub automation only after the manifest is correct
@@ -135,8 +140,9 @@ Suggested order:
 1. vendor or otherwise make `wp-core-base` available in the repository
 2. run `scaffold-downstream`
 3. fill in `.wp-core-base/manifest.php`
-4. run `doctor --github`
-5. test one dry-run or one manual workflow dispatch before enabling the schedule
+4. keep `.wp-core-base/framework.php` pinned to the vendored framework version
+5. run `doctor --github`
+6. test one dry-run or one manual workflow dispatch before enabling the schedule
 
 ## Existing FTP Or Manual Deployment
 
