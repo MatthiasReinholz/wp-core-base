@@ -50,6 +50,8 @@ Managed dependencies are explicit. Folder presence alone never makes something u
 - `management: managed`
 - included in `automation.managed_kinds`
 
+Dependency-source failures are isolated per managed dependency. If one plugin or theme source fails, `sync` still continues processing the remaining managed dependencies and reports the failed sources as warnings at the end of the run.
+
 ## Dependency Update Sources
 
 Supported automated sources:

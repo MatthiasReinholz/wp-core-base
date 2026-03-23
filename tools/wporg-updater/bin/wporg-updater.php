@@ -235,10 +235,13 @@ TEXT);
             gitRunner: new GitCommandRunner($repoRoot, $config->dryRun()),
         );
         $errors = [];
+        $dependencyWarnings = [];
 
         foreach ([
             'core' => static fn () => $coreUpdater->sync(),
-            'dependencies' => static fn () => $dependencyUpdater->sync(),
+            'dependencies' => static function () use ($dependencyUpdater, &$dependencyWarnings): void {
+                $dependencyWarnings = $dependencyUpdater->sync();
+            },
         ] as $name => $syncPass) {
             try {
                 $syncPass();
@@ -249,6 +252,15 @@ TEXT);
 
         if ($errors !== []) {
             throw new RuntimeException(implode("\n\n", $errors));
+        }
+
+        if ($dependencyWarnings !== []) {
+            fwrite(
+                STDERR,
+                "[warn] Non-fatal dependency-source failures were reported during sync:\n- " .
+                implode("\n- ", $dependencyWarnings) .
+                "\n"
+            );
         }
 
         exit(0);
