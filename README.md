@@ -87,6 +87,8 @@ Use `full-core` instead of `content-only` if the downstream repository stores Wo
 Use `content-only-image-first` if you want a stricter image-first preset with external core, `staged-clean` validation, and starter ownership roots for content repos.
 Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the runtime-update, blocker, validation, and framework self-update workflows.
 
+If your downstream repo already ignores `/vendor/`, keep the ignore narrow so `vendor/wp-core-base` remains committed and self-updateable. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md) for the recommended pattern.
+
 The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, runtime files, and runtime directories owned directly by the downstream project. `local` is a normal long-term ownership model, not a migration workaround.
 
 ## Current Baseline

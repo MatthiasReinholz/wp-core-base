@@ -99,6 +99,20 @@ Framework updates operate on the vendored `wp-core-base` snapshot and `.wp-core-
 
 They do not rewrite `.wp-core-base/manifest.php`, and they do not directly change runtime dependency ownership. They refresh the framework tooling layer that downstream automation runs through.
 
+## What if my repo already ignores `/vendor/`?
+
+Keep the ignore narrow.
+
+If `wp-core-base` is installed at `vendor/wp-core-base`, prefer:
+
+```gitignore
+/vendor/*
+!/vendor/wp-core-base
+!/vendor/wp-core-base/**
+```
+
+That keeps framework self-update PRs reviewable and commit-safe without accidentally making the rest of `vendor/` repo-owned.
+
 ## Do managed dependencies have to arrive perfectly runtime-clean?
 
 Ideally, yes.

@@ -64,6 +64,10 @@ final class EnvironmentDoctor
             $this->inspectRuntimeStaging($config);
         }
 
+        if ($framework !== null) {
+            $this->inspectFrameworkDistributionPath($framework, $requireGitHub);
+        }
+
         $this->inspectGitHubEnvironment($config, $requireGitHub);
         $this->inspectGitHubWorkflows($framework, $requireGitHub);
         $this->printSummary();
@@ -375,6 +379,63 @@ final class EnvironmentDoctor
         $this->okIf($hasFrameworkSyncWorkflow, 'Found a GitHub workflow that runs framework-sync mode.', 'No GitHub workflow found that runs `wporg-updater.php framework-sync`.');
     }
 
+    private function inspectFrameworkDistributionPath(FrameworkConfig $framework, bool $requireGitHub): void
+    {
+        $distributionPath = $framework->distributionPath();
+
+        if ($distributionPath === '.') {
+            $this->ok('Framework distribution path is the repository root.');
+            return;
+        }
+
+        $absolutePath = $this->repoRoot . '/' . $distributionPath;
+        $this->okIf(
+            file_exists($absolutePath) || is_link($absolutePath),
+            sprintf('Framework distribution path exists: %s', $distributionPath),
+            sprintf('Framework distribution path does not exist: %s', $distributionPath)
+        );
+
+        if (! $this->commandExists('git') || ! $this->isGitRepository()) {
+            return;
+        }
+
+        $pathsToCheck = [$distributionPath];
+        $expectedToolPath = $distributionPath . '/tools/wporg-updater/bin/wporg-updater.php';
+
+        if (is_file($this->repoRoot . '/' . $expectedToolPath)) {
+            $pathsToCheck[] = $expectedToolPath;
+        }
+
+        foreach ($pathsToCheck as $path) {
+            if (! $this->isIgnoredByGit($path)) {
+                continue;
+            }
+
+            $message = sprintf(
+                'Framework distribution path is ignored by Git: %s. Framework self-update depends on committing the vendored snapshot and reviewing its changes in pull requests.',
+                $path
+            );
+
+            if (str_starts_with($distributionPath, 'vendor/')) {
+                $message .= sprintf(
+                    ' If your repo ignores /vendor/, prefer a narrow exception such as: /vendor/*, !/%s, !/%s/**',
+                    $distributionPath,
+                    $distributionPath
+                );
+            }
+
+            if ($requireGitHub) {
+                $this->error($message);
+            } else {
+                $this->warn($message);
+            }
+
+            return;
+        }
+
+        $this->ok(sprintf('Framework distribution path is not ignored by Git: %s', $distributionPath));
+    }
+
     /**
      * @param array<string, mixed> $dependency
      * @return array{0:list<string>,1:list<string>,2:list<string>,3:list<string>}
@@ -496,6 +557,18 @@ final class EnvironmentDoctor
         exec(sprintf('cd %s && git rev-parse --is-inside-work-tree 2>/dev/null', escapeshellarg($this->repoRoot)), $output, $status);
 
         return $status === 0 && trim(implode("\n", $output)) === 'true';
+    }
+
+    private function isIgnoredByGit(string $path): bool
+    {
+        $status = 0;
+        exec(sprintf(
+            'cd %s && git check-ignore --quiet --no-index -- %s 2>/dev/null',
+            escapeshellarg($this->repoRoot),
+            escapeshellarg($path)
+        ), $_, $status);
+
+        return $status === 0;
     }
 
     private function commandExists(string $command): bool

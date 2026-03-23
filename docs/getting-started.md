@@ -102,6 +102,16 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 
 If you want ongoing upstream framework maintenance, keep the scaffolded `.wp-core-base/framework.php` file and the `wp-core-base` self-update workflow enabled.
 
+If your repo already has a blanket `/vendor/` ignore from historical Composer usage, do not unignore the whole directory. Keep the exception narrow so only `vendor/wp-core-base` becomes repo-owned:
+
+```gitignore
+/vendor/*
+!/vendor/wp-core-base
+!/vendor/wp-core-base/**
+```
+
+That keeps framework self-update PRs reviewable without accidentally committing unrelated vendor packages.
+
 Use `local` freely. It is the intended way to keep custom plugins, themes, MU plugin files, and other downstream-owned runtime code in the project.
 
 Managed dependencies follow a different contract: the updater may normalize them during `sync`, and their manifest checksum represents the sanitized runtime snapshot that the repo should keep in Git.

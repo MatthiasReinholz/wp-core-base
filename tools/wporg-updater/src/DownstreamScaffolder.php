@@ -100,6 +100,13 @@ final class DownstreamScaffolder
         fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $doctorCommand));
         fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 
+        if (str_starts_with(trim($toolPath, '/'), 'vendor/')) {
+            fwrite(STDOUT, sprintf(
+                "[next] If your repo ignores /vendor/, add a narrow exception so Git can track %s and future framework self-update PRs can stay reviewable.\n",
+                trim($toolPath, '/')
+            ));
+        }
+
         return 0;
     }
 

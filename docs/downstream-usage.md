@@ -32,6 +32,16 @@ Use `.wp-core-base/framework.php` for:
 
 That file is what `framework-sync` updates when a newer `wp-core-base` release is installed into the downstream repo.
 
+If the downstream repo already ignores `/vendor/`, keep the exception narrow so only the framework snapshot becomes repo-owned:
+
+```gitignore
+/vendor/*
+!/vendor/wp-core-base
+!/vendor/wp-core-base/**
+```
+
+That is preferred over unignoring the whole `vendor/` tree. It keeps `framework-sync` reviewable in Git while avoiding accidental commits of unrelated Composer-installed packages.
+
 ## Framework Self-Update
 
 `framework-sync` is the framework-level equivalent of dependency sync.
