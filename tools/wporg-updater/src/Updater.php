@@ -26,7 +26,10 @@ final class Updater
     ) {
     }
 
-    public function sync(): void
+    /**
+     * @return list<string> Non-fatal dependency-level errors that were reported during sync.
+     */
+    public function sync(): array
     {
         $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $this->gitHubClient->ensureLabels($this->labelDefinitionsForRun());
@@ -43,8 +46,13 @@ final class Updater
         }
 
         if ($errors !== []) {
-            throw new RuntimeException("Dependency update sync completed with errors:\n- " . implode("\n- ", $errors));
+            fwrite(
+                STDERR,
+                "[warn] Dependency sync completed with non-fatal errors. Healthy dependencies were still processed.\n"
+            );
         }
+
+        return $errors;
     }
 
     /**
