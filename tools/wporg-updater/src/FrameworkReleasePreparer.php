@@ -16,10 +16,10 @@ final class FrameworkReleasePreparer
     /**
      * @return array{version:string, release_notes_path:string, release_notes_created:bool}
      */
-    public function prepare(string $releaseType, ?string $customVersion = null): array
+    public function prepare(string $releaseType, ?string $customVersion = null, bool $allowCurrentVersion = false): array
     {
         $framework = FrameworkConfig::load($this->repoRoot);
-        $version = $this->resolveVersion($framework->normalizedVersion(), $releaseType, $customVersion);
+        $version = $this->resolveVersion($framework->normalizedVersion(), $releaseType, $customVersion, $allowCurrentVersion);
         $releaseNotesPath = $this->repoRoot . '/docs/releases/' . $version . '.md';
         $releaseNotesCreated = false;
 
@@ -36,6 +36,11 @@ final class FrameworkReleasePreparer
                 managedFiles: $framework->managedFiles(),
             );
             (new FrameworkWriter())->write($updated);
+        } elseif (! $allowCurrentVersion) {
+            throw new RuntimeException(sprintf(
+                'Target framework version %s is already present. Use allow-current-version only when refreshing an existing release branch.',
+                $version
+            ));
         }
 
         return [
@@ -45,7 +50,7 @@ final class FrameworkReleasePreparer
         ];
     }
 
-    private function resolveVersion(string $currentVersion, string $releaseType, ?string $customVersion): string
+    private function resolveVersion(string $currentVersion, string $releaseType, ?string $customVersion, bool $allowCurrentVersion): string
     {
         $resolved = null;
 
@@ -67,10 +72,11 @@ final class FrameworkReleasePreparer
             };
         }
 
-        if (version_compare($resolved, $currentVersion, '<=')) {
+        if (version_compare($resolved, $currentVersion, $allowCurrentVersion ? '<' : '<=')) {
             throw new RuntimeException(sprintf(
-                'Target framework version %s must be greater than the current version %s.',
+                'Target framework version %s must be %s the current version %s.',
                 $resolved,
+                $allowCurrentVersion ? 'greater than or equal to' : 'greater than',
                 $currentVersion
             ));
         }

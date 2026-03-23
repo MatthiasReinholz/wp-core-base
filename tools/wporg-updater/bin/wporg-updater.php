@@ -100,6 +100,7 @@ Flags and environment:
   --release-type=TYPE    Release bump type for prepare-framework-release: patch, minor, major, or custom.
   --tag=TAG              Expected release tag for release-verify mode.
   --version=VERSION      Custom release version for prepare-framework-release.
+  --allow-current-version  Allow prepare-framework-release to reuse the current version when refreshing an existing release branch.
   --force                Overwrite scaffolded files when they already exist.
   WPORG_REPO_ROOT        Environment alternative to --repo-root.
   WPORG_UPDATE_DRY_RUN   Enable dry-run behavior for sync mode.
@@ -128,7 +129,11 @@ TEXT);
         }
 
         $customVersion = isset($options['version']) && is_string($options['version']) ? $options['version'] : null;
-        $result = (new FrameworkReleasePreparer($repoRoot))->prepare($releaseType, $customVersion);
+        $result = (new FrameworkReleasePreparer($repoRoot))->prepare(
+            $releaseType,
+            $customVersion,
+            isset($options['allow-current-version'])
+        );
 
         fwrite(STDOUT, sprintf("Prepared framework release %s\n", $result['version']));
         fwrite(STDOUT, sprintf("Release notes: %s\n", $result['release_notes_path']));

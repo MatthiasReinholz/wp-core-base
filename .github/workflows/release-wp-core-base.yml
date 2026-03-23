@@ -1,12 +1,19 @@
 name: release-wp-core-base
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Existing release tag in vX.Y.Z format'
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   release:
@@ -15,8 +22,9 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          ref: ${{ inputs.version }}
           fetch-depth: 0
 
       - name: Set up PHP
@@ -30,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME}"
+          version="${{ inputs.version }}"
 
           if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Version must use vX.Y.Z format." >&2
@@ -40,15 +48,15 @@ jobs:
           echo "value=${version}" >> "$GITHUB_OUTPUT"
           echo "plain=${version#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Re-run release gates
+      - name: Verify release tag comes from a merged release PR
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          php tools/wporg-updater/tests/run.php
-          php tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
-          php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
-          php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.version.outputs.value }}
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          bash scripts/ci/check_framework_release_pr.sh "${GITHUB_REPOSITORY}" "${{ steps.version.outputs.value }}" "$COMMIT_SHA"
+
+      - name: Validate release metadata
+        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.version.outputs.value }}
 
       - name: Build vendored framework snapshot
         run: |
@@ -62,7 +70,7 @@ jobs:
           zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
         with:
           tag_name: ${{ steps.version.outputs.value }}
           title: wp-core-base ${{ steps.version.outputs.value }}

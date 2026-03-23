@@ -34,8 +34,8 @@ The release-notes file must contain:
 1. run the manual `prepare-wp-core-base-release` workflow
 2. review the generated `release/vX.Y.Z` pull request like any normal code change
 3. merge that release PR only after the normal CI checks pass on the protected default branch
-4. `finalize-wp-core-base-release` creates and pushes the annotated tag automatically
-5. `release-wp-core-base` runs from that tag and publishes the GitHub Release asset
+4. `finalize-wp-core-base-release` creates and pushes the annotated tag automatically and publishes the GitHub Release asset
+5. use `release-wp-core-base` only as the manual recovery workflow for an already existing tag
 
 Do not cut ad hoc tags by hand.
 
@@ -62,9 +62,9 @@ php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.
 
 The release flow is intentionally staged:
 
-- `prepare-wp-core-base-release` derives the version bump, updates `.wp-core-base/framework.php`, scaffolds `docs/releases/<version>.md` when needed, and opens `release/vX.Y.Z`
-- `finalize-wp-core-base-release` reacts only to a merged release PR into `main` and creates the annotated tag from the merge commit
-- `release-wp-core-base` runs only from pushed SemVer tags, re-runs the release gates, and publishes the vendorable snapshot asset `wp-core-base-vendor-snapshot.zip`
+- `prepare-wp-core-base-release` derives the version bump, refreshes an existing release branch when appropriate, updates `.wp-core-base/framework.php`, scaffolds `docs/releases/<version>.md` when needed, and opens `release/vX.Y.Z`
+- `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, creates the annotated tag from the merge commit, and publishes the vendorable snapshot asset `wp-core-base-vendor-snapshot.zip`
+- `release-wp-core-base` is the manual recovery workflow for publishing a GitHub Release from an already existing tag after a failed finalize run
 
 This keeps release intent reviewable in a PR instead of bundling version bumps, tagging, and publishing into one manual step.
 

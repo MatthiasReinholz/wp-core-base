@@ -5,12 +5,15 @@ on:
     types:
       - closed
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 permissions:
   contents: write
 
 jobs:
-  tag:
-    name: Tag merged wp-core-base release
+  release:
+    name: Publish merged wp-core-base release
     if: >
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
@@ -26,6 +29,7 @@ jobs:
         run: |
           if [[ "$HEAD_REF" =~ ^release/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "plain=${BASH_REMATCH[1]#v}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -33,7 +37,7 @@ jobs:
           exit 1
 
       - name: Checkout merge commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
@@ -46,6 +50,17 @@ jobs:
 
       - name: Validate release metadata
         run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.release.outputs.version }}
+
+      - name: Build vendored framework snapshot
+        run: |
+          mkdir -p dist/wp-core-base
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.wp-core-base/build/' \
+            --exclude 'dist/' \
+            ./ dist/wp-core-base/
+          cd dist
+          zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
 
       - name: Ensure tag does not already exist
         env:
@@ -66,3 +81,11 @@ jobs:
 
       - name: Push tag
         run: git push origin "${{ steps.release.outputs.version }}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        with:
+          tag_name: ${{ steps.release.outputs.version }}
+          title: wp-core-base ${{ steps.release.outputs.version }}
+          body_path: docs/releases/${{ steps.release.outputs.plain }}.md
+          files: dist/wp-core-base-vendor-snapshot.zip

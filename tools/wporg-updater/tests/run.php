@@ -181,6 +181,9 @@ $assert($preparedFramework->version === '1.0.1', 'Expected prepare-framework-rel
 $preparedNotes = (string) file_get_contents($releasePrepRoot . '/docs/releases/1.0.1.md');
 $assert($preparedNotes !== '', 'Expected scaffolded release notes to be written.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($preparedNotes) === [], 'Expected scaffolded release notes to include required sections.');
+$refreshedRelease = (new FrameworkReleasePreparer($releasePrepRoot))->prepare('custom', 'v1.0.1', true);
+$assert($refreshedRelease['version'] === 'v1.0.1', 'Expected prepare-framework-release to allow refreshing the current version when explicitly requested.');
+$assert($refreshedRelease['release_notes_created'] === false, 'Expected refresh of existing release notes to avoid recreating the file.');
 
 $config = Config::load($repoRoot);
 $assert($config->profile === 'full-core', 'Expected repository manifest to load as full-core.');
