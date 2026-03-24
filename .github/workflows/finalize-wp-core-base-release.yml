@@ -43,7 +43,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
         with:
           php-version: '8.3'
           coverage: none
@@ -61,6 +61,7 @@ jobs:
             ./ dist/wp-core-base/
           cd dist
           zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
+          sha256sum wp-core-base-vendor-snapshot.zip | awk '{print $1}' > wp-core-base-vendor-snapshot.zip.sha256
 
       - name: Ensure tag does not already exist
         env:
@@ -83,9 +84,20 @@ jobs:
         run: git push origin "${{ steps.release.outputs.version }}"
 
       - name: Create GitHub release
+        id: create_release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
         with:
           tag_name: ${{ steps.release.outputs.version }}
           title: wp-core-base ${{ steps.release.outputs.version }}
           body_path: docs/releases/${{ steps.release.outputs.plain }}.md
-          files: dist/wp-core-base-vendor-snapshot.zip
+          files: |
+            dist/wp-core-base-vendor-snapshot.zip
+            dist/wp-core-base-vendor-snapshot.zip.sha256
+
+      - name: Roll back tag on release publish failure
+        if: ${{ failure() && steps.create_release.outcome == 'failure' }}
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          git tag -d "$VERSION" || true
+          git push --delete origin "$VERSION" || true

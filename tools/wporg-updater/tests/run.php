@@ -63,6 +63,8 @@ $runtimeDefaults = [
     'managed_sanitize_paths' => ['cms/plugins/docs', 'cms/plugins/tests', 'cms/themes/docs', 'cms/themes/tests', 'cms/mu-plugins/docs', 'cms/mu-plugins/tests'],
     'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
 ];
+$checkoutActionSha = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683';
+$setupPhpActionSha = 'shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f';
 $legacyRuntimeDefaults = $runtimeDefaults;
 unset(
     $legacyRuntimeDefaults['manifest_mode'],
@@ -205,6 +207,16 @@ $releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/'
 $assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
 $assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v' . $currentFrameworkVersion, 'Expected framework release verification to succeed.');
+$upstreamUpdatesWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-updates.yml');
+$upstreamFinalizeWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/finalize-wp-core-base-release.yml');
+$upstreamRecoveryReleaseWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/release-wp-core-base.yml');
+$assert(str_contains($upstreamUpdatesWorkflow, $checkoutActionSha), 'Expected upstream updates workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($upstreamUpdatesWorkflow, $setupPhpActionSha), 'Expected upstream updates workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($upstreamUpdatesWorkflow, "github.event.pull_request.merged == true"), 'Expected upstream updates workflow to narrow closed-PR reconciliation to merged PRs.');
+$assert(str_contains($upstreamUpdatesWorkflow, "automation:framework-update"), 'Expected upstream updates workflow to limit closed-PR reconciliation to framework automation PRs.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected finalize release workflow to publish a SHA-256 checksum asset.');
+$assert(str_contains($upstreamFinalizeWorkflow, "git push --delete origin"), 'Expected finalize release workflow to roll back the pushed tag when release publishing fails.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected manual release workflow to publish a SHA-256 checksum asset.');
 
 $releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
 mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);
@@ -795,10 +807,18 @@ $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-u
 $assert(str_contains($scaffoldedWorkflow, 'WPORG_REPO_ROOT: ${{ github.workspace }}'), 'Expected scaffolded workflow to set WPORG_REPO_ROOT so sync runs against the downstream repo.');
 $assert(str_contains($scaffoldedBlocker, 'contents: read'), 'Expected scaffolded blocker workflow to grant contents: read for actions/checkout.');
 $assert(str_contains($scaffoldedValidate, 'stage-runtime'), 'Expected scaffolded validation workflow to stage runtime output.');
+$assert(str_contains($scaffoldedWorkflow, $checkoutActionSha), 'Expected scaffolded updates workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedWorkflow, $setupPhpActionSha), 'Expected scaffolded updates workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($scaffoldedBlocker, $checkoutActionSha), 'Expected scaffolded blocker workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedBlocker, $setupPhpActionSha), 'Expected scaffolded blocker workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($scaffoldedValidate, $checkoutActionSha), 'Expected scaffolded validation workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedValidate, $setupPhpActionSha), 'Expected scaffolded validation workflow to pin setup-php by full commit SHA.');
 $scaffoldedFramework = FrameworkConfig::load($tempScaffoldRoot);
 $assert($scaffoldedFramework->distributionPath() === 'vendor/wp-core-base', 'Expected scaffolded framework metadata to point at the vendored framework path.');
 $scaffoldedFrameworkWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wp-core-base-self-update.yml');
 $assert(str_contains($scaffoldedFrameworkWorkflow, 'framework-sync --repo-root=.'), 'Expected scaffolded self-update workflow to run framework-sync.');
+$assert(str_contains($scaffoldedFrameworkWorkflow, $checkoutActionSha), 'Expected scaffolded framework self-update workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedFrameworkWorkflow, $setupPhpActionSha), 'Expected scaffolded framework self-update workflow to pin setup-php by full commit SHA.');
 $assert(str_contains($scaffoldedWorkflow, "github.event.pull_request.merged == true"), 'Expected scaffolded updates workflow to narrow closed-PR reconciliation to merged PRs.');
 $assert(str_contains($scaffoldedWorkflow, "automation:dependency-update"), 'Expected scaffolded updates workflow to gate closed-PR reconciliation to framework automation PRs.');
 

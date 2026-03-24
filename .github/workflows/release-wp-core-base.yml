@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
         with:
           php-version: '8.3'
           coverage: none
@@ -50,7 +50,7 @@ jobs:
 
       - name: Verify release tag comes from a merged release PR
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMIT_SHA="$(git rev-parse HEAD)"
           bash scripts/ci/check_framework_release_pr.sh "${GITHUB_REPOSITORY}" "${{ steps.version.outputs.value }}" "$COMMIT_SHA"
@@ -68,6 +68,7 @@ jobs:
             ./ dist/wp-core-base/
           cd dist
           zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
+          sha256sum wp-core-base-vendor-snapshot.zip | awk '{print $1}' > wp-core-base-vendor-snapshot.zip.sha256
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
@@ -75,4 +76,6 @@ jobs:
           tag_name: ${{ steps.version.outputs.value }}
           title: wp-core-base ${{ steps.version.outputs.value }}
           body_path: docs/releases/${{ steps.version.outputs.plain }}.md
-          files: dist/wp-core-base-vendor-snapshot.zip
+          files: |
+            dist/wp-core-base-vendor-snapshot.zip
+            dist/wp-core-base-vendor-snapshot.zip.sha256

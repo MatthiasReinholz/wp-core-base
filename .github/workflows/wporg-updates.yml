@@ -19,15 +19,25 @@ concurrency:
 
 jobs:
   sync:
+    if: >
+      github.event_name != 'pull_request_target' ||
+      (
+        github.event.action == 'closed' &&
+        github.event.pull_request.merged == true &&
+        (
+          contains(github.event.pull_request.labels.*.name, 'automation:dependency-update') ||
+          contains(github.event.pull_request.labels.*.name, 'automation:framework-update')
+        )
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
 
       - name: Set up PHP
-        uses: shivammathur/setup-php@v2
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
         with:
           php-version: '8.3'
           coverage: none

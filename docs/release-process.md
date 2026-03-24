@@ -63,7 +63,7 @@ php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.
 The release flow is intentionally staged:
 
 - `prepare-wp-core-base-release` derives the version bump, refreshes an existing release branch when appropriate, updates `.wp-core-base/framework.php`, scaffolds `docs/releases/<version>.md` when needed, and opens `release/vX.Y.Z`
-- `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, creates the annotated tag from the merge commit, and publishes the vendorable snapshot asset `wp-core-base-vendor-snapshot.zip`
+- `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, creates the annotated tag from the merge commit, publishes the vendorable snapshot asset `wp-core-base-vendor-snapshot.zip`, and publishes its SHA-256 checksum file
 - `release-wp-core-base` is the manual recovery workflow for publishing a GitHub Release from an already existing tag after a failed finalize run
 
 This keeps release intent reviewable in a PR instead of bundling version bumps, tagging, and publishing into one manual step.
