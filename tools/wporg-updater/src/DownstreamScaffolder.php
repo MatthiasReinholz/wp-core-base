@@ -25,6 +25,9 @@ final class DownstreamScaffolder
         $paths = $this->pathsForProfile($preset['profile'], $contentRoot);
         $ownershipRoots = $this->replacePathPlaceholders($preset['ownership_roots'], $paths);
         $managedSanitizePaths = $this->replacePathPlaceholders($preset['managed_sanitize_paths'], $paths);
+        $wrapperPath = $this->wrapperPath($toolPath);
+        $phpPath = $this->updaterCommand($toolPath, '');
+        $toolRoot = $this->toolRootPath($toolPath);
 
         $this->printHeading('wp-core-base scaffold-downstream');
 
@@ -50,6 +53,25 @@ final class DownstreamScaffolder
                     '__VALIDATED_KINDS__' => $this->exportInlineArray($preset['validated_kinds']),
                     '__MANAGED_SANITIZE_PATHS__' => $this->exportInlineArray($managedSanitizePaths),
                     '__MANAGED_SANITIZE_FILES__' => $this->exportInlineArray($preset['managed_sanitize_files']),
+                ],
+            ],
+            [
+                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-usage.md.tpl',
+                'target' => $this->repoRoot . '/.wp-core-base/USAGE.md',
+                'replacements' => [
+                    '__WPORG_WRAPPER_PATH__' => $wrapperPath,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                    '__WPORG_TOOL_ROOT__' => $toolRoot,
+                    '__CONTENT_ROOT__' => $paths['content_root'],
+                ],
+            ],
+            [
+                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-agents.md.tpl',
+                'target' => $this->repoRoot . '/AGENTS.md',
+                'replacements' => [
+                    '__WPORG_WRAPPER_PATH__' => $wrapperPath,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                    '__WPORG_TOOL_ROOT__' => $toolRoot,
                 ],
             ],
         ];
@@ -97,6 +119,7 @@ final class DownstreamScaffolder
         fwrite(STDOUT, "\n");
         fwrite(STDOUT, "Next steps:\n");
         fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
+        fwrite(STDOUT, sprintf("[next] Review the local usage guidance at %s/.wp-core-base/USAGE.md and %s/AGENTS.md.\n", $this->repoRoot, $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $doctorCommand));
         fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 
@@ -266,19 +289,36 @@ final class DownstreamScaffolder
         return $normalized;
     }
 
+    private function wrapperPath(string $toolPath): string
+    {
+        $trimmed = trim($toolPath, '/');
+
+        if ($trimmed === '') {
+            return 'bin/wp-core-base';
+        }
+
+        return $trimmed . '/bin/wp-core-base';
+    }
+
+    private function toolRootPath(string $toolPath): string
+    {
+        $trimmed = trim($toolPath, '/');
+
+        return $trimmed === '' ? '.' : $trimmed;
+    }
+
     private function updaterCommand(string $toolPath, string $mode): string
     {
         $normalized = trim($toolPath);
+        $command = $normalized === '' || $normalized === '.'
+            ? 'php tools/wporg-updater/bin/wporg-updater.php'
+            : sprintf('php %s/tools/wporg-updater/bin/wporg-updater.php', trim($normalized, '/'));
 
-        if ($normalized === '' || $normalized === '.') {
-            return sprintf('php tools/wporg-updater/bin/wporg-updater.php %s', $mode);
+        if ($mode === '') {
+            return $command;
         }
 
-        return sprintf(
-            'php %s/tools/wporg-updater/bin/wporg-updater.php %s',
-            trim($normalized, '/'),
-            $mode
-        );
+        return sprintf('%s %s', $command, $mode);
     }
 
     /**

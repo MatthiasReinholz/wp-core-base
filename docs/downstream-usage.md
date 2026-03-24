@@ -267,8 +267,10 @@ Typical layout:
 
 ```text
 project/
+  AGENTS.md
   .wp-core-base/framework.php
   .wp-core-base/manifest.php
+  .wp-core-base/USAGE.md
   .github/workflows/
   vendor/wp-core-base/
 ```
