@@ -55,6 +55,16 @@ final class Config
             throw new RuntimeException('Manifest file must return an array.');
         }
 
+        return self::fromArray($repoRoot, $data, $resolvedManifest);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    public static function fromArray(string $repoRoot, array $data, ?string $manifestPath = null): self
+    {
+        $resolvedManifest = $manifestPath ?? $repoRoot . '/.wp-core-base/manifest.php';
+
         $profile = self::string($data['profile'] ?? 'full-core', 'profile');
 
         if (! in_array($profile, ['full-core', 'content-only'], true)) {

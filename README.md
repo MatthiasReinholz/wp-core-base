@@ -54,6 +54,8 @@ If you need help choosing an architecture first, read [docs/deployment-models.md
 
 If you want the framework vocabulary first, read [docs/concepts.md](docs/concepts.md).
 
+If you want the day-to-day dependency authoring workflow, read [docs/managing-dependencies.md](docs/managing-dependencies.md).
+
 ## GitHub And Non-GitHub Use
 
 You do not need GitHub to use `wp-core-base` as a code base.
@@ -72,6 +74,7 @@ That means these are all valid:
 If `wp-core-base` is the current repository:
 
 ```bash
+bin/wp-core-base list-dependencies
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
@@ -116,6 +119,8 @@ These versions describe the code committed in this repository, not a floating la
 - evaluation checklist: [docs/evaluation-guide.md](docs/evaluation-guide.md)
 - support boundaries: [docs/support-matrix.md](docs/support-matrix.md)
 - onboarding and implementation: [docs/getting-started.md](docs/getting-started.md)
+- dependency authoring tasks: [docs/managing-dependencies.md](docs/managing-dependencies.md)
+- local PHP bootstrap notes: [docs/local-prerequisites.md](docs/local-prerequisites.md)
 - deployment and architecture choices: [docs/deployment-models.md](docs/deployment-models.md)
 - advanced downstream usage: [docs/downstream-usage.md](docs/downstream-usage.md)
 - ongoing operations: [docs/operations.md](docs/operations.md)

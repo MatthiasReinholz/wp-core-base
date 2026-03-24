@@ -4,6 +4,7 @@ This guide is for downstream users of `wp-core-base`.
 
 If you are contributing to `wp-core-base` itself, use [contributing.md](contributing.md).
 If you want the vocabulary before the setup steps, read [concepts.md](concepts.md).
+If you want the routine add/remove dependency workflow, read [managing-dependencies.md](managing-dependencies.md).
 
 ## Choose Your Starting Point
 
@@ -125,6 +126,13 @@ Use `local` freely. It is the intended way to keep custom plugins, themes, MU pl
 
 Managed dependencies follow a different contract: the updater may normalize them during `sync`, and their manifest checksum represents the sanitized runtime snapshot that the repo should keep in Git.
 
+For routine entry creation, prefer the CLI over hand-authoring manifest arrays:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
+vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=.
+```
+
 If you are migrating a mixed repository, these helper commands are useful:
 
 ```bash
@@ -195,12 +203,15 @@ Use whichever local stack your team already prefers, such as:
 The framework-specific commands you will use most often are:
 
 ```bash
+bin/wp-core-base list-dependencies
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 php tools/wporg-updater/tests/run.php
 ```
 
 If `wp-core-base` is vendored into another repository, run the same commands from that vendored path and pass `--repo-root=.`
+
+If PHP is not installed locally yet, see [local-prerequisites.md](local-prerequisites.md).
 
 Two practical defaults for new downstreams:
 

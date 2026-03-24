@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CoreScanner;
+use WpOrgPluginUpdater\DependencyAuthoringService;
+use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\FrameworkConfig;
@@ -14,6 +16,7 @@ use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
+use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\LabelHelper;
@@ -72,6 +75,39 @@ unset(
     $legacyRuntimeDefaults['managed_sanitize_paths'],
     $legacyRuntimeDefaults['managed_sanitize_files'],
 );
+
+$writeManifest = static function (string $root, array $dependencies = []) use ($runtimeDefaults): void {
+    if (! is_dir($root . '/.wp-core-base')) {
+        mkdir($root . '/.wp-core-base', 0777, true);
+    }
+
+    file_put_contents(
+        $root . '/.wp-core-base/manifest.php',
+        "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export([
+            'profile' => 'content-only',
+            'paths' => [
+                'content_root' => 'cms',
+                'plugins_root' => 'cms/plugins',
+                'themes_root' => 'cms/themes',
+                'mu_plugins_root' => 'cms/mu-plugins',
+            ],
+            'core' => [
+                'mode' => 'external',
+                'enabled' => false,
+            ],
+            'runtime' => $runtimeDefaults,
+            'github' => [
+                'api_base' => 'https://api.github.com',
+            ],
+            'automation' => [
+                'base_branch' => null,
+                'dry_run' => false,
+                'managed_kinds' => ['plugin', 'theme'],
+            ],
+            'dependencies' => $dependencies,
+        ], true) . ";\n"
+    );
+};
 
 $assert($classifier->classifyScope('5.3.6', '5.3.7') === 'patch', 'Expected patch classification.');
 $assert($classifier->classifyScope('5.3.7', '5.4.0') === 'minor', 'Expected minor classification.');
@@ -872,6 +908,143 @@ $frameworkMetadata = PrBodyRenderer::extractMetadata($renderer->renderFrameworkU
     ],
 ));
 $assert(is_array($frameworkMetadata) && $frameworkMetadata['slug'] === 'wp-core-base', 'Expected framework PR metadata to include a slug for blocker compatibility.');
+
+$authoringRoot = sys_get_temp_dir() . '/wporg-authoring-' . bin2hex(random_bytes(4));
+mkdir($authoringRoot . '/cms/plugins/project-plugin', 0777, true);
+mkdir($authoringRoot . '/cms/themes/project-theme', 0777, true);
+mkdir($authoringRoot . '/cms/mu-plugins', 0777, true);
+mkdir($authoringRoot . '/cms/languages', 0777, true);
+$writeManifest($authoringRoot);
+
+file_put_contents(
+    $authoringRoot . '/cms/plugins/project-plugin/project-plugin.php',
+    "<?php\n/*\nPlugin Name: Project Plugin\nVersion: 1.0.0\n*/\n"
+);
+file_put_contents(
+    $authoringRoot . '/cms/themes/project-theme/style.css',
+    "/*\nTheme Name: Project Theme\nVersion: 2.0.0\n*/\n"
+);
+file_put_contents(
+    $authoringRoot . '/cms/mu-plugins/bootstrap.php',
+    "<?php\n/*\nPlugin Name: Project Bootstrap\nVersion: 0.1.0\n*/\n"
+);
+
+$authoringConfig = Config::load($authoringRoot);
+$authoringService = new DependencyAuthoringService(
+    config: $authoringConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($authoringConfig->runtime),
+    manifestWriter: new ManifestWriter(),
+    wordPressOrgClient: $wpClient,
+    gitHubReleaseClient: $gitHubReleaseClient,
+    httpClient: $httpClient,
+);
+
+$addedPlugin = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'plugin',
+    'path' => 'cms/plugins/project-plugin',
+]);
+$assert($addedPlugin['component_key'] === 'plugin:local:project-plugin', 'Expected local plugin add to derive the component key.');
+$assert($addedPlugin['main_file'] === 'project-plugin.php', 'Expected local plugin add to infer the plugin main file.');
+$assert($addedPlugin['version'] === '1.0.0', 'Expected local plugin add to infer the plugin version.');
+
+$addedTheme = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'theme',
+    'path' => 'cms/themes/project-theme',
+]);
+$assert($addedTheme['main_file'] === 'style.css', 'Expected local theme add to use style.css as the main file.');
+
+$addedMuFile = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'mu-plugin-file',
+    'path' => 'cms/mu-plugins/bootstrap.php',
+]);
+$assert($addedMuFile['main_file'] === null, 'Expected MU plugin files to omit main_file.');
+$assert($addedMuFile['version'] === '0.1.0', 'Expected MU plugin files to infer the version header.');
+
+$addedRuntimeDirectory = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'runtime-directory',
+    'path' => 'cms/languages',
+]);
+$assert($addedRuntimeDirectory['name'] === 'Languages', 'Expected runtime-directory add to derive a display name from the path.');
+
+$listOutput = $authoringService->renderDependencyList();
+$assert(! str_contains($listOutput, 'MANAGED'), 'Expected empty management groups to be omitted from list output.');
+$assert(str_contains($listOutput, 'LOCAL'), 'Expected list output to group local dependencies.');
+$assert(str_contains($listOutput, 'project-plugin'), 'Expected list output to include added dependencies.');
+
+file_put_contents(
+    $authoringRoot . '/cms/plugins/project-plugin/project-plugin.php',
+    "<?php\n/*\nPlugin Name: Project Plugin\nVersion: 1.1.0\n*/\n"
+);
+$replacedPlugin = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'plugin',
+    'path' => 'cms/plugins/project-plugin',
+    'force' => true,
+]);
+$assert($replacedPlugin['version'] === '1.1.0', 'Expected --force to replace an existing manifest entry rather than appending a duplicate.');
+$authoringReloaded = Config::load($authoringRoot);
+$pluginEntries = array_values(array_filter(
+    $authoringReloaded->dependencies(),
+    static fn (array $dependency): bool => $dependency['component_key'] === 'plugin:local:project-plugin'
+));
+$assert(count($pluginEntries) === 1, 'Expected --force replacement to keep only one manifest entry for the same component.');
+
+$removedTheme = $authoringService->removeDependency([
+    'slug' => 'project-theme',
+    'kind' => 'theme',
+]);
+$assert($removedTheme['deleted_path'] === false, 'Expected manifest-only dependency removal by default.');
+$assert(file_exists($authoringRoot . '/cms/themes/project-theme/style.css'), 'Expected manifest-only removal to leave the runtime path intact.');
+
+$removedPlugin = $authoringService->removeDependency([
+    'component-key' => 'plugin:local:project-plugin',
+    'delete-path' => true,
+]);
+$assert($removedPlugin['deleted_path'] === true, 'Expected remove-dependency --delete-path to report the path deletion.');
+$assert(! file_exists($authoringRoot . '/cms/plugins/project-plugin'), 'Expected remove-dependency --delete-path to delete the runtime path.');
+
+$ambiguousRoot = sys_get_temp_dir() . '/wporg-authoring-ambiguous-' . bin2hex(random_bytes(4));
+mkdir($ambiguousRoot . '/plugin', 0777, true);
+file_put_contents($ambiguousRoot . '/plugin/first.php', "<?php\n/*\nPlugin Name: First\n*/\n");
+file_put_contents($ambiguousRoot . '/plugin/second.php', "<?php\n/*\nPlugin Name: Second\n*/\n");
+$ambiguousRejected = false;
+
+try {
+    (new DependencyMetadataResolver())->resolveMainFile($ambiguousRoot . '/plugin', 'plugin');
+} catch (RuntimeException $exception) {
+    $ambiguousRejected = str_contains($exception->getMessage(), '--main-file');
+}
+
+$assert($ambiguousRejected, 'Expected ambiguous plugin entrypoints to require --main-file.');
+$assert(
+    DependencyAuthoringService::defaultGitHubTokenEnv('example-private-plugin') === 'WP_CORE_BASE_GITHUB_TOKEN_EXAMPLE_PRIVATE_PLUGIN',
+    'Expected default token env names to normalize plugin slugs.'
+);
+$assert(
+    DependencyAuthoringService::defaultGitHubTokenEnv('', 'owner/private-plugin') === 'WP_CORE_BASE_GITHUB_TOKEN_PRIVATE_PLUGIN',
+    'Expected default token env names to fall back to the repository basename.'
+);
+
+$interactiveStream = fopen('php://temp', 'r+');
+$assert($interactiveStream !== false, 'Expected to create a temp stream for interactive prompter testing.');
+$assert(! InteractivePrompter::canPrompt($interactiveStream), 'Expected non-TTY streams to disable interactive prompting.');
+fclose($interactiveStream);
+
+$suggestRoot = sys_get_temp_dir() . '/wporg-suggest-authoring-' . bin2hex(random_bytes(4));
+mkdir($suggestRoot . '/cms/plugins/custom-plugin', 0777, true);
+$writeManifest($suggestRoot);
+file_put_contents($suggestRoot . '/cms/plugins/custom-plugin/custom-plugin.php', "<?php\n/*\nPlugin Name: Custom Plugin\n*/\n");
+$suggestions = (new ManifestSuggester(Config::load($suggestRoot), 'vendor/wp-core-base/bin/wp-core-base'))->render();
+$assert(str_contains($suggestions, 'add-dependency --source=local --kind=plugin --path=cms/plugins/custom-plugin'), 'Expected manifest suggestions to recommend add-dependency commands.');
+
+$wrapperContents = (string) file_get_contents($repoRoot . '/bin/wp-core-base');
+$assert(str_contains($wrapperContents, 'brew install php'), 'Expected the shell launcher to include macOS PHP install guidance.');
+$assert(str_contains($wrapperContents, 'docs/local-prerequisites.md'), 'Expected the shell launcher to point users at the local prerequisites doc.');
 
 ZipExtractor::assertSafeEntryName('wordpress/wp-includes/version.php');
 $zipTraversalRejected = false;
