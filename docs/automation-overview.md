@@ -52,7 +52,12 @@ Managed dependencies are explicit. Folder presence alone never makes something u
 
 Dependency-source failures are isolated per managed dependency. If one plugin or theme source fails, `sync` still continues processing the remaining managed dependencies and reports the failed sources as warnings at the end of the run.
 
-The scaffolded updates workflow also listens for closed pull requests, but reconciliation is narrowed to merged framework-managed PRs. That keeps queued follow-up updates moving after a merge without rerunning full update reconciliation for unrelated closed pull requests.
+The scaffolded automation now separates:
+
+- scheduled or manual update runs
+- merged-PR reconciliation runs
+
+That keeps queued follow-up updates moving after a merge without mixing `pull_request_target` behavior into the scheduled/manual update workflow.
 
 ## Dependency Update Sources
 
@@ -107,6 +112,7 @@ Framework PRs use the same queueing behavior, but operate on the vendored `wp-co
 - `.wp-core-base/manifest.php`
 - `.wp-core-base/framework.php`
 - `.github/workflows/wporg-updates.yml`
+- `.github/workflows/wporg-updates-reconcile.yml`
 - `.github/workflows/wporg-update-pr-blocker.yml`
 - `.github/workflows/wporg-validate-runtime.yml`
 - `.github/workflows/wp-core-base-self-update.yml`

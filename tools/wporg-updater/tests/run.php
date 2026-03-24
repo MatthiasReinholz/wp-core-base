@@ -208,15 +208,20 @@ $assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist
 $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
 $assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v' . $currentFrameworkVersion, 'Expected framework release verification to succeed.');
 $upstreamUpdatesWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-updates.yml');
+$upstreamReconcileWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $upstreamFinalizeWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/finalize-wp-core-base-release.yml');
 $upstreamRecoveryReleaseWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/release-wp-core-base.yml');
 $assert(str_contains($upstreamUpdatesWorkflow, $checkoutActionSha), 'Expected upstream updates workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($upstreamUpdatesWorkflow, $setupPhpActionSha), 'Expected upstream updates workflow to pin setup-php by full commit SHA.');
-$assert(str_contains($upstreamUpdatesWorkflow, "github.event.pull_request.merged == true"), 'Expected upstream updates workflow to narrow closed-PR reconciliation to merged PRs.');
-$assert(str_contains($upstreamUpdatesWorkflow, "automation:framework-update"), 'Expected upstream updates workflow to limit closed-PR reconciliation to framework automation PRs.');
+$assert(! str_contains($upstreamUpdatesWorkflow, 'pull_request_target:'), 'Expected upstream updates workflow to keep scheduled/manual execution separate from PR reconciliation.');
+$assert(str_contains($upstreamReconcileWorkflow, $checkoutActionSha), 'Expected upstream reconciliation workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($upstreamReconcileWorkflow, $setupPhpActionSha), 'Expected upstream reconciliation workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($upstreamReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected upstream reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
+$assert(str_contains($upstreamReconcileWorkflow, "automation:framework-update"), 'Expected upstream reconciliation workflow to limit closed-PR reconciliation to framework automation PRs.');
 $assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected finalize release workflow to publish a SHA-256 checksum asset.');
 $assert(str_contains($upstreamFinalizeWorkflow, "git push --delete origin"), 'Expected finalize release workflow to roll back the pushed tag when release publishing fails.');
 $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected manual release workflow to publish a SHA-256 checksum asset.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'GitHub Release ${{ steps.version.outputs.value }} already exists; nothing to publish.'), 'Expected manual recovery release workflow to exit cleanly when the GitHub Release already exists.');
 
 $releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
 mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);
@@ -793,6 +798,7 @@ mkdir($tempScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
 $scaffoldedManifest = (string) file_get_contents($tempScaffoldRoot . '/.wp-core-base/manifest.php');
 $scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+$scaffoldedReconcileWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $scaffoldedBlocker = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
 $scaffoldedValidate = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml');
 $assert(str_contains($scaffoldedManifest, "'profile' => 'content-only'"), 'Expected scaffolded manifest to set the requested profile.');
@@ -805,10 +811,15 @@ $assert(str_contains($scaffoldedManifest, "'kind' => 'mu-plugin-file'"), 'Expect
 $assert(str_contains($scaffoldedManifest, "'kind' => 'runtime-directory'"), 'Expected scaffolded manifest to document runtime directories.');
 $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
 $assert(str_contains($scaffoldedWorkflow, 'WPORG_REPO_ROOT: ${{ github.workspace }}'), 'Expected scaffolded workflow to set WPORG_REPO_ROOT so sync runs against the downstream repo.');
+$assert(! str_contains($scaffoldedWorkflow, 'pull_request_target:'), 'Expected scaffolded updates workflow to keep scheduled/manual execution separate from PR reconciliation.');
 $assert(str_contains($scaffoldedBlocker, 'contents: read'), 'Expected scaffolded blocker workflow to grant contents: read for actions/checkout.');
 $assert(str_contains($scaffoldedValidate, 'stage-runtime'), 'Expected scaffolded validation workflow to stage runtime output.');
 $assert(str_contains($scaffoldedWorkflow, $checkoutActionSha), 'Expected scaffolded updates workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($scaffoldedWorkflow, $setupPhpActionSha), 'Expected scaffolded updates workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($scaffoldedReconcileWorkflow, $checkoutActionSha), 'Expected scaffolded reconciliation workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedReconcileWorkflow, $setupPhpActionSha), 'Expected scaffolded reconciliation workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($scaffoldedReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected scaffolded reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
+$assert(str_contains($scaffoldedReconcileWorkflow, "automation:dependency-update"), 'Expected scaffolded reconciliation workflow to gate merged-PR reconciliation to framework automation PRs.');
 $assert(str_contains($scaffoldedBlocker, $checkoutActionSha), 'Expected scaffolded blocker workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($scaffoldedBlocker, $setupPhpActionSha), 'Expected scaffolded blocker workflow to pin setup-php by full commit SHA.');
 $assert(str_contains($scaffoldedValidate, $checkoutActionSha), 'Expected scaffolded validation workflow to pin actions/checkout by full commit SHA.');
@@ -819,8 +830,6 @@ $scaffoldedFrameworkWorkflow = (string) file_get_contents($tempScaffoldRoot . '/
 $assert(str_contains($scaffoldedFrameworkWorkflow, 'framework-sync --repo-root=.'), 'Expected scaffolded self-update workflow to run framework-sync.');
 $assert(str_contains($scaffoldedFrameworkWorkflow, $checkoutActionSha), 'Expected scaffolded framework self-update workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($scaffoldedFrameworkWorkflow, $setupPhpActionSha), 'Expected scaffolded framework self-update workflow to pin setup-php by full commit SHA.');
-$assert(str_contains($scaffoldedWorkflow, "github.event.pull_request.merged == true"), 'Expected scaffolded updates workflow to narrow closed-PR reconciliation to merged PRs.');
-$assert(str_contains($scaffoldedWorkflow, "automation:dependency-update"), 'Expected scaffolded updates workflow to gate closed-PR reconciliation to framework automation PRs.');
 
 $migrationScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-migration-' . bin2hex(random_bytes(4));
 mkdir($migrationScaffoldRoot, 0777, true);
@@ -840,8 +849,8 @@ $compactScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-image-first-compact
 mkdir($compactScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $compactScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only-image-first-compact', 'cms', true);
 $assert(! file_exists($compactScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml'), 'Expected compact image-first scaffold profile to omit the standalone runtime-validation workflow.');
-$compactWorkflow = (string) file_get_contents($compactScaffoldRoot . '/.github/workflows/wporg-updates.yml');
-$assert(str_contains($compactWorkflow, "automation:framework-update"), 'Expected compact scaffold to keep merged automation PR reconciliation in the updates workflow.');
+$compactReconcileWorkflow = (string) file_get_contents($compactScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
+$assert(str_contains($compactReconcileWorkflow, "automation:framework-update"), 'Expected compact scaffold to keep merged automation PR reconciliation in the dedicated reconciliation workflow.');
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);

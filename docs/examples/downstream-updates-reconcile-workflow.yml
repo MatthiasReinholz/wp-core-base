@@ -1,9 +1,12 @@
-name: wp-core-base Updates
+# This file belongs in the downstream repository, not in wp-core-base itself.
+# It reruns update reconciliation after a framework-managed PR is merged.
+
+name: wp-core-base Update Reconciliation
 
 on:
-  schedule:
-    - cron: '17 */6 * * *'
-  workflow_dispatch:
+  pull_request_target:
+    types:
+      - closed
 
 permissions:
   contents: write
@@ -11,14 +14,20 @@ permissions:
   issues: write
 
 concurrency:
-  group: wp-core-base-updates
+  group: wp-core-base-updates-reconcile
   cancel-in-progress: false
 
 jobs:
   sync:
+    if: >
+      github.event.pull_request.merged == true &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'automation:dependency-update') ||
+        contains(github.event.pull_request.labels.*.name, 'automation:framework-update')
+      )
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out downstream project
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
@@ -34,9 +43,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run updater
+      - name: Run updater against downstream repo
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
           WPORG_REPO_ROOT: ${{ github.workspace }}
-        run: __WPORG_SYNC_COMMAND__
+        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync

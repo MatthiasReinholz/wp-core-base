@@ -276,7 +276,8 @@ project/
 ## Examples
 
 - example downstream manifest: [examples/downstream-manifest.php](examples/downstream-manifest.php)
-- example sync workflow: [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
+- example scheduled/manual updates workflow: [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
+- example merged-PR reconciliation workflow: [examples/downstream-updates-reconcile-workflow.yml](examples/downstream-updates-reconcile-workflow.yml)
 - example framework self-update workflow: [examples/downstream-framework-self-update-workflow.yml](examples/downstream-framework-self-update-workflow.yml)
 - example blocker workflow: [examples/downstream-pr-blocker-workflow.yml](examples/downstream-pr-blocker-workflow.yml)
 - example validation workflow: [examples/downstream-validate-runtime-workflow.yml](examples/downstream-validate-runtime-workflow.yml)

@@ -130,6 +130,10 @@ final class DownstreamScaffolder
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
                 ['__WPORG_SYNC_COMMAND__' => $syncCommand]
             ),
+            '.github/workflows/wporg-updates-reconcile.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-updates-reconcile-workflow.yml.tpl',
+                ['__WPORG_SYNC_COMMAND__' => $syncCommand]
+            ),
             '.github/workflows/wporg-update-pr-blocker.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
                 ['__WPORG_BLOCKER_COMMAND__' => $blockerCommand]

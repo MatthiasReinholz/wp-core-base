@@ -1,9 +1,9 @@
-name: wp-core-base Updates
+name: wp-core-base Update Reconciliation
 
 on:
-  schedule:
-    - cron: '17 */6 * * *'
-  workflow_dispatch:
+  pull_request_target:
+    types:
+      - closed
 
 permissions:
   contents: write
@@ -11,11 +11,17 @@ permissions:
   issues: write
 
 concurrency:
-  group: wp-core-base-updates
+  group: wp-core-base-updates-reconcile
   cancel-in-progress: false
 
 jobs:
   sync:
+    if: >
+      github.event.pull_request.merged == true &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'automation:dependency-update') ||
+        contains(github.event.pull_request.labels.*.name, 'automation:framework-update')
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -38,4 +44,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
-        run: php tools/wporg-updater/bin/wporg-updater.php sync
+          WPORG_REPO_ROOT: ${{ github.workspace }}
+        run: __WPORG_SYNC_COMMAND__

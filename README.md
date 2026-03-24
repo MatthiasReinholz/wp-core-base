@@ -88,7 +88,7 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
 Use `content-only-image-first` if you want a stricter image-first preset with external core, `staged-clean` validation, and starter ownership roots for content repos.
-Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the runtime-update, blocker, validation, and framework self-update workflows.
+Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the scheduled updates, merged-PR reconciliation, blocker, validation, and framework self-update workflows.
 
 If your downstream repo already ignores `/vendor/`, keep the ignore narrow so `vendor/wp-core-base` remains committed and self-updateable. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md) for the recommended pattern.
 
