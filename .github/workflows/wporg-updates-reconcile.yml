@@ -1,12 +1,9 @@
-# This file belongs in the downstream repository, not in wp-core-base itself.
-# It opens scheduled PRs when a newer wp-core-base framework release is available.
-
-name: wp-core-base Self-Update
+name: wp-core-base Update Reconciliation
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: '11 6 * * 1'
+  pull_request_target:
+    types:
+      - closed
 
 permissions:
   contents: write
@@ -14,14 +11,20 @@ permissions:
   issues: write
 
 concurrency:
-  group: wp-core-base-framework-update
+  group: wp-core-base-updates-reconcile
   cancel-in-progress: false
 
 jobs:
-  framework-sync:
+  sync:
+    if: >
+      github.event.pull_request.merged == true &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'automation:dependency-update') ||
+        contains(github.event.pull_request.labels.*.name, 'automation:framework-update')
+      )
     runs-on: ubuntu-latest
     steps:
-      - name: Check out downstream project
+      - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
@@ -37,8 +40,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Run framework self-update
+      - name: Run updater
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
-        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=.
+        run: php tools/wporg-updater/bin/wporg-updater.php sync

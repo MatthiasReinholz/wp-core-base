@@ -34,10 +34,11 @@ If you are evaluating fit:
 If you are implementing in a downstream repo:
 
 1. [docs/getting-started.md](/Users/matthias/DEV/wp-core-base/docs/getting-started.md)
-2. [docs/manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md)
-3. [docs/downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md)
-4. [docs/migration-guide.md](/Users/matthias/DEV/wp-core-base/docs/migration-guide.md)
-5. [docs/operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md)
+2. [docs/managing-dependencies.md](/Users/matthias/DEV/wp-core-base/docs/managing-dependencies.md)
+3. [docs/manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md)
+4. [docs/downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md)
+5. [docs/migration-guide.md](/Users/matthias/DEV/wp-core-base/docs/migration-guide.md)
+6. [docs/operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md)
 
 If you are changing the framework itself:
 
@@ -48,6 +49,8 @@ If you are changing the framework itself:
 ## Core Mental Model
 
 Treat the manifest at `.wp-core-base/manifest.php` as the downstream source of truth.
+
+Treat `add-dependency`, `remove-dependency`, and `list-dependencies` as the preferred day-to-day authoring surface for routine changes. Manual manifest editing is still valid, but it is the advanced path.
 
 Treat `.wp-core-base/framework.php` as the installed framework lock file.
 

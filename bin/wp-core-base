@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PHP_BIN=${PHP:-php}
+
+if command -v "$PHP_BIN" >/dev/null 2>&1; then
+  exec "$PHP_BIN" "$SCRIPT_DIR/../tools/wporg-updater/bin/wporg-updater.php" "$@"
+fi
+
+cat >&2 <<'TEXT'
+wp-core-base requires a local PHP CLI to run authoring commands.
+
+Install examples:
+- macOS (Homebrew): brew install php
+- Debian/Ubuntu: sudo apt install php-cli
+- Other systems: install a recent PHP CLI and rerun
+
+See docs/local-prerequisites.md for local setup details.
+TEXT
+
+exit 1

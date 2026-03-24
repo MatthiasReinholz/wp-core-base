@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CoreScanner;
+use WpOrgPluginUpdater\DependencyAuthoringService;
+use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\FrameworkConfig;
@@ -14,6 +16,7 @@ use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
+use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\LabelHelper;
@@ -60,6 +63,8 @@ $runtimeDefaults = [
     'managed_sanitize_paths' => ['cms/plugins/docs', 'cms/plugins/tests', 'cms/themes/docs', 'cms/themes/tests', 'cms/mu-plugins/docs', 'cms/mu-plugins/tests'],
     'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
 ];
+$checkoutActionSha = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683';
+$setupPhpActionSha = 'shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f';
 $legacyRuntimeDefaults = $runtimeDefaults;
 unset(
     $legacyRuntimeDefaults['manifest_mode'],
@@ -72,6 +77,39 @@ unset(
     $legacyRuntimeDefaults['managed_sanitize_paths'],
     $legacyRuntimeDefaults['managed_sanitize_files'],
 );
+
+$writeManifest = static function (string $root, array $dependencies = []) use ($runtimeDefaults): void {
+    if (! is_dir($root . '/.wp-core-base')) {
+        mkdir($root . '/.wp-core-base', 0777, true);
+    }
+
+    file_put_contents(
+        $root . '/.wp-core-base/manifest.php',
+        "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export([
+            'profile' => 'content-only',
+            'paths' => [
+                'content_root' => 'cms',
+                'plugins_root' => 'cms/plugins',
+                'themes_root' => 'cms/themes',
+                'mu_plugins_root' => 'cms/mu-plugins',
+            ],
+            'core' => [
+                'mode' => 'external',
+                'enabled' => false,
+            ],
+            'runtime' => $runtimeDefaults,
+            'github' => [
+                'api_base' => 'https://api.github.com',
+            ],
+            'automation' => [
+                'base_branch' => null,
+                'dry_run' => false,
+                'managed_kinds' => ['plugin', 'theme'],
+            ],
+            'dependencies' => $dependencies,
+        ], true) . ";\n"
+    );
+};
 
 $assert($classifier->classifyScope('5.3.6', '5.3.7') === 'patch', 'Expected patch classification.');
 $assert($classifier->classifyScope('5.3.7', '5.4.0') === 'minor', 'Expected minor classification.');
@@ -169,6 +207,21 @@ $releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/'
 $assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
 $assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v' . $currentFrameworkVersion, 'Expected framework release verification to succeed.');
+$upstreamUpdatesWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-updates.yml');
+$upstreamReconcileWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-updates-reconcile.yml');
+$upstreamFinalizeWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/finalize-wp-core-base-release.yml');
+$upstreamRecoveryReleaseWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/release-wp-core-base.yml');
+$assert(str_contains($upstreamUpdatesWorkflow, $checkoutActionSha), 'Expected upstream updates workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($upstreamUpdatesWorkflow, $setupPhpActionSha), 'Expected upstream updates workflow to pin setup-php by full commit SHA.');
+$assert(! str_contains($upstreamUpdatesWorkflow, 'pull_request_target:'), 'Expected upstream updates workflow to keep scheduled/manual execution separate from PR reconciliation.');
+$assert(str_contains($upstreamReconcileWorkflow, $checkoutActionSha), 'Expected upstream reconciliation workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($upstreamReconcileWorkflow, $setupPhpActionSha), 'Expected upstream reconciliation workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($upstreamReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected upstream reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
+$assert(str_contains($upstreamReconcileWorkflow, "automation:framework-update"), 'Expected upstream reconciliation workflow to limit closed-PR reconciliation to framework automation PRs.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected finalize release workflow to publish a SHA-256 checksum asset.');
+$assert(str_contains($upstreamFinalizeWorkflow, "git push --delete origin"), 'Expected finalize release workflow to roll back the pushed tag when release publishing fails.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected manual release workflow to publish a SHA-256 checksum asset.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'GitHub Release ${{ steps.version.outputs.value }} already exists; nothing to publish.'), 'Expected manual recovery release workflow to exit cleanly when the GitHub Release already exists.');
 
 $releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
 mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);
@@ -745,6 +798,7 @@ mkdir($tempScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
 $scaffoldedManifest = (string) file_get_contents($tempScaffoldRoot . '/.wp-core-base/manifest.php');
 $scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+$scaffoldedReconcileWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $scaffoldedBlocker = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
 $scaffoldedValidate = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml');
 $assert(str_contains($scaffoldedManifest, "'profile' => 'content-only'"), 'Expected scaffolded manifest to set the requested profile.');
@@ -757,12 +811,25 @@ $assert(str_contains($scaffoldedManifest, "'kind' => 'mu-plugin-file'"), 'Expect
 $assert(str_contains($scaffoldedManifest, "'kind' => 'runtime-directory'"), 'Expected scaffolded manifest to document runtime directories.');
 $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
 $assert(str_contains($scaffoldedWorkflow, 'WPORG_REPO_ROOT: ${{ github.workspace }}'), 'Expected scaffolded workflow to set WPORG_REPO_ROOT so sync runs against the downstream repo.');
+$assert(! str_contains($scaffoldedWorkflow, 'pull_request_target:'), 'Expected scaffolded updates workflow to keep scheduled/manual execution separate from PR reconciliation.');
 $assert(str_contains($scaffoldedBlocker, 'contents: read'), 'Expected scaffolded blocker workflow to grant contents: read for actions/checkout.');
 $assert(str_contains($scaffoldedValidate, 'stage-runtime'), 'Expected scaffolded validation workflow to stage runtime output.');
+$assert(str_contains($scaffoldedWorkflow, $checkoutActionSha), 'Expected scaffolded updates workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedWorkflow, $setupPhpActionSha), 'Expected scaffolded updates workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($scaffoldedReconcileWorkflow, $checkoutActionSha), 'Expected scaffolded reconciliation workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedReconcileWorkflow, $setupPhpActionSha), 'Expected scaffolded reconciliation workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($scaffoldedReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected scaffolded reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
+$assert(str_contains($scaffoldedReconcileWorkflow, "automation:dependency-update"), 'Expected scaffolded reconciliation workflow to gate merged-PR reconciliation to framework automation PRs.');
+$assert(str_contains($scaffoldedBlocker, $checkoutActionSha), 'Expected scaffolded blocker workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedBlocker, $setupPhpActionSha), 'Expected scaffolded blocker workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($scaffoldedValidate, $checkoutActionSha), 'Expected scaffolded validation workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedValidate, $setupPhpActionSha), 'Expected scaffolded validation workflow to pin setup-php by full commit SHA.');
 $scaffoldedFramework = FrameworkConfig::load($tempScaffoldRoot);
 $assert($scaffoldedFramework->distributionPath() === 'vendor/wp-core-base', 'Expected scaffolded framework metadata to point at the vendored framework path.');
 $scaffoldedFrameworkWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wp-core-base-self-update.yml');
 $assert(str_contains($scaffoldedFrameworkWorkflow, 'framework-sync --repo-root=.'), 'Expected scaffolded self-update workflow to run framework-sync.');
+$assert(str_contains($scaffoldedFrameworkWorkflow, $checkoutActionSha), 'Expected scaffolded framework self-update workflow to pin actions/checkout by full commit SHA.');
+$assert(str_contains($scaffoldedFrameworkWorkflow, $setupPhpActionSha), 'Expected scaffolded framework self-update workflow to pin setup-php by full commit SHA.');
 
 $migrationScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-migration-' . bin2hex(random_bytes(4));
 mkdir($migrationScaffoldRoot, 0777, true);
@@ -777,6 +844,13 @@ $imageFirstManifest = (string) file_get_contents($imageFirstScaffoldRoot . '/.wp
 $assert(str_contains($imageFirstManifest, "'validation_mode' => 'staged-clean'"), 'Expected image-first scaffold preset to use staged-clean validation.');
 $assert(str_contains($imageFirstManifest, "'cms/languages'"), 'Expected image-first scaffold preset to include languages ownership roots.');
 $assert(str_contains($imageFirstManifest, "'managed_sanitize_paths' =>"), 'Expected image-first scaffold preset to include managed sanitation paths.');
+
+$compactScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-image-first-compact-' . bin2hex(random_bytes(4));
+mkdir($compactScaffoldRoot, 0777, true);
+(new DownstreamScaffolder(dirname(__DIR__, 3), $compactScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only-image-first-compact', 'cms', true);
+$assert(! file_exists($compactScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml'), 'Expected compact image-first scaffold profile to omit the standalone runtime-validation workflow.');
+$compactReconcileWorkflow = (string) file_get_contents($compactScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
+$assert(str_contains($compactReconcileWorkflow, "automation:framework-update"), 'Expected compact scaffold to keep merged automation PR reconciliation in the dedicated reconciliation workflow.');
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);
@@ -863,6 +937,207 @@ $frameworkMetadata = PrBodyRenderer::extractMetadata($renderer->renderFrameworkU
     ],
 ));
 $assert(is_array($frameworkMetadata) && $frameworkMetadata['slug'] === 'wp-core-base', 'Expected framework PR metadata to include a slug for blocker compatibility.');
+
+$authoringRoot = sys_get_temp_dir() . '/wporg-authoring-' . bin2hex(random_bytes(4));
+mkdir($authoringRoot . '/cms/plugins/project-plugin', 0777, true);
+mkdir($authoringRoot . '/cms/themes/project-theme', 0777, true);
+mkdir($authoringRoot . '/cms/mu-plugins', 0777, true);
+mkdir($authoringRoot . '/cms/languages', 0777, true);
+$writeManifest($authoringRoot);
+
+file_put_contents(
+    $authoringRoot . '/cms/plugins/project-plugin/project-plugin.php',
+    "<?php\n/*\nPlugin Name: Project Plugin\nVersion: 1.0.0\n*/\n"
+);
+file_put_contents(
+    $authoringRoot . '/cms/themes/project-theme/style.css',
+    "/*\nTheme Name: Project Theme\nVersion: 2.0.0\n*/\n"
+);
+file_put_contents(
+    $authoringRoot . '/cms/mu-plugins/bootstrap.php',
+    "<?php\n/*\nPlugin Name: Project Bootstrap\nVersion: 0.1.0\n*/\n"
+);
+
+$authoringConfig = Config::load($authoringRoot);
+$authoringService = new DependencyAuthoringService(
+    config: $authoringConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($authoringConfig->runtime),
+    manifestWriter: new ManifestWriter(),
+    wordPressOrgClient: $wpClient,
+    gitHubReleaseClient: $gitHubReleaseClient,
+    httpClient: $httpClient,
+);
+
+$addedPlugin = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'plugin',
+    'path' => 'cms/plugins/project-plugin',
+]);
+$assert($addedPlugin['component_key'] === 'plugin:local:project-plugin', 'Expected local plugin add to derive the component key.');
+$assert($addedPlugin['main_file'] === 'project-plugin.php', 'Expected local plugin add to infer the plugin main file.');
+$assert($addedPlugin['version'] === '1.0.0', 'Expected local plugin add to infer the plugin version.');
+
+$addedTheme = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'theme',
+    'path' => 'cms/themes/project-theme',
+]);
+$assert($addedTheme['main_file'] === 'style.css', 'Expected local theme add to use style.css as the main file.');
+
+$addedMuFile = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'mu-plugin-file',
+    'path' => 'cms/mu-plugins/bootstrap.php',
+]);
+$assert($addedMuFile['main_file'] === null, 'Expected MU plugin files to omit main_file.');
+$assert($addedMuFile['version'] === '0.1.0', 'Expected MU plugin files to infer the version header.');
+
+$addedRuntimeDirectory = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'runtime-directory',
+    'path' => 'cms/languages',
+]);
+$assert($addedRuntimeDirectory['name'] === 'Languages', 'Expected runtime-directory add to derive a display name from the path.');
+
+$listOutput = $authoringService->renderDependencyList();
+$assert(! str_contains($listOutput, 'MANAGED'), 'Expected empty management groups to be omitted from list output.');
+$assert(str_contains($listOutput, 'LOCAL'), 'Expected list output to group local dependencies.');
+$assert(str_contains($listOutput, 'project-plugin'), 'Expected list output to include added dependencies.');
+
+file_put_contents(
+    $authoringRoot . '/cms/plugins/project-plugin/project-plugin.php',
+    "<?php\n/*\nPlugin Name: Project Plugin\nVersion: 1.1.0\n*/\n"
+);
+$replacedPlugin = $authoringService->addDependency([
+    'source' => 'local',
+    'kind' => 'plugin',
+    'path' => 'cms/plugins/project-plugin',
+    'force' => true,
+]);
+$assert($replacedPlugin['version'] === '1.1.0', 'Expected --force to replace an existing manifest entry rather than appending a duplicate.');
+$authoringReloaded = Config::load($authoringRoot);
+$pluginEntries = array_values(array_filter(
+    $authoringReloaded->dependencies(),
+    static fn (array $dependency): bool => $dependency['component_key'] === 'plugin:local:project-plugin'
+));
+$assert(count($pluginEntries) === 1, 'Expected --force replacement to keep only one manifest entry for the same component.');
+
+$removedTheme = $authoringService->removeDependency([
+    'slug' => 'project-theme',
+    'kind' => 'theme',
+]);
+$assert($removedTheme['deleted_path'] === false, 'Expected manifest-only dependency removal by default.');
+$assert(file_exists($authoringRoot . '/cms/themes/project-theme/style.css'), 'Expected manifest-only removal to leave the runtime path intact.');
+
+$removedPlugin = $authoringService->removeDependency([
+    'component-key' => 'plugin:local:project-plugin',
+    'delete-path' => true,
+]);
+$assert($removedPlugin['deleted_path'] === true, 'Expected remove-dependency --delete-path to report the path deletion.');
+$assert(! file_exists($authoringRoot . '/cms/plugins/project-plugin'), 'Expected remove-dependency --delete-path to delete the runtime path.');
+
+$ambiguousRemoveRoot = sys_get_temp_dir() . '/wporg-authoring-remove-' . bin2hex(random_bytes(4));
+mkdir($ambiguousRemoveRoot . '/cms/plugins/shared-plugin', 0777, true);
+$writeManifest($ambiguousRemoveRoot, [
+    [
+        'name' => 'Shared Plugin Local',
+        'slug' => 'shared-plugin',
+        'kind' => 'plugin',
+        'management' => 'local',
+        'source' => 'local',
+        'path' => 'cms/plugins/shared-plugin',
+        'main_file' => 'shared-plugin.php',
+        'version' => '1.0.0',
+        'checksum' => null,
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+        'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => []],
+    ],
+    [
+        'name' => 'Shared Plugin Managed',
+        'slug' => 'shared-plugin',
+        'kind' => 'plugin',
+        'management' => 'managed',
+        'source' => 'wordpress.org',
+        'path' => 'cms/plugins/shared-plugin-managed',
+        'main_file' => 'shared-plugin.php',
+        'version' => '2.0.0',
+        'checksum' => 'sha256:test',
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+        'policy' => ['class' => 'managed-upstream', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+    ],
+]);
+$ambiguousAuthoringConfig = Config::load($ambiguousRemoveRoot);
+$ambiguousAuthoringService = new DependencyAuthoringService(
+    config: $ambiguousAuthoringConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($ambiguousAuthoringConfig->runtime),
+    manifestWriter: new ManifestWriter(),
+    wordPressOrgClient: $wpClient,
+    gitHubReleaseClient: $gitHubReleaseClient,
+    httpClient: $httpClient,
+);
+$ambiguousRemoveRejected = false;
+
+try {
+    $ambiguousAuthoringService->removeDependency([
+        'slug' => 'shared-plugin',
+        'kind' => 'plugin',
+    ]);
+} catch (RuntimeException $exception) {
+    $ambiguousRemoveRejected = str_contains($exception->getMessage(), '--source')
+        && str_contains($exception->getMessage(), '--component-key');
+}
+
+$assert($ambiguousRemoveRejected, 'Expected remove-dependency to reject ambiguous slug/kind matches unless source or component-key is provided.');
+$specificRemove = $ambiguousAuthoringService->removeDependency([
+    'slug' => 'shared-plugin',
+    'kind' => 'plugin',
+    'source' => 'local',
+]);
+$assert($specificRemove['removed']['component_key'] === 'plugin:local:shared-plugin', 'Expected remove-dependency --source to disambiguate matching entries.');
+
+$ambiguousRoot = sys_get_temp_dir() . '/wporg-authoring-ambiguous-' . bin2hex(random_bytes(4));
+mkdir($ambiguousRoot . '/plugin', 0777, true);
+file_put_contents($ambiguousRoot . '/plugin/first.php', "<?php\n/*\nPlugin Name: First\n*/\n");
+file_put_contents($ambiguousRoot . '/plugin/second.php', "<?php\n/*\nPlugin Name: Second\n*/\n");
+$ambiguousRejected = false;
+
+try {
+    (new DependencyMetadataResolver())->resolveMainFile($ambiguousRoot . '/plugin', 'plugin');
+} catch (RuntimeException $exception) {
+    $ambiguousRejected = str_contains($exception->getMessage(), '--main-file');
+}
+
+$assert($ambiguousRejected, 'Expected ambiguous plugin entrypoints to require --main-file.');
+$assert(
+    DependencyAuthoringService::defaultGitHubTokenEnv('example-private-plugin') === 'WP_CORE_BASE_GITHUB_TOKEN_EXAMPLE_PRIVATE_PLUGIN',
+    'Expected default token env names to normalize plugin slugs.'
+);
+$assert(
+    DependencyAuthoringService::defaultGitHubTokenEnv('', 'owner/private-plugin') === 'WP_CORE_BASE_GITHUB_TOKEN_PRIVATE_PLUGIN',
+    'Expected default token env names to fall back to the repository basename.'
+);
+
+$interactiveStream = fopen('php://temp', 'r+');
+$assert($interactiveStream !== false, 'Expected to create a temp stream for interactive prompter testing.');
+$assert(! InteractivePrompter::canPrompt($interactiveStream), 'Expected non-TTY streams to disable interactive prompting.');
+fclose($interactiveStream);
+
+$suggestRoot = sys_get_temp_dir() . '/wporg-suggest-authoring-' . bin2hex(random_bytes(4));
+mkdir($suggestRoot . '/cms/plugins/custom-plugin', 0777, true);
+$writeManifest($suggestRoot);
+file_put_contents($suggestRoot . '/cms/plugins/custom-plugin/custom-plugin.php', "<?php\n/*\nPlugin Name: Custom Plugin\n*/\n");
+$suggestions = (new ManifestSuggester(Config::load($suggestRoot), 'vendor/wp-core-base/bin/wp-core-base'))->render();
+$assert(str_contains($suggestions, 'add-dependency --source=local --kind=plugin --path=cms/plugins/custom-plugin'), 'Expected manifest suggestions to recommend add-dependency commands.');
+
+$wrapperContents = (string) file_get_contents($repoRoot . '/bin/wp-core-base');
+$assert(str_contains($wrapperContents, 'brew install php'), 'Expected the shell launcher to include macOS PHP install guidance.');
+$assert(str_contains($wrapperContents, 'docs/local-prerequisites.md'), 'Expected the shell launcher to point users at the local prerequisites doc.');
 
 ZipExtractor::assertSafeEntryName('wordpress/wp-includes/version.php');
 $zipTraversalRejected = false;

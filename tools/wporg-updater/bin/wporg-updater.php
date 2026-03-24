@@ -6,6 +6,8 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\CoreUpdater;
 use WpOrgPluginUpdater\DependencyScanner;
+use WpOrgPluginUpdater\DependencyAuthoringService;
+use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\EnvironmentDoctor;
 use WpOrgPluginUpdater\FrameworkConfig;
@@ -18,6 +20,7 @@ use WpOrgPluginUpdater\GitCommandRunner;
 use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
+use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\PrBodyRenderer;
@@ -62,11 +65,64 @@ $toolPath = $options['tool-path'] ?? (
         : 'vendor/wp-core-base'
 );
 $force = isset($options['force']);
+$commandPrefix = $toolPath === '.'
+    ? 'bin/wp-core-base'
+    : sprintf('%s/bin/wp-core-base', trim((string) $toolPath, '/'));
+
+$maybePromptForMissing = static function (array &$options, InteractivePrompter $prompter): void {
+    $source = isset($options['source']) && is_string($options['source']) ? $options['source'] : null;
+    $kind = isset($options['kind']) && is_string($options['kind']) ? $options['kind'] : null;
+
+    if ($source === null || $source === '') {
+        $options['source'] = $prompter->choose('Select dependency source', ['wordpress.org', 'github-release', 'local'], 'local');
+        $source = $options['source'];
+    }
+
+    if ($kind === null || $kind === '') {
+        $options['kind'] = $prompter->choose(
+            'Select dependency kind',
+            ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'],
+            'plugin'
+        );
+        $kind = $options['kind'];
+    }
+
+    if ((! isset($options['slug']) || ! is_string($options['slug']) || trim($options['slug']) === '') && ! isset($options['path'])) {
+        if ($source === 'local') {
+            $options['path'] = $prompter->ask('Runtime path');
+        } else {
+            $options['slug'] = $prompter->ask('Slug');
+        }
+    }
+
+    if ($source === 'github-release') {
+        if (! isset($options['github-repository']) || ! is_string($options['github-repository']) || trim($options['github-repository']) === '') {
+            $options['github-repository'] = $prompter->ask('GitHub repository (owner/repo)');
+        }
+
+        if (! isset($options['private']) && $prompter->confirm('Is this GitHub repository private?', false)) {
+            $options['private'] = true;
+        }
+
+        if (($options['private'] ?? false) === true && (! isset($options['github-token-env']) || ! is_string($options['github-token-env']) || trim($options['github-token-env']) === '')) {
+            $tokenEnv = $prompter->ask('GitHub token env var name (leave blank for default)', '');
+
+            if ($tokenEnv !== '') {
+                $options['github-token-env'] = $tokenEnv;
+            }
+        }
+    }
+
+    if ($source === 'local' && (! isset($options['path']) || ! is_string($options['path']) || trim($options['path']) === '')) {
+        $options['path'] = $prompter->ask('Runtime path');
+    }
+};
 
 try {
     if (in_array($mode, ['help', '--help', '-h'], true)) {
         fwrite(STDOUT, <<<TEXT
 Usage:
+  bin/wp-core-base add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
   php tools/wporg-updater/bin/wporg-updater.php sync
   php tools/wporg-updater/bin/wporg-updater.php doctor [--repo-root=/path] [--github]
   php tools/wporg-updater/bin/wporg-updater.php stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
@@ -76,6 +132,9 @@ Usage:
   php tools/wporg-updater/bin/wporg-updater.php release-verify [--repo-root=/path] [--tag=v1.0.0]
   php tools/wporg-updater/bin/wporg-updater.php suggest-manifest [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php format-manifest [--repo-root=/path]
+  php tools/wporg-updater/bin/wporg-updater.php add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
+  php tools/wporg-updater/bin/wporg-updater.php remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
+  php tools/wporg-updater/bin/wporg-updater.php list-dependencies [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php pr-blocker
 
 Modes:
@@ -88,13 +147,18 @@ Modes:
   release-verify    Validate framework release metadata and release notes before publishing.
   suggest-manifest  Print suggested manifest entries for undeclared runtime paths.
   format-manifest   Rewrite the manifest into the normalized framework format.
+  add-dependency    Add a managed, local, or ignored dependency entry.
+  remove-dependency Remove a dependency entry, optionally deleting its path.
+  list-dependencies Print configured dependencies grouped by ownership.
   pr-blocker        Evaluate whether the current PR should remain blocked.
 
 Flags and environment:
   --repo-root=PATH       Override the repository root to inspect or update.
   --tool-path=PATH       Path from the downstream repo root to the wp-core-base checkout for scaffold mode.
-  --profile=PROFILE      Downstream scaffold profile or preset: full-core, content-only, content-only-default, content-only-migration, content-only-local-mu, or content-only-image-first.
+  --profile=PROFILE      Downstream scaffold profile or preset: full-core, content-only, content-only-default, content-only-migration, content-only-local-mu, content-only-image-first, or content-only-image-first-compact.
   --content-root=PATH    Override the scaffolded content root.
+  --interactive          Prompt for missing dependency-authoring inputs when attached to a TTY.
+  --private              Treat a GitHub release dependency as private and default a token env-var name when needed.
   --output=PATH          Override the stage-runtime output path.
   --check-only           Print framework update availability without changing files.
   --release-type=TYPE    Release bump type for prepare-framework-release: patch, minor, major, or custom.
@@ -198,13 +262,76 @@ TEXT);
     }
 
     if ($mode === 'suggest-manifest') {
-        fwrite(STDOUT, (new ManifestSuggester($config))->render());
+        fwrite(STDOUT, (new ManifestSuggester($config, $commandPrefix))->render());
         exit(0);
     }
 
     if ($mode === 'format-manifest') {
         (new ManifestWriter())->write($config);
         fwrite(STDOUT, sprintf("Formatted manifest: %s\n", $config->manifestPath));
+        exit(0);
+    }
+
+    if (in_array($mode, ['add-dependency', 'remove-dependency', 'list-dependencies'], true)) {
+        $prompter = new InteractivePrompter();
+
+        if (
+            $mode === 'add-dependency'
+            && (
+                isset($options['interactive'])
+                || (
+                    InteractivePrompter::canPrompt()
+                    && (
+                        ! isset($options['source'])
+                        || ! isset($options['kind'])
+                        || (! isset($options['slug']) && ! isset($options['path']))
+                    )
+                )
+            )
+        ) {
+            $maybePromptForMissing($options, $prompter);
+        }
+
+        $authoringService = new DependencyAuthoringService(
+            config: $config,
+            metadataResolver: new DependencyMetadataResolver(),
+            runtimeInspector: new RuntimeInspector($config->runtime),
+            manifestWriter: new ManifestWriter(),
+            wordPressOrgClient: new WordPressOrgClient($httpClient),
+            gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase()),
+            httpClient: $httpClient,
+        );
+
+        if ($mode === 'add-dependency') {
+            $result = $authoringService->addDependency($options);
+            fwrite(STDOUT, sprintf("Added dependency %s (%s)\n", $result['component_key'], $result['path']));
+
+            if (($result['version'] ?? null) !== null) {
+                fwrite(STDOUT, sprintf("Version: %s\n", $result['version']));
+            }
+
+            if (($result['checksum'] ?? null) !== null) {
+                fwrite(STDOUT, sprintf("Checksum: %s\n", $result['checksum']));
+            }
+
+            foreach ((array) ($result['next_steps'] ?? []) as $step) {
+                fwrite(STDOUT, sprintf("Next: %s\n", $step));
+            }
+
+            exit(0);
+        }
+
+        if ($mode === 'remove-dependency') {
+            $result = $authoringService->removeDependency($options);
+            fwrite(STDOUT, sprintf(
+                "Removed dependency %s%s\n",
+                $result['removed']['component_key'],
+                $result['deleted_path'] ? ' and deleted its path' : ''
+            ));
+            exit(0);
+        }
+
+        fwrite(STDOUT, $authoringService->renderDependencyList());
         exit(0);
     }
 

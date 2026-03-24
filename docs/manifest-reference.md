@@ -5,6 +5,9 @@ This document is for downstream users configuring `.wp-core-base/manifest.php`.
 Framework release pinning lives separately in `.wp-core-base/framework.php`. The manifest is only for runtime ownership, update scope, and staging policy.
 
 If you need plain-language definitions before the schema details, read [concepts.md](concepts.md).
+If you want the routine add/remove workflow, read [managing-dependencies.md](managing-dependencies.md).
+
+The manifest remains the source of truth, but common entry creation does not need to be hand-written. Prefer the CLI for normal tasks such as adding a plugin, MU plugin file, or runtime directory.
 
 ## Top-Level Keys
 
@@ -136,6 +139,14 @@ Each dependency entry supports:
         'sanitize_files' => [],
     ],
 ]
+```
+
+Routine authoring commands:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
+vendor/wp-core-base/bin/wp-core-base remove-dependency --repo-root=. --slug=project-plugin --kind=plugin
+vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=.
 ```
 
 ## Rules

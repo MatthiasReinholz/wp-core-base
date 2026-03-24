@@ -4,6 +4,7 @@ This guide is for downstream users of `wp-core-base`.
 
 If you are contributing to `wp-core-base` itself, use [contributing.md](contributing.md).
 If you want the vocabulary before the setup steps, read [concepts.md](concepts.md).
+If you want the routine add/remove dependency workflow, read [managing-dependencies.md](managing-dependencies.md).
 
 ## Choose Your Starting Point
 
@@ -83,6 +84,13 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downs
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
 ```
 
+If the project already has a strong PR build workflow that runs `doctor`, `stage-runtime`, and image or smoke checks, use the compact image-first profile instead:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-image-first-compact --content-root=cms
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+```
+
 Then:
 
 1. classify every runtime dependency in `.wp-core-base/manifest.php`
@@ -102,6 +110,8 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 
 If you want ongoing upstream framework maintenance, keep the scaffolded `.wp-core-base/framework.php` file and the `wp-core-base` self-update workflow enabled.
 
+The standalone `wp-core-base Runtime Validation` workflow is the default because it gives downstreams a small canonical runtime-contract check even when they do not yet have a mature PR build pipeline. The scaffold also writes a separate merged-PR reconciliation workflow so scheduled/manual update runs stay distinct from post-merge queue unblocking. If your main PR workflow already runs `doctor` and `stage-runtime`, the compact image-first scaffold profile is usually the better fit.
+
 If your repo already has a blanket `/vendor/` ignore from historical Composer usage, do not unignore the whole directory. Keep the exception narrow so only `vendor/wp-core-base` becomes repo-owned:
 
 ```gitignore
@@ -115,6 +125,13 @@ That keeps framework self-update PRs reviewable without accidentally committing 
 Use `local` freely. It is the intended way to keep custom plugins, themes, MU plugin files, and other downstream-owned runtime code in the project.
 
 Managed dependencies follow a different contract: the updater may normalize them during `sync`, and their manifest checksum represents the sanitized runtime snapshot that the repo should keep in Git.
+
+For routine entry creation, prefer the CLI over hand-authoring manifest arrays:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
+vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=.
+```
 
 If you are migrating a mixed repository, these helper commands are useful:
 
@@ -186,12 +203,15 @@ Use whichever local stack your team already prefers, such as:
 The framework-specific commands you will use most often are:
 
 ```bash
+bin/wp-core-base list-dependencies
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 php tools/wporg-updater/tests/run.php
 ```
 
 If `wp-core-base` is vendored into another repository, run the same commands from that vendored path and pass `--repo-root=.`
+
+If PHP is not installed locally yet, see [local-prerequisites.md](local-prerequisites.md).
 
 Two practical defaults for new downstreams:
 

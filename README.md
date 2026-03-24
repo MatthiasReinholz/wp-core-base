@@ -54,6 +54,8 @@ If you need help choosing an architecture first, read [docs/deployment-models.md
 
 If you want the framework vocabulary first, read [docs/concepts.md](docs/concepts.md).
 
+If you want the day-to-day dependency authoring workflow, read [docs/managing-dependencies.md](docs/managing-dependencies.md).
+
 ## GitHub And Non-GitHub Use
 
 You do not need GitHub to use `wp-core-base` as a code base.
@@ -72,6 +74,7 @@ That means these are all valid:
 If `wp-core-base` is the current repository:
 
 ```bash
+bin/wp-core-base list-dependencies
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
@@ -85,7 +88,7 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
 Use `content-only-image-first` if you want a stricter image-first preset with external core, `staged-clean` validation, and starter ownership roots for content repos.
-Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the runtime-update, blocker, validation, and framework self-update workflows.
+Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the scheduled updates, merged-PR reconciliation, blocker, validation, and framework self-update workflows.
 
 If your downstream repo already ignores `/vendor/`, keep the ignore narrow so `vendor/wp-core-base` remains committed and self-updateable. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md) for the recommended pattern.
 
@@ -116,6 +119,8 @@ These versions describe the code committed in this repository, not a floating la
 - evaluation checklist: [docs/evaluation-guide.md](docs/evaluation-guide.md)
 - support boundaries: [docs/support-matrix.md](docs/support-matrix.md)
 - onboarding and implementation: [docs/getting-started.md](docs/getting-started.md)
+- dependency authoring tasks: [docs/managing-dependencies.md](docs/managing-dependencies.md)
+- local PHP bootstrap notes: [docs/local-prerequisites.md](docs/local-prerequisites.md)
 - deployment and architecture choices: [docs/deployment-models.md](docs/deployment-models.md)
 - advanced downstream usage: [docs/downstream-usage.md](docs/downstream-usage.md)
 - ongoing operations: [docs/operations.md](docs/operations.md)

@@ -3,6 +3,7 @@
 This guide is for downstream users who already understand the basics and need the operational model in more detail.
 
 If you need the terminology first, read [concepts.md](concepts.md). If you are evaluating fit rather than implementing, read [evaluation-guide.md](evaluation-guide.md).
+If you want task-based authoring commands, read [managing-dependencies.md](managing-dependencies.md).
 
 ## The Manifest Is The Contract
 
@@ -18,6 +19,14 @@ The manifest defines:
 - every dependency the updater is allowed to touch
 
 The updater does not infer managed dependencies by scanning folders.
+
+For day-to-day work, the recommended interface is still command-driven:
+
+- `add-dependency`
+- `remove-dependency`
+- `list-dependencies`
+
+Use manual manifest editing for advanced policy changes, not for every normal plugin or MU plugin addition.
 
 Framework version pinning is separate from runtime ownership. Downstreams should also keep `.wp-core-base/framework.php` so the installed `wp-core-base` version, vendored path, and framework-managed workflow checksums are explicit.
 
@@ -267,7 +276,8 @@ project/
 ## Examples
 
 - example downstream manifest: [examples/downstream-manifest.php](examples/downstream-manifest.php)
-- example sync workflow: [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
+- example scheduled/manual updates workflow: [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
+- example merged-PR reconciliation workflow: [examples/downstream-updates-reconcile-workflow.yml](examples/downstream-updates-reconcile-workflow.yml)
 - example framework self-update workflow: [examples/downstream-framework-self-update-workflow.yml](examples/downstream-framework-self-update-workflow.yml)
 - example blocker workflow: [examples/downstream-pr-blocker-workflow.yml](examples/downstream-pr-blocker-workflow.yml)
 - example validation workflow: [examples/downstream-validate-runtime-workflow.yml](examples/downstream-validate-runtime-workflow.yml)
