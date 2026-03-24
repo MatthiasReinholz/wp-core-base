@@ -133,7 +133,7 @@ Usage:
   php tools/wporg-updater/bin/wporg-updater.php suggest-manifest [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php format-manifest [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
-  php tools/wporg-updater/bin/wporg-updater.php remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--delete-path]
+  php tools/wporg-updater/bin/wporg-updater.php remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
   php tools/wporg-updater/bin/wporg-updater.php list-dependencies [--repo-root=/path]
   php tools/wporg-updater/bin/wporg-updater.php pr-blocker
 

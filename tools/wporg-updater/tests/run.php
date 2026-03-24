@@ -1008,6 +1008,70 @@ $removedPlugin = $authoringService->removeDependency([
 $assert($removedPlugin['deleted_path'] === true, 'Expected remove-dependency --delete-path to report the path deletion.');
 $assert(! file_exists($authoringRoot . '/cms/plugins/project-plugin'), 'Expected remove-dependency --delete-path to delete the runtime path.');
 
+$ambiguousRemoveRoot = sys_get_temp_dir() . '/wporg-authoring-remove-' . bin2hex(random_bytes(4));
+mkdir($ambiguousRemoveRoot . '/cms/plugins/shared-plugin', 0777, true);
+$writeManifest($ambiguousRemoveRoot, [
+    [
+        'name' => 'Shared Plugin Local',
+        'slug' => 'shared-plugin',
+        'kind' => 'plugin',
+        'management' => 'local',
+        'source' => 'local',
+        'path' => 'cms/plugins/shared-plugin',
+        'main_file' => 'shared-plugin.php',
+        'version' => '1.0.0',
+        'checksum' => null,
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+        'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => []],
+    ],
+    [
+        'name' => 'Shared Plugin Managed',
+        'slug' => 'shared-plugin',
+        'kind' => 'plugin',
+        'management' => 'managed',
+        'source' => 'wordpress.org',
+        'path' => 'cms/plugins/shared-plugin-managed',
+        'main_file' => 'shared-plugin.php',
+        'version' => '2.0.0',
+        'checksum' => 'sha256:test',
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+        'policy' => ['class' => 'managed-upstream', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+    ],
+]);
+$ambiguousAuthoringConfig = Config::load($ambiguousRemoveRoot);
+$ambiguousAuthoringService = new DependencyAuthoringService(
+    config: $ambiguousAuthoringConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($ambiguousAuthoringConfig->runtime),
+    manifestWriter: new ManifestWriter(),
+    wordPressOrgClient: $wpClient,
+    gitHubReleaseClient: $gitHubReleaseClient,
+    httpClient: $httpClient,
+);
+$ambiguousRemoveRejected = false;
+
+try {
+    $ambiguousAuthoringService->removeDependency([
+        'slug' => 'shared-plugin',
+        'kind' => 'plugin',
+    ]);
+} catch (RuntimeException $exception) {
+    $ambiguousRemoveRejected = str_contains($exception->getMessage(), '--source')
+        && str_contains($exception->getMessage(), '--component-key');
+}
+
+$assert($ambiguousRemoveRejected, 'Expected remove-dependency to reject ambiguous slug/kind matches unless source or component-key is provided.');
+$specificRemove = $ambiguousAuthoringService->removeDependency([
+    'slug' => 'shared-plugin',
+    'kind' => 'plugin',
+    'source' => 'local',
+]);
+$assert($specificRemove['removed']['component_key'] === 'plugin:local:shared-plugin', 'Expected remove-dependency --source to disambiguate matching entries.');
+
 $ambiguousRoot = sys_get_temp_dir() . '/wporg-authoring-ambiguous-' . bin2hex(random_bytes(4));
 mkdir($ambiguousRoot . '/plugin', 0777, true);
 file_put_contents($ambiguousRoot . '/plugin/first.php', "<?php\n/*\nPlugin Name: First\n*/\n");

@@ -74,11 +74,10 @@ vendor/wp-core-base/bin/wp-core-base add-dependency \
   --source=github-release \
   --kind=plugin \
   --slug=private-plugin \
-  --github-repository=owner/private-plugin \
-  --private
+  --github-repository=owner/private-plugin
 ```
 
-If you do not pass `--github-token-env`, the CLI generates a default env var name such as:
+If the repository needs authentication and you do not pass `--github-token-env`, the CLI falls back to a generated default env var name such as:
 
 - `WP_CORE_BASE_GITHUB_TOKEN_PRIVATE_PLUGIN`
 
@@ -89,6 +88,8 @@ You can override that with:
 ```
 
 The manifest stores only the env var name, never the token value.
+
+You can still pass `--private` explicitly if you want to make that intent obvious up front, but it is no longer required for the default token-env naming flow.
 
 Local shell example:
 
@@ -172,7 +173,8 @@ Manifest-only removal:
 vendor/wp-core-base/bin/wp-core-base remove-dependency \
   --repo-root=. \
   --slug=project-plugin \
-  --kind=plugin
+  --kind=plugin \
+  --source=local
 ```
 
 Remove the manifest entry and delete the runtime path:
@@ -182,8 +184,11 @@ vendor/wp-core-base/bin/wp-core-base remove-dependency \
   --repo-root=. \
   --slug=project-plugin \
   --kind=plugin \
+  --source=local \
   --delete-path
 ```
+
+If the same slug exists from multiple sources, prefer `--component-key` or add `--source` explicitly so removal stays unambiguous.
 
 ## List Current Entries
 

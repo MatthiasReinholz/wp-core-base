@@ -92,35 +92,84 @@ final class DependencyAuthoringService
         $componentKey = $this->nullableString($options['component-key'] ?? null);
         $slug = $this->nullableString($options['slug'] ?? null);
         $kind = $this->nullableString($options['kind'] ?? null);
+        $source = $this->nullableString($options['source'] ?? null);
         $deletePath = isset($options['delete-path']);
 
         $dependencies = $this->config->dependencies();
         $removed = null;
+        $removedIndex = null;
+        $matches = [];
 
         foreach ($dependencies as $index => $dependency) {
             if ($componentKey !== null && $dependency['component_key'] === $componentKey) {
                 $removed = $dependency;
-                unset($dependencies[$index]);
+                $removedIndex = $index;
                 break;
             }
 
-            if ($componentKey === null && $slug !== null && $kind !== null && $dependency['slug'] === $slug && $dependency['kind'] === $kind) {
-                $removed = $dependency;
-                unset($dependencies[$index]);
-                break;
+            if (
+                $componentKey === null
+                && $slug !== null
+                && $kind !== null
+                && $dependency['slug'] === $slug
+                && $dependency['kind'] === $kind
+                && ($source === null || $dependency['source'] === $source)
+            ) {
+                $matches[] = [
+                    'index' => $index,
+                    'dependency' => $dependency,
+                ];
             }
+        }
+
+        if ($removed === null && $matches !== []) {
+            if (count($matches) > 1) {
+                $keys = array_map(
+                    static fn (array $match): string => (string) $match['dependency']['component_key'],
+                    $matches
+                );
+
+                throw new RuntimeException(
+                    "Multiple dependencies matched that slug/kind selector. Re-run with --source or --component-key. Matches: " .
+                    implode(', ', $keys)
+                );
+            }
+
+            $removed = $matches[0]['dependency'];
+            $removedIndex = $matches[0]['index'];
         }
 
         if ($removed === null) {
             throw new RuntimeException('No matching dependency entry was found to remove.');
         }
 
+        unset($dependencies[$removedIndex]);
         $nextConfig = $this->config->withDependencies(array_values($dependencies));
-        $this->manifestWriter->write($nextConfig);
-        $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
+        $removedAbsolutePath = $this->config->repoRoot . '/' . $removed['path'];
+        $backupRoot = null;
+        $backupPath = null;
 
-        if ($deletePath) {
-            $this->runtimeInspector->clearPath($this->config->repoRoot . '/' . $removed['path']);
+        if ($deletePath && (file_exists($removedAbsolutePath) || is_link($removedAbsolutePath))) {
+            $backupRoot = sys_get_temp_dir() . '/wporg-remove-backup-' . bin2hex(random_bytes(6));
+            mkdir($backupRoot, 0775, true);
+            $backupPath = $backupRoot . '/' . basename($removedAbsolutePath);
+            $this->runtimeInspector->copyPath($removedAbsolutePath, $backupPath);
+            $this->runtimeInspector->clearPath($removedAbsolutePath);
+        }
+
+        try {
+            $this->manifestWriter->write($nextConfig);
+            $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
+        } catch (RuntimeException $exception) {
+            if ($deletePath && $backupPath !== null && (file_exists($backupPath) || is_link($backupPath))) {
+                $this->runtimeInspector->copyPath($backupPath, $removedAbsolutePath);
+            }
+
+            throw $exception;
+        } finally {
+            if ($backupRoot !== null) {
+                $this->runtimeInspector->clearPath($backupRoot);
+            }
         }
 
         return [
@@ -209,10 +258,7 @@ final class DependencyAuthoringService
             } else {
                 $repository = $this->requiredString($options, 'github-repository');
                 $tokenEnv = $this->nullableString($options['github-token-env'] ?? null);
-
-                if ($privateGitHub && $tokenEnv === null) {
-                    $tokenEnv = self::defaultGitHubTokenEnv($rawEntry['slug'], $repository);
-                }
+                $defaultTokenEnv = self::defaultGitHubTokenEnv($rawEntry['slug'], $repository);
 
                 $rawEntry['source_config']['github_repository'] = $repository;
                 $rawEntry['source_config']['github_release_asset_pattern'] = $this->nullableString($options['github-release-asset-pattern'] ?? null);
@@ -226,7 +272,30 @@ final class DependencyAuthoringService
                     ));
                 }
 
-                $releases = $this->gitHubReleaseClient->fetchStableReleases($rawEntry);
+                try {
+                    $releases = $this->gitHubReleaseClient->fetchStableReleases($rawEntry);
+                } catch (RuntimeException $exception) {
+                    if (
+                        $tokenEnv === null
+                        && $this->looksLikeGitHubAuthFailure($exception)
+                    ) {
+                        $rawEntry['source_config']['github_token_env'] = $defaultTokenEnv;
+                        $envValue = getenv($defaultTokenEnv);
+
+                        if (! is_string($envValue) || $envValue === '') {
+                            throw new RuntimeException(sprintf(
+                                'GitHub release access for %s may require authentication. Export %s locally, or pass --github-token-env=YOUR_TOKEN_ENV. If the repository is public, verify that --github-repository is correct.',
+                                $repository,
+                                $defaultTokenEnv
+                            ), previous: $exception);
+                        }
+
+                        $releases = $this->gitHubReleaseClient->fetchStableReleases($rawEntry);
+                    } else {
+                        throw $exception;
+                    }
+                }
+
                 $selectedRelease = $this->selectGitHubRelease($releases, $rawEntry, $requestedVersion);
                 $version = $this->gitHubReleaseClient->latestVersion($selectedRelease, $rawEntry);
                 $this->gitHubReleaseClient->downloadReleaseToFile($selectedRelease, $rawEntry, $archivePath);
@@ -597,5 +666,14 @@ final class DependencyAuthoringService
 
         $trimmed = trim($value);
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    private function looksLikeGitHubAuthFailure(RuntimeException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'status 401')
+            || str_contains($message, 'status 403')
+            || str_contains($message, 'status 404');
     }
 }
