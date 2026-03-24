@@ -54,7 +54,7 @@ final class DownstreamScaffolder
             ],
         ];
 
-        $managedFiles = $this->renderFrameworkManagedFiles($toolPath);
+        $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset);
 
         foreach ($managedFiles as $relativePath => $rendered) {
             $writes[] = [
@@ -113,7 +113,11 @@ final class DownstreamScaffolder
     /**
      * @return array<string, string>
      */
-    public function renderFrameworkManagedFiles(string $toolPath): array
+    /**
+     * @param array{include_runtime_validation?:bool} $preset
+     * @return array<string, string>
+     */
+    public function renderFrameworkManagedFiles(string $toolPath, array $preset = []): array
     {
         $syncCommand = $this->updaterCommand($toolPath, 'sync');
         $frameworkSyncCommand = $this->updaterCommand($toolPath, 'framework-sync --repo-root=.');
@@ -121,7 +125,7 @@ final class DownstreamScaffolder
         $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --github');
         $stageCommand = $this->updaterCommand($toolPath, 'stage-runtime --repo-root=. --output=.wp-core-base/build/runtime');
 
-        return [
+        $files = [
             '.github/workflows/wporg-updates.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
                 ['__WPORG_SYNC_COMMAND__' => $syncCommand]
@@ -142,6 +146,12 @@ final class DownstreamScaffolder
                 ['__WPORG_FRAMEWORK_SYNC_COMMAND__' => $frameworkSyncCommand]
             ),
         ];
+
+        if (($preset['include_runtime_validation'] ?? true) !== true) {
+            unset($files['.github/workflows/wporg-validate-runtime.yml']);
+        }
+
+        return $files;
     }
 
     /**
@@ -268,7 +278,7 @@ final class DownstreamScaffolder
     }
 
     /**
-     * @return array{template:string, profile:string, core_mode:string, core_enabled:bool, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, managed_kinds:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>}
+     * @return array{template:string, profile:string, core_mode:string, core_enabled:bool, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, managed_kinds:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>, include_runtime_validation:bool}
      */
     private function presetForProfile(string $profile): array
     {
@@ -286,6 +296,7 @@ final class DownstreamScaffolder
                 'validated_kinds' => Config::runtimeKinds(),
                 'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
                 'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'include_runtime_validation' => true,
             ],
             'content-only', 'content-only-default', 'content-only-local-mu' => [
                 'template' => 'content-only',
@@ -300,6 +311,7 @@ final class DownstreamScaffolder
                 'validated_kinds' => Config::runtimeKinds(),
                 'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
                 'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'include_runtime_validation' => true,
             ],
             'content-only-migration' => [
                 'template' => 'content-only',
@@ -314,6 +326,7 @@ final class DownstreamScaffolder
                 'validated_kinds' => Config::runtimeKinds(),
                 'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
                 'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'include_runtime_validation' => true,
             ],
             'content-only-image-first' => [
                 'template' => 'content-only',
@@ -365,6 +378,59 @@ final class DownstreamScaffolder
                     'pnpm-lock.yaml',
                     'yarn.lock',
                 ],
+                'include_runtime_validation' => true,
+            ],
+            'content-only-image-first-compact' => [
+                'template' => 'content-only',
+                'profile' => 'content-only',
+                'core_mode' => 'external',
+                'core_enabled' => false,
+                'manifest_mode' => 'strict',
+                'validation_mode' => 'staged-clean',
+                'ownership_roots' => ['__PLUGINS_ROOT__', '__THEMES_ROOT__', '__MU_PLUGINS_ROOT__', '__CONTENT_ROOT__/languages'],
+                'managed_kinds' => ['plugin', 'theme'],
+                'staged_kinds' => Config::runtimeKinds(),
+                'validated_kinds' => Config::runtimeKinds(),
+                'managed_sanitize_paths' => [
+                    '__PLUGINS_ROOT__/docs',
+                    '__PLUGINS_ROOT__/.github',
+                    '__PLUGINS_ROOT__/.wordpress-org',
+                    '__PLUGINS_ROOT__/node_modules',
+                    '__PLUGINS_ROOT__/doc',
+                    '__PLUGINS_ROOT__/tests',
+                    '__PLUGINS_ROOT__/test',
+                    '__PLUGINS_ROOT__/__tests__',
+                    '__PLUGINS_ROOT__/examples',
+                    '__PLUGINS_ROOT__/example',
+                    '__PLUGINS_ROOT__/demo',
+                    '__PLUGINS_ROOT__/screenshots',
+                    '__THEMES_ROOT__/docs',
+                    '__THEMES_ROOT__/.github',
+                    '__THEMES_ROOT__/.wordpress-org',
+                    '__THEMES_ROOT__/node_modules',
+                    '__THEMES_ROOT__/doc',
+                    '__THEMES_ROOT__/tests',
+                    '__THEMES_ROOT__/test',
+                    '__THEMES_ROOT__/__tests__',
+                    '__THEMES_ROOT__/examples',
+                    '__THEMES_ROOT__/example',
+                    '__THEMES_ROOT__/demo',
+                    '__THEMES_ROOT__/screenshots',
+                ],
+                'managed_sanitize_files' => [
+                    'README*',
+                    'CHANGELOG*',
+                    '.gitignore',
+                    '.gitattributes',
+                    'phpunit.xml*',
+                    'composer.json',
+                    'composer.lock',
+                    'package.json',
+                    'package-lock.json',
+                    'pnpm-lock.yaml',
+                    'yarn.lock',
+                ],
+                'include_runtime_validation' => false,
             ],
             default => throw new RuntimeException(sprintf('Invalid scaffold profile: %s', $profile)),
         };

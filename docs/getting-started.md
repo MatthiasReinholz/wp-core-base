@@ -83,6 +83,13 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downs
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
 ```
 
+If the project already has a strong PR build workflow that runs `doctor`, `stage-runtime`, and image or smoke checks, use the compact image-first profile instead:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-image-first-compact --content-root=cms
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+```
+
 Then:
 
 1. classify every runtime dependency in `.wp-core-base/manifest.php`
@@ -101,6 +108,8 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 9. point your image build at the staged runtime directory instead of the raw working tree
 
 If you want ongoing upstream framework maintenance, keep the scaffolded `.wp-core-base/framework.php` file and the `wp-core-base` self-update workflow enabled.
+
+The standalone `wp-core-base Runtime Validation` workflow is the default because it gives downstreams a small canonical runtime-contract check even when they do not yet have a mature PR build pipeline. If your main PR workflow already runs `doctor` and `stage-runtime`, the compact image-first scaffold profile is usually the better fit.
 
 If your repo already has a blanket `/vendor/` ignore from historical Composer usage, do not unignore the whole directory. Keep the exception narrow so only `vendor/wp-core-base` becomes repo-owned:
 

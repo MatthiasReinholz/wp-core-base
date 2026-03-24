@@ -19,6 +19,16 @@ concurrency:
 
 jobs:
   sync:
+    if: >
+      github.event_name != 'pull_request_target' ||
+      (
+        github.event.action == 'closed' &&
+        github.event.pull_request.merged == true &&
+        (
+          contains(github.event.pull_request.labels.*.name, 'automation:dependency-update') ||
+          contains(github.event.pull_request.labels.*.name, 'automation:framework-update')
+        )
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository

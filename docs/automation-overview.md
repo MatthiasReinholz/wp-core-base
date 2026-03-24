@@ -52,6 +52,8 @@ Managed dependencies are explicit. Folder presence alone never makes something u
 
 Dependency-source failures are isolated per managed dependency. If one plugin or theme source fails, `sync` still continues processing the remaining managed dependencies and reports the failed sources as warnings at the end of the run.
 
+The scaffolded updates workflow also listens for closed pull requests, but reconciliation is narrowed to merged framework-managed PRs. That keeps queued follow-up updates moving after a merge without rerunning full update reconciliation for unrelated closed pull requests.
+
 ## Dependency Update Sources
 
 Supported automated sources:

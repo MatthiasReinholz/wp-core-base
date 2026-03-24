@@ -763,6 +763,8 @@ $scaffoldedFramework = FrameworkConfig::load($tempScaffoldRoot);
 $assert($scaffoldedFramework->distributionPath() === 'vendor/wp-core-base', 'Expected scaffolded framework metadata to point at the vendored framework path.');
 $scaffoldedFrameworkWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wp-core-base-self-update.yml');
 $assert(str_contains($scaffoldedFrameworkWorkflow, 'framework-sync --repo-root=.'), 'Expected scaffolded self-update workflow to run framework-sync.');
+$assert(str_contains($scaffoldedWorkflow, "github.event.pull_request.merged == true"), 'Expected scaffolded updates workflow to narrow closed-PR reconciliation to merged PRs.');
+$assert(str_contains($scaffoldedWorkflow, "automation:dependency-update"), 'Expected scaffolded updates workflow to gate closed-PR reconciliation to framework automation PRs.');
 
 $migrationScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-migration-' . bin2hex(random_bytes(4));
 mkdir($migrationScaffoldRoot, 0777, true);
@@ -777,6 +779,13 @@ $imageFirstManifest = (string) file_get_contents($imageFirstScaffoldRoot . '/.wp
 $assert(str_contains($imageFirstManifest, "'validation_mode' => 'staged-clean'"), 'Expected image-first scaffold preset to use staged-clean validation.');
 $assert(str_contains($imageFirstManifest, "'cms/languages'"), 'Expected image-first scaffold preset to include languages ownership roots.');
 $assert(str_contains($imageFirstManifest, "'managed_sanitize_paths' =>"), 'Expected image-first scaffold preset to include managed sanitation paths.');
+
+$compactScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-image-first-compact-' . bin2hex(random_bytes(4));
+mkdir($compactScaffoldRoot, 0777, true);
+(new DownstreamScaffolder(dirname(__DIR__, 3), $compactScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only-image-first-compact', 'cms', true);
+$assert(! file_exists($compactScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml'), 'Expected compact image-first scaffold profile to omit the standalone runtime-validation workflow.');
+$compactWorkflow = (string) file_get_contents($compactScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+$assert(str_contains($compactWorkflow, "automation:framework-update"), 'Expected compact scaffold to keep merged automation PR reconciliation in the updates workflow.');
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);
