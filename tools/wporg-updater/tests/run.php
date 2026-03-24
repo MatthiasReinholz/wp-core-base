@@ -797,6 +797,8 @@ $tempScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-' . bin2hex(random_byt
 mkdir($tempScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
 $scaffoldedManifest = (string) file_get_contents($tempScaffoldRoot . '/.wp-core-base/manifest.php');
+$scaffoldedUsage = (string) file_get_contents($tempScaffoldRoot . '/.wp-core-base/USAGE.md');
+$scaffoldedAgents = (string) file_get_contents($tempScaffoldRoot . '/AGENTS.md');
 $scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates.yml');
 $scaffoldedReconcileWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $scaffoldedBlocker = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
@@ -809,6 +811,10 @@ $assert(str_contains($scaffoldedManifest, "'ownership_roots' =>"), 'Expected sca
 $assert(str_contains($scaffoldedManifest, "'managed_kinds' => ["), 'Expected scaffolded manifest to include managed_kinds.');
 $assert(str_contains($scaffoldedManifest, "'kind' => 'mu-plugin-file'"), 'Expected scaffolded manifest to document local MU plugin files.');
 $assert(str_contains($scaffoldedManifest, "'kind' => 'runtime-directory'"), 'Expected scaffolded manifest to document runtime directories.');
+$assert(str_contains($scaffoldedUsage, 'vendor/wp-core-base/bin/wp-core-base add-dependency'), 'Expected scaffolded usage guide to point at the vendored wrapper for routine dependency authoring.');
+$assert(str_contains($scaffoldedUsage, '.wp-core-base/manifest.php'), 'Expected scaffolded usage guide to explain the manifest source of truth.');
+$assert(str_contains($scaffoldedAgents, '.wp-core-base/USAGE.md'), 'Expected scaffolded downstream AGENTS.md to point agents at the local usage guide first.');
+$assert(str_contains($scaffoldedAgents, 'Do not start by hand-editing `.wp-core-base/manifest.php`'), 'Expected scaffolded downstream AGENTS.md to steer agents toward the CLI-first workflow.');
 $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
 $assert(str_contains($scaffoldedWorkflow, 'WPORG_REPO_ROOT: ${{ github.workspace }}'), 'Expected scaffolded workflow to set WPORG_REPO_ROOT so sync runs against the downstream repo.');
 $assert(! str_contains($scaffoldedWorkflow, 'pull_request_target:'), 'Expected scaffolded updates workflow to keep scheduled/manual execution separate from PR reconciliation.');
