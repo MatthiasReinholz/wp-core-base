@@ -131,6 +131,30 @@ No.
 
 Check [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md) for the exact supported and unsupported cases.
 
+## Are premium plugins supported in workflow updates?
+
+Selected premium plugin sources are supported.
+
+Today that includes:
+
+- ACF PRO through `acf-pro`
+- User Role Editor Pro through `role-editor-pro`
+- Freemius-backed premium plugins through `freemius-premium`
+
+Those sources use one fixed local or GitHub Actions secret:
+
+- `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+
+WooCommerce.com extensions are still outside the native workflow-managed source contract in this phase.
+
+## Why does wp-admin say a plugin is managed by workflows?
+
+Because scaffolded downstreams now include a framework-managed governance MU plugin.
+
+For workflow-managed plugins, the framework suppresses the normal WordPress update affordances that would suggest “update this plugin in the dashboard” even though the intended contract is “update this plugin through Git-reviewed automation PRs”.
+
+That keeps the admin UI aligned with the real ownership model instead of showing conflicting update paths.
+
 ## Can I point managed dependencies at raw Git working trees, symlinks, or submodules?
 
 No. That is not the intended managed-dependency model.

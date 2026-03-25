@@ -11,6 +11,7 @@ final class RuntimeStager
     public function __construct(
         private readonly Config $config,
         private readonly RuntimeInspector $runtimeInspector,
+        private readonly ?AdminGovernanceExporter $adminGovernanceExporter = null,
     ) {
     }
 
@@ -140,6 +141,25 @@ final class RuntimeStager
                 $this->runtimeInspector->stripPath($destination, $stripPaths, $stripFiles);
                 $stagedPaths[] = $entry['path'];
             }
+        }
+
+        foreach (FrameworkRuntimeFiles::runtimeEntries($this->config) as $entry) {
+            if ($entry['path'] === FrameworkRuntimeFiles::governanceDataPath($this->config)) {
+                continue;
+            }
+
+            if (! file_exists($entry['absolute_path']) && ! is_link($entry['absolute_path'])) {
+                continue;
+            }
+
+            $destination = $absoluteOutput . '/' . $entry['path'];
+            $this->runtimeInspector->copyPath($entry['absolute_path'], $destination);
+            $stagedPaths[] = $entry['path'];
+        }
+
+        if ($this->adminGovernanceExporter !== null) {
+            $this->adminGovernanceExporter->exportToRuntime($this->config, $absoluteOutput);
+            $stagedPaths[] = FrameworkRuntimeFiles::governanceDataPath($this->config);
         }
 
         $this->runtimeInspector->assertTreeIsClean($absoluteOutput);

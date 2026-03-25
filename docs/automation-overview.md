@@ -31,6 +31,7 @@ The CLI supports:
 - `stage-runtime`
 - `scaffold-downstream`
 - `framework-sync`
+- `refresh-admin-governance`
 - `release-verify`
 - `suggest-manifest`
 - `format-manifest`
@@ -65,6 +66,9 @@ Supported automated sources:
 
 - `WordPress.org`
 - `github-release`
+- `acf-pro`
+- `role-editor-pro`
+- `freemius-premium`
 
 GitHub source handling uses stable Releases as the source of truth. It does not infer release state from raw tags or commit history.
 
@@ -75,6 +79,12 @@ Private GitHub release assets are supported through:
 - `source_config.github_token_env`
 
 The download flow never forwards authorization headers to redirected CDN URLs.
+
+Premium source handling uses one fixed credentials env var:
+
+- `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+
+The manifest stores only source identity and lookup keys. It never stores premium license keys, site-linked API tokens, or signed download URLs.
 
 ## Runtime Hygiene
 
@@ -116,6 +126,8 @@ Framework PRs use the same queueing behavior, but operate on the vendored `wp-co
 - `.github/workflows/wporg-update-pr-blocker.yml`
 - `.github/workflows/wporg-validate-runtime.yml`
 - `.github/workflows/wp-core-base-self-update.yml`
+- a framework-managed admin governance MU plugin loader
+- a generated admin governance data file
 
 Profiles:
 
@@ -136,6 +148,8 @@ Scaffolded manifests include:
 - `runtime.validated_kinds`
 - `runtime.managed_sanitize_paths`
 - `runtime.managed_sanitize_files`
+
+The governance data file is also refreshed automatically after dependency authoring commands and framework self-updates so wp-admin can keep reflecting the manifest’s ownership model without reading `.wp-core-base/manifest.php` at runtime.
 
 ## Managed Dependency Packaging Contract
 

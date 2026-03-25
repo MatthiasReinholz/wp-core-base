@@ -77,6 +77,7 @@ These map to manifest values like this:
 
 - `management: managed` + `source: wordpress.org` => `managed-upstream`
 - `management: managed` + `source: github-release` => `managed-private`
+- `management: managed` + `source: acf-pro|role-editor-pro|freemius-premium` => `managed-premium`
 - `management: local` + `source: local` => `local-owned`
 - `management: ignored` + `source: local` => `ignored`
 
@@ -86,10 +87,24 @@ Today the framework supports automated updates from:
 
 - `WordPress.org`
 - `github-release`
+- `acf-pro`
+- `role-editor-pro`
+- `freemius-premium`
 
 GitHub support is release-backed. The repository must publish stable GitHub Releases. Raw tags without Releases are not treated as the source of truth.
 
 For private GitHub dependencies, the manifest should point to an environment variable through `source_config.github_token_env`.
+
+Premium workflow sources use one fixed env var or GitHub secret:
+
+- `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+
+Current premium position:
+
+- ACF PRO: supported through `acf-pro`
+- User Role Editor Pro: supported through `role-editor-pro`
+- Freemius-backed premium plugins: supported through `freemius-premium`
+- WooCommerce.com extensions: not supported as native workflow-managed sources in this phase
 
 ## Managed Versus Local
 
@@ -216,6 +231,25 @@ Use the staged directory as the input to:
 - immutable artifact builds
 
 Do not build release artifacts from the raw repository tree when runtime staging is part of your contract.
+
+## Admin Governance
+
+Scaffolded downstreams also get a framework-managed MU plugin plus a generated data file under the configured `mu_plugins_root`.
+
+That governance layer projects manifest ownership into runtime so wp-admin can distinguish:
+
+- workflow-managed plugins
+- local project-owned plugins
+- ignored entries
+
+For workflow-managed plugins, the admin UI becomes intentionally less misleading:
+
+- WordPress update offers for those plugins are suppressed
+- manual `Update now` style actions are removed when present
+- auto-update controls are replaced with explanatory text
+- the plugin row shows a `Managed by wp-core-base workflows` label
+
+If the downstream site already suppresses update UI globally, the governance component stays passive and informational. It does not try to re-enable native WordPress update behavior.
 
 ## Helper Commands
 

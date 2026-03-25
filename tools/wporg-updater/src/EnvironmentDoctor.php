@@ -61,6 +61,7 @@ final class EnvironmentDoctor
             $this->inspectConfiguredStructure($config);
             $this->inspectDependencies($config);
             $this->inspectRuntimeOwnership($config);
+            $this->inspectAdminGovernance($config);
             $this->inspectRuntimeStaging($config);
         }
 
@@ -259,7 +260,7 @@ final class EnvironmentDoctor
     {
         $stagePath = $config->repoRoot . '/.wp-core-base/build/doctor-runtime';
         $runtimeInspector = new RuntimeInspector($config->runtime);
-        $stager = new RuntimeStager($config, $runtimeInspector);
+        $stager = new RuntimeStager($config, $runtimeInspector, new AdminGovernanceExporter($runtimeInspector));
 
         try {
             $stagedPaths = $stager->stage('.wp-core-base/build/doctor-runtime');
@@ -306,6 +307,65 @@ final class EnvironmentDoctor
 
         foreach ($config->managedDependencies() as $dependency) {
             if ($dependency['source'] !== 'github-release') {
+                if (in_array($dependency['source'], ['acf-pro', 'role-editor-pro', 'freemius-premium'], true)) {
+                    $store = new PremiumCredentialsStore();
+
+                    try {
+                        $credentials = $store->credentialsFor($dependency);
+                        $requiredFields = match ($dependency['source']) {
+                            'acf-pro' => ['license_key', 'site_url'],
+                            'role-editor-pro' => ['license_key'],
+                            'freemius-premium' => [],
+                            default => [],
+                        };
+
+                        foreach ($requiredFields as $field) {
+                            $value = $credentials[$field] ?? null;
+
+                            if (! is_string($value) || trim($value) === '') {
+                                throw new RuntimeException(sprintf(
+                                    'Premium credentials for %s are missing `%s`.',
+                                    $dependency['component_key'],
+                                    $field
+                                ));
+                            }
+                        }
+
+                        if ($dependency['source'] === 'freemius-premium') {
+                            $hasFreemiusAuth = (
+                                (isset($credentials['api_token']) && is_string($credentials['api_token']) && trim($credentials['api_token']) !== '')
+                                || (
+                                    isset($credentials['install_id']) && is_numeric($credentials['install_id'])
+                                    && isset($credentials['install_api_token']) && is_string($credentials['install_api_token']) && trim($credentials['install_api_token']) !== ''
+                                )
+                                || (
+                                    isset($credentials['license_key']) && is_string($credentials['license_key']) && trim($credentials['license_key']) !== ''
+                                    && isset($credentials['site_url']) && is_string($credentials['site_url']) && trim($credentials['site_url']) !== ''
+                                )
+                            );
+
+                            if (! $hasFreemiusAuth) {
+                                throw new RuntimeException(sprintf(
+                                    'Premium credentials for %s must include either api_token, install_id + install_api_token, or license_key + site_url.',
+                                    $dependency['component_key']
+                                ));
+                            }
+                        }
+
+                        $this->ok(sprintf(
+                            'Premium credentials are configured for %s via %s.',
+                            $dependency['component_key'],
+                            PremiumCredentialsStore::envName()
+                        ));
+                    } catch (RuntimeException $exception) {
+                        if ($requireGitHub) {
+                            $this->error($exception->getMessage());
+                        } else {
+                            $this->warn($exception->getMessage());
+                        }
+                    }
+                }
+
                 continue;
             }
 
@@ -328,6 +388,36 @@ final class EnvironmentDoctor
                 $this->error($message);
             } else {
                 $this->warn($message);
+            }
+        }
+    }
+
+    private function inspectAdminGovernance(Config $config): void
+    {
+        $loaderPath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceLoaderPath($config);
+        $dataPath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config);
+        $exporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));
+
+        $this->okIf(
+            is_file($loaderPath),
+            sprintf('Admin governance loader exists: %s', FrameworkRuntimeFiles::governanceLoaderPath($config)),
+            sprintf('Admin governance loader is missing: %s', FrameworkRuntimeFiles::governanceLoaderPath($config))
+        );
+
+        $this->okIf(
+            is_file($dataPath),
+            sprintf('Admin governance data exists: %s', FrameworkRuntimeFiles::governanceDataPath($config)),
+            sprintf('Admin governance data is missing: %s. Run refresh-admin-governance.', FrameworkRuntimeFiles::governanceDataPath($config))
+        );
+
+        if (is_file($dataPath)) {
+            if ($exporter->isStaleOrMissing($config)) {
+                $this->warn(sprintf(
+                    'Admin governance data is stale relative to the manifest: %s. Run refresh-admin-governance.',
+                    FrameworkRuntimeFiles::governanceDataPath($config)
+                ));
+            } else {
+                $this->ok('Admin governance data matches the current manifest.');
             }
         }
     }

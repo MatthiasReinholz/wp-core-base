@@ -76,7 +76,7 @@ final class DownstreamScaffolder
             ],
         ];
 
-        $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset);
+        $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset, $paths);
 
         foreach ($managedFiles as $relativePath => $rendered) {
             $writes[] = [
@@ -116,6 +116,10 @@ final class DownstreamScaffolder
         (new FrameworkWriter())->write($frameworkConfig);
         fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/.wp-core-base/framework.php'));
 
+        $config = Config::load($this->repoRoot);
+        (new AdminGovernanceExporter(new RuntimeInspector($config->runtime)))->refresh($config);
+        fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config)));
+
         fwrite(STDOUT, "\n");
         fwrite(STDOUT, "Next steps:\n");
         fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
@@ -140,8 +144,12 @@ final class DownstreamScaffolder
      * @param array{include_runtime_validation?:bool} $preset
      * @return array<string, string>
      */
-    public function renderFrameworkManagedFiles(string $toolPath, array $preset = []): array
+    public function renderFrameworkManagedFiles(string $toolPath, array $preset = [], ?array $paths = null): array
     {
+        if ($paths === null) {
+            $paths = Config::load($this->repoRoot)->paths;
+        }
+
         $syncCommand = $this->updaterCommand($toolPath, 'sync');
         $frameworkSyncCommand = $this->updaterCommand($toolPath, 'framework-sync --repo-root=.');
         $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
@@ -171,6 +179,10 @@ final class DownstreamScaffolder
             '.github/workflows/wp-core-base-self-update.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-framework-self-update-workflow.yml.tpl',
                 ['__WPORG_FRAMEWORK_SYNC_COMMAND__' => $frameworkSyncCommand]
+            ),
+            $paths['mu_plugins_root'] . '/' . FrameworkRuntimeFiles::GOVERNANCE_LOADER_BASENAME => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/admin-governance-loader.php.tpl',
+                ['__WP_CORE_BASE_GOVERNANCE_DATA_BASENAME__' => FrameworkRuntimeFiles::GOVERNANCE_DATA_BASENAME]
             ),
         ];
 

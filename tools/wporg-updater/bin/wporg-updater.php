@@ -6,6 +6,8 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\CoreUpdater;
+use WpOrgPluginUpdater\AcfProManagedSource;
+use WpOrgPluginUpdater\AdminGovernanceExporter;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DependencyAuthoringService;
 use WpOrgPluginUpdater\DependencyMetadataResolver;
@@ -24,15 +26,21 @@ use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
+use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\PrBodyRenderer;
+use WpOrgPluginUpdater\PremiumCredentialsStore;
 use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
+use WpOrgPluginUpdater\RoleEditorProManagedSource;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeStager;
+use WpOrgPluginUpdater\WordPressOrgManagedSource;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\Updater;
 use WpOrgPluginUpdater\WordPressCoreClient;
 use WpOrgPluginUpdater\WordPressOrgClient;
+use WpOrgPluginUpdater\GitHubReleaseManagedSource;
+use WpOrgPluginUpdater\FreemiusPremiumManagedSource;
 
 require dirname(__DIR__) . '/src/Autoload.php';
 
@@ -78,7 +86,11 @@ $maybePromptForMissing = static function (array &$options, InteractivePrompter $
     $kind = isset($options['kind']) && is_string($options['kind']) ? $options['kind'] : null;
 
     if ($source === null || $source === '') {
-        $options['source'] = $prompter->choose('Select dependency source', ['wordpress.org', 'github-release', 'local'], 'local');
+        $options['source'] = $prompter->choose(
+            'Select dependency source',
+            ['wordpress.org', 'github-release', 'acf-pro', 'role-editor-pro', 'freemius-premium', 'local'],
+            'local'
+        );
         $source = $options['source'];
     }
 
@@ -113,6 +125,24 @@ $maybePromptForMissing = static function (array &$options, InteractivePrompter $
 
             if ($tokenEnv !== '') {
                 $options['github-token-env'] = $tokenEnv;
+            }
+        }
+    }
+
+    if (in_array($source, ['acf-pro', 'role-editor-pro', 'freemius-premium'], true)) {
+        if ($source === 'freemius-premium' && (! isset($options['provider-product-id']) || ! is_string($options['provider-product-id']) || trim($options['provider-product-id']) === '')) {
+            $providerProductId = $prompter->ask('Freemius product ID (leave blank for known defaults)', '');
+
+            if ($providerProductId !== '') {
+                $options['provider-product-id'] = $providerProductId;
+            }
+        }
+
+        if (! isset($options['credential-key']) || ! is_string($options['credential-key']) || trim($options['credential-key']) === '') {
+            $credentialKey = $prompter->ask('Premium credential lookup key (leave blank for component key)', '');
+
+            if ($credentialKey !== '') {
+                $options['credential-key'] = $credentialKey;
             }
         }
     }
@@ -204,10 +234,18 @@ try {
     $httpClient = new HttpClient(
         userAgent: 'wp-core-base/' . ($mode === 'sync' ? 'sync' : $mode)
     );
+    $managedSourceRegistry = new ManagedSourceRegistry(
+        new WordPressOrgManagedSource(new WordPressOrgClient($httpClient), $httpClient),
+        new GitHubReleaseManagedSource(new GitHubReleaseClient($httpClient, $config->githubApiBase())),
+        new AcfProManagedSource($httpClient, new PremiumCredentialsStore()),
+        new RoleEditorProManagedSource($httpClient, new PremiumCredentialsStore()),
+        new FreemiusPremiumManagedSource($httpClient, new PremiumCredentialsStore())
+    );
+    $adminGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));
 
     if ($mode === 'stage-runtime') {
         $runtimeInspector = new RuntimeInspector($config->runtime);
-        $stager = new RuntimeStager($config, $runtimeInspector);
+        $stager = new RuntimeStager($config, $runtimeInspector, $adminGovernanceExporter);
         $stagedPaths = $stager->stage((string) ($options['output'] ?? $config->runtime['stage_dir']));
         fwrite(STDOUT, "Staged runtime paths:\n");
 
@@ -215,6 +253,12 @@ try {
             fwrite(STDOUT, sprintf("- %s\n", $path));
         }
 
+        exit(0);
+    }
+
+    if ($mode === 'refresh-admin-governance') {
+        $adminGovernanceExporter->refresh($config);
+        fwrite(STDOUT, "Refreshed admin governance runtime data\n");
         exit(0);
     }
 
@@ -259,9 +303,8 @@ try {
             metadataResolver: new DependencyMetadataResolver(),
             runtimeInspector: new RuntimeInspector($config->runtime),
             manifestWriter: new ManifestWriter(),
-            wordPressOrgClient: new WordPressOrgClient($httpClient),
-            gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase()),
-            archiveDownloader: $httpClient,
+            managedSourceRegistry: $managedSourceRegistry,
+            adminGovernanceExporter: $adminGovernanceExporter,
         );
 
         if ($mode === 'add-dependency') {
@@ -382,6 +425,7 @@ try {
             dependencyScanner: new DependencyScanner(),
             wordPressOrgClient: new WordPressOrgClient($httpClient),
             gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase()),
+            managedSourceRegistry: $managedSourceRegistry,
             supportForumClient: new SupportForumClient($httpClient, 100),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),

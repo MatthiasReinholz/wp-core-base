@@ -92,6 +92,107 @@ Optional flags:
 
 Use `--archive-subdir` only when the extracted payload is not resolved correctly by default. Standard WordPress.org plugin ZIPs should not need it.
 
+## Add A Premium Plugin
+
+Premium workflow updates are supported today for these managed source types:
+
+- `acf-pro`
+- `role-editor-pro`
+- `freemius-premium`
+
+The workflow credential contract is a single JSON env var or GitHub Actions secret:
+
+- `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+
+The manifest stores only the dependency source and optional lookup keys. It never stores premium license keys.
+
+### Add ACF PRO
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=acf-pro \
+  --kind=plugin \
+  --slug=advanced-custom-fields-pro
+```
+
+Credentials JSON entry:
+
+```json
+{
+  "plugin:acf-pro:advanced-custom-fields-pro": {
+    "license_key": "acf-license-key",
+    "site_url": "https://example.com",
+    "release_access_key": "optional-access-key"
+  }
+}
+```
+
+### Add User Role Editor Pro
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=role-editor-pro \
+  --kind=plugin \
+  --slug=user-role-editor-pro
+```
+
+Credentials JSON entry:
+
+```json
+{
+  "plugin:role-editor-pro:user-role-editor-pro": {
+    "license_key": "ure-license-key"
+  }
+}
+```
+
+### Add A Freemius-Backed Premium Plugin
+
+The first validated `freemius-premium` path is Blocksy Companion Pro.
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=freemius-premium \
+  --kind=plugin \
+  --slug=blocksy-companion-pro \
+  --provider-product-id=5115
+```
+
+Supported Freemius credentials are:
+
+- `api_token`
+- `install_id` plus `install_api_token`
+- `license_key` plus `site_url`
+
+Example:
+
+```json
+{
+  "plugin:freemius-premium:blocksy-companion-pro": {
+    "license_key": "blocksy-license-key",
+    "site_url": "https://example.com"
+  }
+}
+```
+
+### Local and GitHub setup for premium credentials
+
+Local shell example:
+
+```bash
+export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:acf-pro:advanced-custom-fields-pro":{"license_key":"acf-license-key","site_url":"https://example.com"}}'
+```
+
+GitHub Actions setup:
+
+- create one repository secret named `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+- store the same JSON object there
+
+Premium source failures remain per-dependency warnings during `sync`. A broken premium source does not stop healthy managed dependency updates from continuing.
+
 ## Add A Private GitHub Release Plugin
 
 ```bash
@@ -237,6 +338,17 @@ vendor/wp-core-base/bin/wp-core-base adopt-dependency \
   --preserve-version
 ```
 
+### Adopt a local premium plugin into managed premium ownership
+
+```bash
+vendor/wp-core-base/bin/wp-core-base adopt-dependency \
+  --repo-root=. \
+  --kind=plugin \
+  --slug=advanced-custom-fields-pro \
+  --source=acf-pro \
+  --preserve-version
+```
+
 ### Preview an adoption before it changes anything
 
 ```bash
@@ -261,6 +373,17 @@ Important scope note:
 - a single `adopt-dependency` run is atomic
 - a batch of several separate commands is not transactional across invocations
 - if you are migrating many entries, do them one by one and review each result
+
+## Unsupported Premium Path In This Phase
+
+WooCommerce.com extensions are still outside the native workflow-update contract in this phase.
+
+Use them as:
+
+- `local` dependencies
+- or another manual/project-specific process
+
+Do not model them as native managed sources yet.
 
 ## Remove An Entry
 

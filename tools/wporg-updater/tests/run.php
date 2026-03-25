@@ -6,32 +6,42 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\ConfigWriter;
 use WpOrgPluginUpdater\CoreScanner;
+use WpOrgPluginUpdater\AdminGovernanceExporter;
+use WpOrgPluginUpdater\AcfProManagedSource;
 use WpOrgPluginUpdater\DependencyAuthoringService;
 use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\ExtractedPayloadLocator;
+use WpOrgPluginUpdater\FreemiusPremiumManagedSource;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
 use WpOrgPluginUpdater\FrameworkReleasePreparer;
 use WpOrgPluginUpdater\FrameworkReleaseVerifier;
+use WpOrgPluginUpdater\FrameworkRuntimeFiles;
 use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\GitHubReleaseClient;
+use WpOrgPluginUpdater\GitHubReleaseManagedSource;
 use WpOrgPluginUpdater\GitHubReleaseSource;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
+use WpOrgPluginUpdater\ManagedDependencySource;
+use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\LabelHelper;
+use WpOrgPluginUpdater\PremiumCredentialsStore;
 use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\ReleaseClassifier;
+use WpOrgPluginUpdater\RoleEditorProManagedSource;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\ArchiveDownloader;
 use WpOrgPluginUpdater\WordPressCoreClient;
+use WpOrgPluginUpdater\WordPressOrgManagedSource;
 use WpOrgPluginUpdater\WordPressOrgSource;
 use WpOrgPluginUpdater\WordPressOrgClient;
 use WpOrgPluginUpdater\ZipExtractor;
@@ -47,6 +57,138 @@ $gitHubReleaseClient = new GitHubReleaseClient($httpClient);
 $coreClient = new WordPressCoreClient($httpClient);
 $supportClient = new SupportForumClient($httpClient, 30);
 $renderer = new PrBodyRenderer();
+$premiumCredentialsStore = new PremiumCredentialsStore('{}');
+$makeManagedSourceRegistry = static function (
+    WordPressOrgSource $wordPressOrgSource,
+    GitHubReleaseSource $gitHubReleaseSource,
+    ArchiveDownloader $archiveDownloader,
+    ?HttpClient $httpClientOverride = null
+): ManagedSourceRegistry {
+    $http = $httpClientOverride ?? new HttpClient();
+
+    $wpOrgManagedSource = new class($wordPressOrgSource, $archiveDownloader) implements ManagedDependencySource
+    {
+        public function __construct(
+            private readonly WordPressOrgSource $source,
+            private readonly ArchiveDownloader $downloader,
+        ) {
+        }
+
+        public function key(): string
+        {
+            return 'wordpress.org';
+        }
+
+        public function fetchCatalog(array $dependency): array
+        {
+            $info = $this->source->fetchComponentInfo((string) $dependency['kind'], (string) $dependency['slug']);
+
+            return [
+                'source' => 'wordpress.org',
+                'info' => $info,
+                'latest_version' => $this->source->latestVersion((string) $dependency['kind'], $info),
+                'latest_release_at' => gmdate(DATE_ATOM),
+            ];
+        }
+
+        public function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
+        {
+            $info = (array) ($catalog['info'] ?? []);
+
+            return [
+                'source' => 'wordpress.org',
+                'version' => $targetVersion,
+                'download_url' => $this->source->downloadUrlForVersion((string) $dependency['kind'], $info, $targetVersion),
+                'archive_subdir' => trim((string) $dependency['archive_subdir'], '/'),
+                'release_at' => $fallbackReleaseAt,
+                'notes_markup' => '<p>Release notes unavailable.</p>',
+                'notes_text' => 'Release notes unavailable.',
+                'source_reference' => $this->source->downloadUrlForVersion((string) $dependency['kind'], $info, $targetVersion),
+                'source_details' => [],
+            ];
+        }
+
+        public function downloadReleaseToFile(array $dependency, array $releaseData, string $destination): void
+        {
+            $this->downloader->downloadToFile((string) $releaseData['download_url'], $destination);
+        }
+
+        public function supportsForumSync(array $dependency): bool
+        {
+            return (string) $dependency['kind'] === 'plugin';
+        }
+    };
+
+    $gitHubManagedSource = new class($gitHubReleaseSource) implements ManagedDependencySource
+    {
+        public function __construct(
+            private readonly GitHubReleaseSource $source,
+        ) {
+        }
+
+        public function key(): string
+        {
+            return 'github-release';
+        }
+
+        public function fetchCatalog(array $dependency): array
+        {
+            $releases = $this->source->fetchStableReleases($dependency);
+            $releasesByVersion = [];
+
+            foreach ($releases as $release) {
+                $version = $this->source->latestVersion($release, $dependency);
+                $releasesByVersion[$version] = $release;
+            }
+
+            return [
+                'source' => 'github-release',
+                'latest_version' => $this->source->latestVersion($releases[0], $dependency),
+                'latest_release_at' => gmdate(DATE_ATOM),
+                'releases_by_version' => $releasesByVersion,
+            ];
+        }
+
+        public function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
+        {
+            $release = $catalog['releases_by_version'][$targetVersion] ?? null;
+
+            if (! is_array($release)) {
+                throw new RuntimeException('Missing fake GitHub release.');
+            }
+
+            return [
+                'source' => 'github-release',
+                'version' => $targetVersion,
+                'release' => $release,
+                'archive_subdir' => trim((string) $dependency['archive_subdir'], '/'),
+                'release_at' => $fallbackReleaseAt,
+                'notes_markup' => '_Release notes unavailable._',
+                'notes_text' => 'Release notes unavailable.',
+                'source_reference' => 'fake-github-release',
+                'source_details' => [],
+            ];
+        }
+
+        public function downloadReleaseToFile(array $dependency, array $releaseData, string $destination): void
+        {
+            $this->source->downloadReleaseToFile((array) $releaseData['release'], $dependency, $destination);
+        }
+
+        public function supportsForumSync(array $dependency): bool
+        {
+            return false;
+        }
+    };
+
+    return new ManagedSourceRegistry(
+        $wpOrgManagedSource,
+        $gitHubManagedSource,
+        new AcfProManagedSource($http, new PremiumCredentialsStore('{}')),
+        new RoleEditorProManagedSource($http, new PremiumCredentialsStore('{}')),
+        new FreemiusPremiumManagedSource($http, new PremiumCredentialsStore('{}'))
+    );
+};
 
 $assert = static function (bool $condition, string $message): void {
     if (! $condition) {
@@ -1000,9 +1142,14 @@ $authoringService = new DependencyAuthoringService(
     metadataResolver: new DependencyMetadataResolver(),
     runtimeInspector: new RuntimeInspector($authoringConfig->runtime),
     manifestWriter: new ManifestWriter(),
-    wordPressOrgClient: $wpClient,
-    gitHubReleaseClient: $gitHubReleaseClient,
-    archiveDownloader: $httpClient,
+    managedSourceRegistry: new ManagedSourceRegistry(
+        new WordPressOrgManagedSource($wpClient, $httpClient),
+        new GitHubReleaseManagedSource($gitHubReleaseClient),
+        new AcfProManagedSource($httpClient, $premiumCredentialsStore),
+        new RoleEditorProManagedSource($httpClient, $premiumCredentialsStore),
+        new FreemiusPremiumManagedSource($httpClient, $premiumCredentialsStore),
+    ),
+    adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
 );
 
 $addedPlugin = $authoringService->addDependency([
@@ -1137,9 +1284,8 @@ $managedPlanService = new DependencyAuthoringService(
     metadataResolver: new DependencyMetadataResolver(),
     runtimeInspector: new RuntimeInspector($managedPlanConfig->runtime),
     manifestWriter: new ManifestWriter(),
-    wordPressOrgClient: $fakeWordPressOrgSource,
-    gitHubReleaseClient: $fakeGitHubReleaseSource,
-    archiveDownloader: $fakeArchiveDownloader,
+    managedSourceRegistry: $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader),
+    adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($managedPlanConfig->runtime)),
 );
 $managedPlan = $managedPlanService->planAddDependency([
     'source' => 'wordpress.org',
@@ -1169,8 +1315,8 @@ $writeManifest($adoptRoot, [[
     'checksum' => null,
     'archive_subdir' => '',
     'extra_labels' => [],
-    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
-    'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => []],
+    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
+    'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
 ]]);
 $adoptConfig = Config::load($adoptRoot);
 $adoptService = new DependencyAuthoringService(
@@ -1178,9 +1324,8 @@ $adoptService = new DependencyAuthoringService(
     metadataResolver: new DependencyMetadataResolver(),
     runtimeInspector: new RuntimeInspector($adoptConfig->runtime),
     manifestWriter: new ManifestWriter(),
-    wordPressOrgClient: $fakeWordPressOrgSource,
-    gitHubReleaseClient: $fakeGitHubReleaseSource,
-    archiveDownloader: $fakeArchiveDownloader,
+    managedSourceRegistry: $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader),
+    adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($adoptConfig->runtime)),
 );
 $adoptPlan = $adoptService->planAdoptDependency([
     'kind' => 'plugin',
@@ -1265,8 +1410,8 @@ $writeManifest($rollbackRoot, [[
     'checksum' => null,
     'archive_subdir' => '',
     'extra_labels' => [],
-    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
-    'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => []],
+    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
+    'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
 ]]);
 $failingWriter = new class implements ConfigWriter
 {
@@ -1281,9 +1426,8 @@ $rollbackService = new DependencyAuthoringService(
     metadataResolver: new DependencyMetadataResolver(),
     runtimeInspector: new RuntimeInspector($rollbackConfig->runtime),
     manifestWriter: $failingWriter,
-    wordPressOrgClient: $rollbackWpSource,
-    gitHubReleaseClient: $fakeGitHubReleaseSource,
-    archiveDownloader: $rollbackDownloader,
+    managedSourceRegistry: $makeManagedSourceRegistry($rollbackWpSource, $fakeGitHubReleaseSource, $rollbackDownloader),
+    adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($rollbackConfig->runtime)),
 );
 $rollbackTriggered = false;
 
@@ -1360,8 +1504,8 @@ $writeManifest($ambiguousRemoveRoot, [
         'checksum' => null,
         'archive_subdir' => '',
         'extra_labels' => [],
-        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
-        'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => []],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
+        'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
     ],
     [
         'name' => 'Shared Plugin Managed',
@@ -1375,7 +1519,7 @@ $writeManifest($ambiguousRemoveRoot, [
         'checksum' => 'sha256:test',
         'archive_subdir' => '',
         'extra_labels' => [],
-        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
         'policy' => ['class' => 'managed-upstream', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
     ],
 ]);
@@ -1385,9 +1529,14 @@ $ambiguousAuthoringService = new DependencyAuthoringService(
     metadataResolver: new DependencyMetadataResolver(),
     runtimeInspector: new RuntimeInspector($ambiguousAuthoringConfig->runtime),
     manifestWriter: new ManifestWriter(),
-    wordPressOrgClient: $wpClient,
-    gitHubReleaseClient: $gitHubReleaseClient,
-    archiveDownloader: $httpClient,
+    managedSourceRegistry: new ManagedSourceRegistry(
+        new WordPressOrgManagedSource($wpClient, $httpClient),
+        new GitHubReleaseManagedSource($gitHubReleaseClient),
+        new AcfProManagedSource($httpClient, $premiumCredentialsStore),
+        new RoleEditorProManagedSource($httpClient, $premiumCredentialsStore),
+        new FreemiusPremiumManagedSource($httpClient, $premiumCredentialsStore),
+    ),
+    adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($ambiguousAuthoringConfig->runtime)),
 );
 $ambiguousRemoveRejected = false;
 

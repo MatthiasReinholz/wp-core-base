@@ -131,6 +131,8 @@ Each dependency entry supports:
         'github_repository' => null,
         'github_release_asset_pattern' => null,
         'github_token_env' => null,
+        'credential_key' => null,
+        'provider_product_id' => null,
     ],
     'policy' => [
         'class' => 'managed-upstream',
@@ -159,7 +161,7 @@ vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=.
   - `runtime-file`
   - `runtime-directory`
 - `management` must be `managed`, `local`, or `ignored`
-- `source` must be `wordpress.org`, `github-release`, or `local`
+- `source` must be `wordpress.org`, `github-release`, `acf-pro`, `role-editor-pro`, `freemius-premium`, or `local`
 - `managed` entries must define `version` and `checksum`
 - `local` entries may define `version`, but do not need `checksum`
 - `ignored` entries are excluded from runtime staging
@@ -238,6 +240,30 @@ For a private GitHub release-backed dependency, use:
 - `source_config.github_token_env`
 
 The token value itself should stay in environment or repository secrets, not in the manifest.
+
+## Premium Managed Dependencies
+
+Premium managed plugin sources use one fixed env-var or GitHub secret contract:
+
+- `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+
+Supported premium `source` values:
+
+- `acf-pro`
+- `role-editor-pro`
+- `freemius-premium`
+
+Use `source_config.credential_key` only when the credential lookup key should differ from the dependency `component_key`.
+
+Use `source_config.provider_product_id` only for providers that require a stable product identifier. In the current implementation, this applies to `freemius-premium`.
+
+The manifest never stores:
+
+- premium license keys
+- site-linked API tokens
+- signed download URLs
+
+Those values live only in `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`.
 
 ## Runtime Ownership Modes
 

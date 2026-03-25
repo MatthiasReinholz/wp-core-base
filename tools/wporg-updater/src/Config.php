@@ -656,7 +656,11 @@ final class Config
             $slug = self::string($dependency['slug'] ?? null, sprintf('dependencies[%d].slug', (int) $index));
             $kind = self::enumValue($dependency['kind'] ?? null, sprintf('dependencies[%d].kind', (int) $index), self::ALL_KINDS);
             $management = self::enumValue($dependency['management'] ?? null, sprintf('dependencies[%d].management', (int) $index), ['managed', 'local', 'ignored']);
-            $source = self::enumValue($dependency['source'] ?? null, sprintf('dependencies[%d].source', (int) $index), ['wordpress.org', 'github-release', 'local']);
+            $source = self::enumValue(
+                $dependency['source'] ?? null,
+                sprintf('dependencies[%d].source', (int) $index),
+                ['wordpress.org', 'github-release', 'acf-pro', 'role-editor-pro', 'freemius-premium', 'local']
+            );
             $path = self::normalizedRelativePath($dependency['path'] ?? null, sprintf('dependencies[%s].path', $slug));
             $mainFile = self::nullableNormalizedRelativePath($dependency['main_file'] ?? null, sprintf('dependencies[%s].main_file', $slug));
             $name = self::string($dependency['name'] ?? $slug, sprintf('dependencies[%s].name', $slug));
@@ -687,6 +691,10 @@ final class Config
 
             if ($source === 'wordpress.org' && ! in_array($kind, ['plugin', 'theme'], true)) {
                 throw new RuntimeException(sprintf('WordPress.org source is only supported for plugin and theme dependencies (%s).', $slug));
+            }
+
+            if (in_array($source, ['acf-pro', 'role-editor-pro', 'freemius-premium'], true) && $kind !== 'plugin') {
+                throw new RuntimeException(sprintf('Premium source %s is currently supported only for plugin dependencies (%s).', $source, $slug));
             }
 
             if ($kind === 'runtime-directory' && $management === 'managed') {
@@ -736,9 +744,17 @@ final class Config
             $githubRepository = self::nullableString($sourceConfig['github_repository'] ?? null);
             $githubReleaseAssetPattern = self::nullableString($sourceConfig['github_release_asset_pattern'] ?? null);
             $githubTokenEnv = self::nullableString($sourceConfig['github_token_env'] ?? null);
+            $credentialKey = self::nullableString($sourceConfig['credential_key'] ?? null);
+            $providerProductId = isset($sourceConfig['provider_product_id']) && $sourceConfig['provider_product_id'] !== ''
+                ? (int) $sourceConfig['provider_product_id']
+                : null;
 
             if ($source === 'github-release' && $githubRepository === null) {
                 throw new RuntimeException(sprintf('GitHub release dependency %s must define source_config.github_repository.', $slug));
+            }
+
+            if ($source === 'freemius-premium' && $providerProductId !== null && $providerProductId <= 0) {
+                throw new RuntimeException(sprintf('Freemius premium dependency %s must use a positive source_config.provider_product_id.', $slug));
             }
 
             $expectedPrefix = self::rootForKindFromPaths($kind, $paths);
@@ -768,6 +784,8 @@ final class Config
                     'github_repository' => $githubRepository,
                     'github_release_asset_pattern' => $githubReleaseAssetPattern,
                     'github_token_env' => $githubTokenEnv,
+                    'credential_key' => $credentialKey,
+                    'provider_product_id' => $providerProductId,
                 ],
                 'policy' => [
                     'class' => $policyClass,
@@ -803,6 +821,7 @@ final class Config
         return match (true) {
             $management === 'managed' && $source === 'wordpress.org' => 'managed-upstream',
             $management === 'managed' && $source === 'github-release' => 'managed-private',
+            $management === 'managed' && in_array($source, ['acf-pro', 'role-editor-pro', 'freemius-premium'], true) => 'managed-premium',
             $management === 'local' && $source === 'local' => 'local-owned',
             $management === 'ignored' && $source === 'local' => 'ignored',
             default => throw new RuntimeException(sprintf('Invalid management/source combination: %s/%s', $management, $source)),
