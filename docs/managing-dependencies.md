@@ -5,6 +5,7 @@ Use `.wp-core-base/manifest.php` as the source of truth, but prefer the CLI for 
 Normal workflow:
 
 - use `add-dependency` to create new manifest entries
+- use `adopt-dependency` to convert an existing `local` entry into a managed entry safely
 - use `remove-dependency` to remove entries
 - use `list-dependencies` to inspect current state
 - edit the manifest manually only for advanced policy or path changes
@@ -31,6 +32,14 @@ The PHP CLI remains fully supported:
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
 ```
 
+For mode-specific help, prefer:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base help add-dependency
+vendor/wp-core-base/bin/wp-core-base help adopt-dependency
+vendor/wp-core-base/bin/wp-core-base help remove-dependency
+```
+
 ## Add A WordPress.org Plugin
 
 ```bash
@@ -49,6 +58,19 @@ This will:
 - sanitize and checksum the installed tree
 - write the manifest entry
 
+Preview the resolved version, archive path, destination path, and sanitation rules without mutating the repo:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=wordpress.org \
+  --kind=plugin \
+  --slug=woocommerce \
+  --plan
+```
+
+Pin to the currently installed version during adoption or migration by passing `--version=...`.
+
 ## Add A GitHub Release Plugin
 
 ```bash
@@ -65,6 +87,10 @@ Optional flags:
 - `--version=1.2.3`
 - `--archive-subdir=plugin`
 - `--github-release-asset-pattern=*.zip`
+- `--private`
+- `--plan` or `--dry-run`
+
+Use `--archive-subdir` only when the extracted payload is not resolved correctly by default. Standard WordPress.org plugin ZIPs should not need it.
 
 ## Add A Private GitHub Release Plugin
 
@@ -100,6 +126,18 @@ export WP_CORE_BASE_GITHUB_TOKEN_PRIVATE_PLUGIN=...
 GitHub Actions setup:
 
 - create a repository secret with the same name as the configured env var
+
+Preview private GitHub adoption without mutating the repo:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=github-release \
+  --kind=plugin \
+  --slug=private-plugin \
+  --github-repository=owner/private-plugin \
+  --plan
+```
 
 ## Add Local Project-Owned Code
 
@@ -164,6 +202,65 @@ vendor/wp-core-base/bin/wp-core-base add-dependency \
   --kind=runtime-directory \
   --path=cms/languages
 ```
+
+## Adopt Local Code Into Managed Ownership
+
+Use `adopt-dependency` when you already have a `local` plugin or theme in the repo and want to convert it into a managed upstream dependency.
+
+This is the safe migration path because a single adoption is atomic:
+
+- the existing runtime path is preserved
+- the managed snapshot is prepared and sanitized first
+- the manifest is only rewritten after the runtime tree has been replaced successfully
+- if the adoption fails, the original local runtime tree is restored
+
+### Adopt a local plugin into WordPress.org management
+
+```bash
+vendor/wp-core-base/bin/wp-core-base adopt-dependency \
+  --repo-root=. \
+  --kind=plugin \
+  --slug=woocommerce \
+  --source=wordpress.org \
+  --preserve-version
+```
+
+### Adopt a local plugin into GitHub Release management
+
+```bash
+vendor/wp-core-base/bin/wp-core-base adopt-dependency \
+  --repo-root=. \
+  --kind=plugin \
+  --slug=private-plugin \
+  --source=github-release \
+  --github-repository=owner/private-plugin \
+  --preserve-version
+```
+
+### Preview an adoption before it changes anything
+
+```bash
+vendor/wp-core-base/bin/wp-core-base adopt-dependency \
+  --repo-root=. \
+  --kind=plugin \
+  --slug=woocommerce \
+  --source=wordpress.org \
+  --preserve-version \
+  --plan
+```
+
+Recommended migration pattern:
+
+- use `--preserve-version` to keep the currently installed version instead of jumping to latest upstream
+- use `--version=...` when you want an explicit upstream version
+- use `--archive-subdir=...` only when an upstream archive layout requires it
+- review the resulting manifest diff and staged runtime after each adoption
+
+Important scope note:
+
+- a single `adopt-dependency` run is atomic
+- a batch of several separate commands is not transactional across invocations
+- if you are migrating many entries, do them one by one and review each result
 
 ## Remove An Entry
 

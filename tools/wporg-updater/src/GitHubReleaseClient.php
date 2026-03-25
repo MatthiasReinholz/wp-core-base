@@ -7,7 +7,7 @@ namespace WpOrgPluginUpdater;
 use DateTimeImmutable;
 use RuntimeException;
 
-final class GitHubReleaseClient
+final class GitHubReleaseClient implements GitHubReleaseSource
 {
     public function __construct(
         private readonly HttpClient $httpClient,

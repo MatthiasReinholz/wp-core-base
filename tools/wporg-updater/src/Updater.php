@@ -806,59 +806,13 @@ final class Updater
         string $slug,
         bool $isFile,
     ): string {
-        $entries = array_values(array_filter(scandir($extractPath) ?: [], static fn (string $entry): bool => $entry !== '.' && $entry !== '..'));
-        $candidateBases = [$extractPath];
-
-        foreach ($entries as $entry) {
-            $candidate = $extractPath . '/' . $entry;
-
-            if (is_dir($candidate)) {
-                $candidateBases[] = $candidate;
-            }
-        }
-
-        $matches = [];
-
-        foreach ($candidateBases as $candidateBase) {
-            $candidatePath = $candidateBase;
-
-            if ($archiveSubdir !== '') {
-                $candidatePath .= '/' . $archiveSubdir;
-            }
-
-            if ($isFile) {
-                $candidateFile = $candidatePath . '/' . $expectedEntry;
-
-                if (is_file($candidateFile)) {
-                    $matches[] = $candidateFile;
-                }
-
-                continue;
-            }
-
-            if (is_file($candidatePath . '/' . $expectedEntry)) {
-                $matches[] = $candidatePath;
-            }
-        }
-
-        $matches = array_values(array_unique($matches));
-
-        if (count($matches) === 1) {
-            return $matches[0];
-        }
-
-        if ($matches === []) {
-            throw new RuntimeException(sprintf(
-                'Could not locate the extracted dependency payload for %s. Expected to find %s inside the archive.',
-                $slug,
-                $expectedEntry
-            ));
-        }
-
-        throw new RuntimeException(sprintf(
-            'Extracted archive for %s matched multiple candidate dependency payloads.',
-            $slug
-        ));
+        return ExtractedPayloadLocator::locateByExpectedEntry(
+            $extractPath,
+            $archiveSubdir,
+            $expectedEntry,
+            $slug,
+            $isFile
+        );
     }
 
     private function expectedArchiveEntry(array $dependency): string

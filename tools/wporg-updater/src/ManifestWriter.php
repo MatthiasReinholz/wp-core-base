@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class ManifestWriter
+final class ManifestWriter implements ConfigWriter
 {
     public function write(Config $config): void
     {
