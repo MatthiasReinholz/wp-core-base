@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-abstract class AbstractPremiumManagedSource implements ManagedDependencySource
+abstract class AbstractPremiumManagedSource implements PremiumManagedDependencySource
 {
     public function __construct(
         protected readonly HttpClient $httpClient,
@@ -86,5 +86,37 @@ abstract class AbstractPremiumManagedSource implements ManagedDependencySource
         }
 
         return $credentials;
+    }
+
+    public function validateCredentialConfiguration(array $dependency): void
+    {
+        $this->credentialsFor($dependency, $this->requiredCredentialFields());
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function requiredCredentialFields(): array
+    {
+        return [];
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    protected function updateContractDescription(array $dependency): string
+    {
+        $source = (string) ($dependency['source'] ?? '');
+        $provider = PremiumSourceResolver::providerForDependency($dependency);
+
+        if ($source === 'premium' && $provider !== null) {
+            return sprintf('`premium` provider `%s`', $provider);
+        }
+
+        if ($source !== '') {
+            return sprintf('`%s` premium source', $source);
+        }
+
+        return '`premium` source';
     }
 }

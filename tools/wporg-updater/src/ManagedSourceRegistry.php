@@ -28,13 +28,29 @@ final class ManagedSourceRegistry
     {
         $key = $dependency['source'] ?? null;
 
-        if (! is_string($key) || ! isset($this->sources[$key])) {
+        if (! is_string($key) || $key === '') {
             throw new RuntimeException(sprintf(
                 'Unsupported managed dependency source: %s',
                 is_scalar($key) ? (string) $key : gettype($key)
             ));
         }
 
-        return $this->sources[$key];
+        $lookupKey = $key;
+
+        if ($key === 'premium') {
+            $provider = PremiumSourceResolver::providerForDependency($dependency);
+
+            if ($provider === null) {
+                throw new RuntimeException('Premium dependencies must define a provider.');
+            }
+
+            $lookupKey = $provider;
+        }
+
+        if (! isset($this->sources[$lookupKey])) {
+            throw new RuntimeException(sprintf('Unsupported managed dependency source: %s', $lookupKey));
+        }
+
+        return $this->sources[$lookupKey];
     }
 }

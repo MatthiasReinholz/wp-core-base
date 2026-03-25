@@ -659,7 +659,7 @@ final class Config
             $source = self::enumValue(
                 $dependency['source'] ?? null,
                 sprintf('dependencies[%d].source', (int) $index),
-                ['wordpress.org', 'github-release', 'acf-pro', 'role-editor-pro', 'freemius-premium', 'local']
+                PremiumSourceResolver::allowedSources()
             );
             $path = self::normalizedRelativePath($dependency['path'] ?? null, sprintf('dependencies[%s].path', $slug));
             $mainFile = self::nullableNormalizedRelativePath($dependency['main_file'] ?? null, sprintf('dependencies[%s].main_file', $slug));
@@ -693,7 +693,7 @@ final class Config
                 throw new RuntimeException(sprintf('WordPress.org source is only supported for plugin and theme dependencies (%s).', $slug));
             }
 
-            if (in_array($source, ['acf-pro', 'role-editor-pro', 'freemius-premium'], true) && $kind !== 'plugin') {
+            if (PremiumSourceResolver::isPremiumSource($source) && $kind !== 'plugin') {
                 throw new RuntimeException(sprintf('Premium source %s is currently supported only for plugin dependencies (%s).', $source, $slug));
             }
 
@@ -745,16 +745,20 @@ final class Config
             $githubReleaseAssetPattern = self::nullableString($sourceConfig['github_release_asset_pattern'] ?? null);
             $githubTokenEnv = self::nullableString($sourceConfig['github_token_env'] ?? null);
             $credentialKey = self::nullableString($sourceConfig['credential_key'] ?? null);
+            $provider = self::nullableString($sourceConfig['provider'] ?? null);
             $providerProductId = isset($sourceConfig['provider_product_id']) && $sourceConfig['provider_product_id'] !== ''
                 ? (int) $sourceConfig['provider_product_id']
                 : null;
+
+            $normalizedSourceConfig = PremiumSourceResolver::normalizeSourceConfig($source, $sourceConfig);
+            $provider = PremiumSourceResolver::providerFor($source, $normalizedSourceConfig);
 
             if ($source === 'github-release' && $githubRepository === null) {
                 throw new RuntimeException(sprintf('GitHub release dependency %s must define source_config.github_repository.', $slug));
             }
 
-            if ($source === 'freemius-premium' && $providerProductId !== null && $providerProductId <= 0) {
-                throw new RuntimeException(sprintf('Freemius premium dependency %s must use a positive source_config.provider_product_id.', $slug));
+            if ($providerProductId !== null && $providerProductId <= 0) {
+                throw new RuntimeException(sprintf('Premium dependency %s must use a positive source_config.provider_product_id when it is set.', $slug));
             }
 
             $expectedPrefix = self::rootForKindFromPaths($kind, $paths);
@@ -785,6 +789,7 @@ final class Config
                     'github_release_asset_pattern' => $githubReleaseAssetPattern,
                     'github_token_env' => $githubTokenEnv,
                     'credential_key' => $credentialKey,
+                    'provider' => $provider,
                     'provider_product_id' => $providerProductId,
                 ],
                 'policy' => [
@@ -821,7 +826,7 @@ final class Config
         return match (true) {
             $management === 'managed' && $source === 'wordpress.org' => 'managed-upstream',
             $management === 'managed' && $source === 'github-release' => 'managed-private',
-            $management === 'managed' && in_array($source, ['acf-pro', 'role-editor-pro', 'freemius-premium'], true) => 'managed-premium',
+            $management === 'managed' && PremiumSourceResolver::isPremiumSource($source) => 'managed-premium',
             $management === 'local' && $source === 'local' => 'local-owned',
             $management === 'ignored' && $source === 'local' => 'ignored',
             default => throw new RuntimeException(sprintf('Invalid management/source combination: %s/%s', $management, $source)),

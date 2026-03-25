@@ -133,13 +133,11 @@ Check [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.m
 
 ## Are premium plugins supported in workflow updates?
 
-Selected premium plugin sources are supported.
+Premium plugin workflow updates are supported through downstream-registered providers.
 
 Today that includes:
 
-- ACF PRO through `acf-pro`
-- User Role Editor Pro through `role-editor-pro`
-- Freemius-backed premium plugins through `freemius-premium`
+- generic `premium` sources with a downstream-registered provider key
 
 Those sources use one fixed local or GitHub Actions secret:
 

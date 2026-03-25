@@ -77,7 +77,7 @@ These map to manifest values like this:
 
 - `management: managed` + `source: wordpress.org` => `managed-upstream`
 - `management: managed` + `source: github-release` => `managed-private`
-- `management: managed` + `source: acf-pro|role-editor-pro|freemius-premium` => `managed-premium`
+- `management: managed` + `source: premium` => `managed-premium`
 - `management: local` + `source: local` => `local-owned`
 - `management: ignored` + `source: local` => `ignored`
 
@@ -87,9 +87,7 @@ Today the framework supports automated updates from:
 
 - `WordPress.org`
 - `github-release`
-- `acf-pro`
-- `role-editor-pro`
-- `freemius-premium`
+- `premium`
 
 GitHub support is release-backed. The repository must publish stable GitHub Releases. Raw tags without Releases are not treated as the source of truth.
 
@@ -101,10 +99,10 @@ Premium workflow sources use one fixed env var or GitHub secret:
 
 Current premium position:
 
-- ACF PRO: supported through `acf-pro`
-- User Role Editor Pro: supported through `role-editor-pro`
-- Freemius-backed premium plugins: supported through `freemius-premium`
-- WooCommerce.com extensions: not supported as native workflow-managed sources in this phase
+- Generic premium path: `source: premium` with `source_config.provider`
+- The provider key must be registered in `.wp-core-base/premium-providers.php`
+- The concrete adapter class lives in the downstream repo, not in framework core
+- `wp-core-base` itself does not ship vendor-specific premium adapters
 
 ## Managed Versus Local
 
@@ -304,6 +302,7 @@ project/
   AGENTS.md
   .wp-core-base/framework.php
   .wp-core-base/manifest.php
+  .wp-core-base/premium-providers.php
   .wp-core-base/USAGE.md
   .github/workflows/
   vendor/wp-core-base/

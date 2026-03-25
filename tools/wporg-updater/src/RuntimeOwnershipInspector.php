@@ -87,6 +87,7 @@ final class RuntimeOwnershipInspector
                 'github_release_asset_pattern' => null,
                 'github_token_env' => null,
                 'credential_key' => null,
+                'provider' => null,
                 'provider_product_id' => null,
             ],
             'policy' => [

@@ -6,14 +6,13 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\ConfigWriter;
 use WpOrgPluginUpdater\CoreScanner;
+use WpOrgPluginUpdater\AbstractPremiumManagedSource;
 use WpOrgPluginUpdater\AdminGovernanceExporter;
-use WpOrgPluginUpdater\AcfProManagedSource;
 use WpOrgPluginUpdater\DependencyAuthoringService;
 use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\ExtractedPayloadLocator;
-use WpOrgPluginUpdater\FreemiusPremiumManagedSource;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
@@ -31,10 +30,11 @@ use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\LabelHelper;
+use WpOrgPluginUpdater\PremiumProviderRegistry;
+use WpOrgPluginUpdater\PremiumProviderScaffolder;
 use WpOrgPluginUpdater\PremiumCredentialsStore;
 use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\ReleaseClassifier;
-use WpOrgPluginUpdater\RoleEditorProManagedSource;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
@@ -47,6 +47,55 @@ use WpOrgPluginUpdater\WordPressOrgClient;
 use WpOrgPluginUpdater\ZipExtractor;
 
 require dirname(__DIR__) . '/src/Autoload.php';
+
+final class ExamplePremiumManagedSource extends AbstractPremiumManagedSource
+{
+    public function key(): string
+    {
+        return 'example-vendor';
+    }
+
+    public function fetchCatalog(array $dependency): array
+    {
+        $this->validateCredentialConfiguration($dependency);
+
+        return [
+            'source' => $this->key(),
+            'latest_version' => (string) ($dependency['version'] ?? '1.0.0'),
+            'latest_release_at' => gmdate(DATE_ATOM),
+            'payload' => [
+                'download_url' => 'https://example.com/example-vendor.zip',
+            ],
+        ];
+    }
+
+    public function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
+    {
+        return [
+            'source' => $this->key(),
+            'version' => $targetVersion,
+            'release_at' => (string) ($catalog['latest_release_at'] ?? $fallbackReleaseAt),
+            'archive_subdir' => trim((string) $dependency['archive_subdir'], '/'),
+            'download_url' => 'https://example.com/example-vendor.zip',
+            'notes_markup' => '<p>Release notes unavailable.</p>',
+            'notes_text' => 'Release notes unavailable.',
+            'source_reference' => 'https://example.com/example-vendor',
+            'source_details' => [
+                ['label' => 'Update contract', 'value' => $this->updateContractDescription($dependency)],
+            ],
+        ];
+    }
+
+    public function downloadReleaseToFile(array $dependency, array $releaseData, string $destination): void
+    {
+        throw new RuntimeException('Not used in tests.');
+    }
+
+    protected function requiredCredentialFields(): array
+    {
+        return ['license_key'];
+    }
+}
 
 $fixtureDir = __DIR__ . '/fixtures';
 $repoRoot = dirname(__DIR__, 3);
@@ -184,9 +233,7 @@ $makeManagedSourceRegistry = static function (
     return new ManagedSourceRegistry(
         $wpOrgManagedSource,
         $gitHubManagedSource,
-        new AcfProManagedSource($http, new PremiumCredentialsStore('{}')),
-        new RoleEditorProManagedSource($http, new PremiumCredentialsStore('{}')),
-        new FreemiusPremiumManagedSource($http, new PremiumCredentialsStore('{}'))
+        new ExamplePremiumManagedSource($http, new PremiumCredentialsStore('{}'))
     );
 };
 
@@ -1145,9 +1192,7 @@ $authoringService = new DependencyAuthoringService(
     managedSourceRegistry: new ManagedSourceRegistry(
         new WordPressOrgManagedSource($wpClient, $httpClient),
         new GitHubReleaseManagedSource($gitHubReleaseClient),
-        new AcfProManagedSource($httpClient, $premiumCredentialsStore),
-        new RoleEditorProManagedSource($httpClient, $premiumCredentialsStore),
-        new FreemiusPremiumManagedSource($httpClient, $premiumCredentialsStore),
+        new ExamplePremiumManagedSource($httpClient, $premiumCredentialsStore),
     ),
     adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
 );
@@ -1197,6 +1242,8 @@ $assert(str_contains($addHelp, '--replace'), 'Expected add-dependency help to do
 $assert(str_contains($addHelp, '--archive-subdir'), 'Expected add-dependency help to document --archive-subdir.');
 $assert(str_contains($addHelp, '--plan'), 'Expected add-dependency help to document preview mode.');
 $assert(str_contains($addHelp, '--private'), 'Expected add-dependency help to document private GitHub onboarding.');
+$assert(str_contains($addHelp, '--provider=KEY'), 'Expected add-dependency help to document the generic premium provider flag.');
+$assert(str_contains($addHelp, 'scaffold-premium-provider --repo-root=. --provider=example-vendor'), 'Expected add-dependency help to point users at the premium provider scaffold command.');
 
 $adoptHelp = CommandHelp::render(
     'adopt-dependency',
@@ -1205,20 +1252,40 @@ $adoptHelp = CommandHelp::render(
 );
 $assert(str_contains($adoptHelp, '--preserve-version'), 'Expected adopt-dependency help to document version-preserving adoption.');
 $assert(str_contains($adoptHelp, 'atomic'), 'Expected adopt-dependency help to explain the atomic single-dependency workflow.');
+$assert(str_contains($adoptHelp, '--source=premium --provider=example-vendor'), 'Expected adopt-dependency help to show the registered premium source example.');
+
+$premiumScaffoldHelp = CommandHelp::render(
+    'scaffold-premium-provider',
+    'vendor/wp-core-base/bin/wp-core-base',
+    'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php'
+);
+$assert(str_contains($premiumScaffoldHelp, '.wp-core-base/premium-providers.php'), 'Expected premium provider scaffold help to mention the downstream registry.');
+
+$premiumProviderRoot = sys_get_temp_dir() . '/wporg-premium-provider-' . bin2hex(random_bytes(4));
+mkdir($premiumProviderRoot, 0777, true);
+$premiumProviderScaffold = new PremiumProviderScaffolder($repoRoot, $premiumProviderRoot);
+$premiumProviderResult = $premiumProviderScaffold->scaffold('example-vendor');
+$assert(is_file($premiumProviderResult['registry_path']), 'Expected premium provider scaffold to create the registry file.');
+$assert(is_file($premiumProviderRoot . '/' . $premiumProviderResult['path']), 'Expected premium provider scaffold to create the provider class file.');
+$premiumProviderRegistry = PremiumProviderRegistry::load($premiumProviderRoot);
+$assert($premiumProviderRegistry->hasProvider('example-vendor'), 'Expected premium provider registry to contain the scaffolded provider.');
+$premiumProviderSources = $premiumProviderRegistry->instantiate(new HttpClient(), new PremiumCredentialsStore('{}'));
+$assert(isset($premiumProviderSources['example-vendor']), 'Expected premium provider registry to instantiate the scaffolded provider class.');
+$assert($premiumProviderSources['example-vendor']->key() === 'example-vendor', 'Expected scaffolded premium provider key to match the registry key.');
 
 $locatorRoot = sys_get_temp_dir() . '/wporg-authoring-locator-' . bin2hex(random_bytes(4));
-mkdir($locatorRoot . '/blocksy-companion', 0777, true);
-file_put_contents($locatorRoot . '/blocksy-companion/blocksy-companion.php', "<?php\n/*\nPlugin Name: Blocksy Companion\nVersion: 2.4.0\n*/\n");
+mkdir($locatorRoot . '/example-companion', 0777, true);
+file_put_contents($locatorRoot . '/example-companion/example-companion.php', "<?php\n/*\nPlugin Name: Example Companion\nVersion: 2.4.0\n*/\n");
 file_put_contents($locatorRoot . '/README.txt', "top-level readme\n");
 $locatedPayload = ExtractedPayloadLocator::locateForAuthoring(
     $locatorRoot,
     '',
-    'blocksy-companion',
+    'example-companion',
     'plugin',
     new DependencyMetadataResolver()
 );
 $assert(
-    str_replace('\\', '/', $locatedPayload) === str_replace('\\', '/', $locatorRoot . '/blocksy-companion'),
+    str_replace('\\', '/', $locatedPayload) === str_replace('\\', '/', $locatorRoot . '/example-companion'),
     'Expected archive payload selection to prefer the slug directory over the broader extract root when both are technically valid.'
 );
 
@@ -1297,6 +1364,135 @@ $assert($managedPlan['target_path'] === 'cms/plugins/adopt-me', 'Expected add-de
 $assert($managedPlan['would_replace'] === false, 'Expected add-dependency --plan to detect when no replacement is needed.');
 $assert(str_contains((string) $managedPlan['source_reference'], 'downloads.wordpress.org/plugin/adopt-me.2.3.4.zip'), 'Expected add-dependency --plan to report the resolved upstream source.');
 
+$premiumConfig = Config::fromArray($managedPlanRoot, [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => [
+        'mode' => 'external',
+        'enabled' => false,
+    ],
+    'runtime' => $runtimeDefaults,
+    'github' => [
+        'api_base' => 'https://api.github.com',
+    ],
+    'automation' => [
+        'base_branch' => null,
+        'dry_run' => false,
+        'managed_kinds' => ['plugin', 'theme'],
+    ],
+    'dependencies' => [[
+        'name' => 'Example Premium Plugin',
+        'slug' => 'example-premium-plugin',
+        'kind' => 'plugin',
+        'management' => 'managed',
+        'source' => 'premium',
+        'path' => 'cms/plugins/example-premium-plugin',
+        'main_file' => 'example-premium-plugin.php',
+        'version' => '6.3.0',
+        'checksum' => str_repeat('a', 64),
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => [
+            'github_repository' => null,
+            'github_release_asset_pattern' => null,
+            'github_token_env' => null,
+            'credential_key' => null,
+            'provider' => 'example-vendor',
+            'provider_product_id' => null,
+        ],
+        'policy' => [
+            'class' => 'managed-premium',
+            'allow_runtime_paths' => [],
+            'strip_paths' => [],
+            'strip_files' => [],
+            'sanitize_paths' => [],
+            'sanitize_files' => [],
+        ],
+    ]],
+], $managedPlanRoot . '/.wp-core-base/manifest.php');
+$premiumDependency = $premiumConfig->dependencyByKey('plugin:premium:example-premium-plugin');
+$assert($premiumDependency['source_config']['provider'] === 'example-vendor', 'Expected generic premium dependencies to retain provider metadata.');
+$assert(
+    $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader)->for($premiumDependency)->key() === 'example-vendor',
+    'Expected the managed source registry to route generic premium dependencies to the provider adapter.'
+);
+$premiumSourceDetails = (new ExamplePremiumManagedSource(new HttpClient(), new PremiumCredentialsStore('{}')))->releaseDataForVersion(
+    $premiumDependency,
+    [
+        'latest_version' => '6.3.0',
+        'latest_release_at' => gmdate(DATE_ATOM),
+        'payload' => ['download_url' => 'https://example.com/example-vendor.zip'],
+    ],
+    '6.3.0',
+    gmdate(DATE_ATOM)
+);
+$assert(
+    ((array) $premiumSourceDetails['source_details'])[0]['value'] === '`premium` provider `example-vendor`',
+    'Expected generic premium release details to describe the registered premium provider contract.'
+);
+
+$premiumDuplicateRoot = sys_get_temp_dir() . '/wporg-premium-duplicate-' . bin2hex(random_bytes(4));
+mkdir($premiumDuplicateRoot . '/cms/plugins/example-premium-plugin', 0777, true);
+file_put_contents(
+    $premiumDuplicateRoot . '/cms/plugins/example-premium-plugin/example-premium-plugin.php',
+    "<?php\n/*\nPlugin Name: Example Premium Plugin\nVersion: 6.3.0\n*/\n"
+);
+$writeManifest($premiumDuplicateRoot, [[
+    'name' => 'Example Premium Plugin',
+    'slug' => 'example-premium-plugin',
+    'kind' => 'plugin',
+    'management' => 'managed',
+    'source' => 'premium',
+    'path' => 'cms/plugins/example-premium-plugin',
+    'main_file' => 'example-premium-plugin.php',
+    'version' => '6.3.0',
+    'checksum' => str_repeat('b', 64),
+    'archive_subdir' => '',
+    'extra_labels' => [],
+    'source_config' => [
+        'github_repository' => null,
+        'github_release_asset_pattern' => null,
+        'github_token_env' => null,
+        'credential_key' => null,
+        'provider' => 'example-vendor',
+        'provider_product_id' => null,
+    ],
+    'policy' => [
+        'class' => 'managed-premium',
+        'allow_runtime_paths' => [],
+        'sanitize_paths' => [],
+        'sanitize_files' => [],
+    ],
+]]);
+$premiumDuplicateConfig = Config::load($premiumDuplicateRoot);
+$premiumDuplicateService = new DependencyAuthoringService(
+    config: $premiumDuplicateConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($premiumDuplicateConfig->runtime),
+    manifestWriter: new ManifestWriter(),
+    managedSourceRegistry: $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader),
+    adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($premiumDuplicateConfig->runtime)),
+);
+$duplicateBlocked = false;
+
+try {
+    $premiumDuplicateService->planAddDependency([
+        'source' => 'premium',
+        'provider' => 'example-vendor',
+        'kind' => 'plugin',
+        'slug' => 'example-premium-plugin',
+    ]);
+} catch (RuntimeException $exception) {
+    $duplicateBlocked = str_contains($exception->getMessage(), 'Dependency already exists: plugin:premium:example-premium-plugin');
+}
+
+$assert($duplicateBlocked, 'Expected premium authoring to reject duplicate provider/slug combinations.');
+
 $adoptRoot = sys_get_temp_dir() . '/wporg-authoring-adopt-' . bin2hex(random_bytes(4));
 mkdir($adoptRoot . '/cms/plugins/adopt-me', 0777, true);
 file_put_contents(
@@ -1315,7 +1511,7 @@ $writeManifest($adoptRoot, [[
     'checksum' => null,
     'archive_subdir' => '',
     'extra_labels' => [],
-    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
+    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider' => null, 'provider_product_id' => null],
     'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
 ]]);
 $adoptConfig = Config::load($adoptRoot);
@@ -1410,7 +1606,7 @@ $writeManifest($rollbackRoot, [[
     'checksum' => null,
     'archive_subdir' => '',
     'extra_labels' => [],
-    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
+    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider' => null, 'provider_product_id' => null],
     'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
 ]]);
 $failingWriter = new class implements ConfigWriter
@@ -1504,7 +1700,7 @@ $writeManifest($ambiguousRemoveRoot, [
         'checksum' => null,
         'archive_subdir' => '',
         'extra_labels' => [],
-        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider' => null, 'provider_product_id' => null],
         'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
     ],
     [
@@ -1519,7 +1715,7 @@ $writeManifest($ambiguousRemoveRoot, [
         'checksum' => 'sha256:test',
         'archive_subdir' => '',
         'extra_labels' => [],
-        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider_product_id' => null],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider' => null, 'provider_product_id' => null],
         'policy' => ['class' => 'managed-upstream', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
     ],
 ]);
@@ -1532,9 +1728,7 @@ $ambiguousAuthoringService = new DependencyAuthoringService(
     managedSourceRegistry: new ManagedSourceRegistry(
         new WordPressOrgManagedSource($wpClient, $httpClient),
         new GitHubReleaseManagedSource($gitHubReleaseClient),
-        new AcfProManagedSource($httpClient, $premiumCredentialsStore),
-        new RoleEditorProManagedSource($httpClient, $premiumCredentialsStore),
-        new FreemiusPremiumManagedSource($httpClient, $premiumCredentialsStore),
+        new ExamplePremiumManagedSource($httpClient, $premiumCredentialsStore),
     ),
     adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($ambiguousAuthoringConfig->runtime)),
 );

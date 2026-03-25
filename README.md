@@ -18,7 +18,7 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 - explicit framework release metadata at `.wp-core-base/framework.php`
 - scheduled GitHub update PRs for WordPress core and managed dependencies
 - scheduled GitHub PRs when a newer `wp-core-base` framework release is available
-- support for WordPress.org, GitHub Release, and selected premium plugin sources
+- support for WordPress.org, GitHub Release, and downstream-registered premium plugin sources
 - support for project-owned custom code as first-class `local` runtime entries
 - optional staged-clean runtime assembly for richer local source trees
 - managed-dependency sanitation during update ingestion when upstream archives contain non-runtime metadata
@@ -36,7 +36,7 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 - intelligent PR lifecycle behavior: patch releases can refresh an existing PR, while later minor or major releases can queue behind unresolved work. See [automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md#pull-request-behavior).
 - `wp-core-base` itself is versioned and updateable, so downstream repos can pin a framework release and receive dedicated framework-update PRs instead of treating the base as a one-time copy. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#framework-version-pinning).
 - support for both WordPress.org and GitHub Release backed dependencies, including private GitHub release assets. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#source-types).
-- native premium update support for selected vendors, so ACF PRO, User Role Editor Pro, and the first Freemius-backed premium plugin path can use the same Git-reviewed workflow model instead of falling back to manual plugin dashboard updates. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#source-types).
+- a premium provider extension model, so downstream repos can register their own premium plugin source adapters instead of forcing premium updates through manual plugin dashboard workflows. See [adding-premium-provider.md](/Users/matthias/DEV/wp-core-base/docs/adding-premium-provider.md).
 - local project-owned code remains first-class, so custom plugins, themes, MU plugins, runtime files, and runtime directories do not need to be forced through updater automation. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#managed-versus-local).
 - normalized runtime snapshots, because managed dependencies can be sanitized during update ingestion and local code can use staged-clean strip rules when needed. See [manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md#managed-sanitation).
 - deterministic runtime staging for Docker, immutable images, and other build pipelines, so deployments can use a clean staged payload instead of the raw working tree. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#runtime-staging).

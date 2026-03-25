@@ -305,52 +305,46 @@ final class EnvironmentDoctor
             return;
         }
 
+        $premiumRegistry = null;
+        $premiumSources = [];
+
+        try {
+            $premiumRegistry = PremiumProviderRegistry::load($this->repoRoot);
+
+            if ($premiumRegistry->exists()) {
+                $premiumSources = $premiumRegistry->instantiate(
+                    new HttpClient(userAgent: 'wp-core-base/doctor'),
+                    new PremiumCredentialsStore()
+                );
+                $this->ok(sprintf(
+                    'Premium provider registry loaded from %s with %d provider(s).',
+                    $premiumRegistry->path(),
+                    count($premiumSources)
+                ));
+            }
+        } catch (RuntimeException $exception) {
+            if ($requireGitHub) {
+                $this->error($exception->getMessage());
+            } else {
+                $this->warn($exception->getMessage());
+            }
+        }
+
         foreach ($config->managedDependencies() as $dependency) {
             if ($dependency['source'] !== 'github-release') {
-                if (in_array($dependency['source'], ['acf-pro', 'role-editor-pro', 'freemius-premium'], true)) {
-                    $store = new PremiumCredentialsStore();
+                if (PremiumSourceResolver::isPremiumSource((string) $dependency['source'])) {
+                    $provider = PremiumSourceResolver::providerForDependency($dependency);
 
                     try {
-                        $credentials = $store->credentialsFor($dependency);
-                        $requiredFields = match ($dependency['source']) {
-                            'acf-pro' => ['license_key', 'site_url'],
-                            'role-editor-pro' => ['license_key'],
-                            'freemius-premium' => [],
-                            default => [],
-                        };
-
-                        foreach ($requiredFields as $field) {
-                            $value = $credentials[$field] ?? null;
-
-                            if (! is_string($value) || trim($value) === '') {
-                                throw new RuntimeException(sprintf(
-                                    'Premium credentials for %s are missing `%s`.',
-                                    $dependency['component_key'],
-                                    $field
-                                ));
-                            }
+                        if ($premiumRegistry === null || ! $premiumRegistry->hasProvider((string) $provider)) {
+                            throw new RuntimeException(sprintf(
+                                'Premium provider `%s` is not registered for %s. Add it to .wp-core-base/premium-providers.php.',
+                                (string) $provider,
+                                $dependency['component_key']
+                            ));
                         }
 
-                        if ($dependency['source'] === 'freemius-premium') {
-                            $hasFreemiusAuth = (
-                                (isset($credentials['api_token']) && is_string($credentials['api_token']) && trim($credentials['api_token']) !== '')
-                                || (
-                                    isset($credentials['install_id']) && is_numeric($credentials['install_id'])
-                                    && isset($credentials['install_api_token']) && is_string($credentials['install_api_token']) && trim($credentials['install_api_token']) !== ''
-                                )
-                                || (
-                                    isset($credentials['license_key']) && is_string($credentials['license_key']) && trim($credentials['license_key']) !== ''
-                                    && isset($credentials['site_url']) && is_string($credentials['site_url']) && trim($credentials['site_url']) !== ''
-                                )
-                            );
-
-                            if (! $hasFreemiusAuth) {
-                                throw new RuntimeException(sprintf(
-                                    'Premium credentials for %s must include either api_token, install_id + install_api_token, or license_key + site_url.',
-                                    $dependency['component_key']
-                                ));
-                            }
-                        }
+                        $premiumSources[(string) $provider]->validateCredentialConfiguration($dependency);
 
                         $this->ok(sprintf(
                             'Premium credentials are configured for %s via %s.',

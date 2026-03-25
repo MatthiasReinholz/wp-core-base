@@ -49,9 +49,7 @@ This document lists what `wp-core-base` supports today, what it supports with co
 | WordPress.org themes | Supported | First-class automated source. |
 | public GitHub Releases | Supported | Requires stable Releases. |
 | private GitHub Releases | Supported with constraints | Requires token env and release-backed artifacts. |
-| ACF PRO | Supported with constraints | Uses the `acf-pro` source and `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`. |
-| User Role Editor Pro | Supported with constraints | Uses the `role-editor-pro` source and `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`. |
-| Freemius-backed premium plugins | Supported with constraints | Uses the `freemius-premium` source and `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`; Blocksy Companion Pro is the first validated path. |
+| downstream-registered premium providers | Supported with constraints | Uses `source: premium`, a provider registered in `.wp-core-base/premium-providers.php`, and `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`. |
 | raw GitHub tags without Releases | Not supported | GitHub Releases are the source of truth. |
 | WooCommerce.com | Not supported | No native automation path today. |
 | Composer as managed source | Not supported | Can coexist downstream, but not as native updater source. |

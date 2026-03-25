@@ -66,9 +66,7 @@ Supported automated sources:
 
 - `WordPress.org`
 - `github-release`
-- `acf-pro`
-- `role-editor-pro`
-- `freemius-premium`
+- `premium`
 
 GitHub source handling uses stable Releases as the source of truth. It does not infer release state from raw tags or commit history.
 
@@ -83,6 +81,8 @@ The download flow never forwards authorization headers to redirected CDN URLs.
 Premium source handling uses one fixed credentials env var:
 
 - `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+
+When you use `source: premium`, set `source_config.provider` to a provider key registered in `.wp-core-base/premium-providers.php`.
 
 The manifest stores only source identity and lookup keys. It never stores premium license keys, site-linked API tokens, or signed download URLs.
 

@@ -74,6 +74,11 @@ final class DownstreamScaffolder
                     '__WPORG_TOOL_ROOT__' => $toolRoot,
                 ],
             ],
+            [
+                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/premium-providers.php.tpl',
+                'target' => $this->repoRoot . '/.wp-core-base/premium-providers.php',
+                'replacements' => [],
+            ],
         ];
 
         $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset, $paths);
@@ -124,6 +129,7 @@ final class DownstreamScaffolder
         fwrite(STDOUT, "Next steps:\n");
         fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Review the local usage guidance at %s/.wp-core-base/USAGE.md and %s/AGENTS.md.\n", $this->repoRoot, $this->repoRoot));
+        fwrite(STDOUT, sprintf("[next] Register custom premium providers in %s/.wp-core-base/premium-providers.php if your project needs premium workflow sources.\n", $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $doctorCommand));
         fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 

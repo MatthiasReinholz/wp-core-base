@@ -79,6 +79,7 @@ Do not blur those contracts when reasoning about the system.
 - `stage-runtime` is the deployment contract whenever staged runtime is part of the architecture.
 - `framework-sync` updates the vendored `wp-core-base` framework snapshot, not the runtime manifest.
 - premium plugin credentials live in `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`, not in the manifest.
+- downstream-owned premium provider registrations live in `.wp-core-base/premium-providers.php`.
 - workflow-managed plugins may intentionally look non-updateable inside wp-admin because the governance MU plugin suppresses misleading in-dashboard update actions for them.
 
 ## Unsafe Assumptions
