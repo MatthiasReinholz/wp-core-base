@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class HttpClient
+final class HttpClient implements ArchiveDownloader
 {
     private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
 

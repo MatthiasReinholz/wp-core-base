@@ -10,7 +10,7 @@ use DOMNode;
 use DOMXPath;
 use RuntimeException;
 
-final class WordPressOrgClient
+final class WordPressOrgClient implements WordPressOrgSource
 {
     public function __construct(private readonly HttpClient $httpClient)
     {

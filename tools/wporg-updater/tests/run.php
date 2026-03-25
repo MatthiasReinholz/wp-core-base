@@ -3,11 +3,14 @@
 declare(strict_types=1);
 
 use WpOrgPluginUpdater\Config;
+use WpOrgPluginUpdater\CommandHelp;
+use WpOrgPluginUpdater\ConfigWriter;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\DependencyAuthoringService;
 use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
+use WpOrgPluginUpdater\ExtractedPayloadLocator;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
@@ -15,6 +18,7 @@ use WpOrgPluginUpdater\FrameworkReleasePreparer;
 use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\GitHubReleaseClient;
+use WpOrgPluginUpdater\GitHubReleaseSource;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManifestWriter;
@@ -26,7 +30,9 @@ use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
 use WpOrgPluginUpdater\SupportForumClient;
+use WpOrgPluginUpdater\ArchiveDownloader;
 use WpOrgPluginUpdater\WordPressCoreClient;
+use WpOrgPluginUpdater\WordPressOrgSource;
 use WpOrgPluginUpdater\WordPressOrgClient;
 use WpOrgPluginUpdater\ZipExtractor;
 
@@ -109,6 +115,30 @@ $writeManifest = static function (string $root, array $dependencies = []) use ($
             'dependencies' => $dependencies,
         ], true) . ";\n"
     );
+};
+
+$createPluginArchive = static function (string $archivePath, string $outerDirectory, string $slug, string $version, bool $includeReadme = true): void {
+    $zip = new ZipArchive();
+    $opened = $zip->open($archivePath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+
+    if ($opened !== true) {
+        throw new RuntimeException(sprintf('Failed to create archive fixture: %s', $archivePath));
+    }
+
+    $prefix = trim($outerDirectory, '/');
+    $base = $prefix === '' ? $slug : $prefix . '/' . $slug;
+    $zip->addEmptyDir($prefix === '' ? $slug : $prefix);
+    $zip->addEmptyDir($base);
+    $zip->addFromString(
+        $base . '/' . $slug . '.php',
+        "<?php\n/*\nPlugin Name: " . ucwords(str_replace('-', ' ', $slug)) . "\nVersion: " . $version . "\n*/\n"
+    );
+
+    if ($includeReadme) {
+        $zip->addFromString($base . '/README.txt', "Readme for {$slug}\n");
+    }
+
+    $zip->close();
 };
 
 $assert($classifier->classifyScope('5.3.6', '5.3.7') === 'patch', 'Expected patch classification.');
@@ -972,7 +1002,7 @@ $authoringService = new DependencyAuthoringService(
     manifestWriter: new ManifestWriter(),
     wordPressOrgClient: $wpClient,
     gitHubReleaseClient: $gitHubReleaseClient,
-    httpClient: $httpClient,
+    archiveDownloader: $httpClient,
 );
 
 $addedPlugin = $authoringService->addDependency([
@@ -1010,6 +1040,278 @@ $listOutput = $authoringService->renderDependencyList();
 $assert(! str_contains($listOutput, 'MANAGED'), 'Expected empty management groups to be omitted from list output.');
 $assert(str_contains($listOutput, 'LOCAL'), 'Expected list output to group local dependencies.');
 $assert(str_contains($listOutput, 'project-plugin'), 'Expected list output to include added dependencies.');
+
+$addHelp = CommandHelp::render(
+    'add-dependency',
+    'vendor/wp-core-base/bin/wp-core-base',
+    'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php'
+);
+$assert(str_contains($addHelp, '--replace'), 'Expected add-dependency help to document --replace.');
+$assert(str_contains($addHelp, '--archive-subdir'), 'Expected add-dependency help to document --archive-subdir.');
+$assert(str_contains($addHelp, '--plan'), 'Expected add-dependency help to document preview mode.');
+$assert(str_contains($addHelp, '--private'), 'Expected add-dependency help to document private GitHub onboarding.');
+
+$adoptHelp = CommandHelp::render(
+    'adopt-dependency',
+    'vendor/wp-core-base/bin/wp-core-base',
+    'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php'
+);
+$assert(str_contains($adoptHelp, '--preserve-version'), 'Expected adopt-dependency help to document version-preserving adoption.');
+$assert(str_contains($adoptHelp, 'atomic'), 'Expected adopt-dependency help to explain the atomic single-dependency workflow.');
+
+$locatorRoot = sys_get_temp_dir() . '/wporg-authoring-locator-' . bin2hex(random_bytes(4));
+mkdir($locatorRoot . '/blocksy-companion', 0777, true);
+file_put_contents($locatorRoot . '/blocksy-companion/blocksy-companion.php', "<?php\n/*\nPlugin Name: Blocksy Companion\nVersion: 2.4.0\n*/\n");
+file_put_contents($locatorRoot . '/README.txt', "top-level readme\n");
+$locatedPayload = ExtractedPayloadLocator::locateForAuthoring(
+    $locatorRoot,
+    '',
+    'blocksy-companion',
+    'plugin',
+    new DependencyMetadataResolver()
+);
+$assert(
+    str_replace('\\', '/', $locatedPayload) === str_replace('\\', '/', $locatorRoot . '/blocksy-companion'),
+    'Expected archive payload selection to prefer the slug directory over the broader extract root when both are technically valid.'
+);
+
+$managedArchivePath = sys_get_temp_dir() . '/wporg-authoring-managed-' . bin2hex(random_bytes(4)) . '.zip';
+$createPluginArchive($managedArchivePath, 'release-package', 'adopt-me', '2.3.4');
+$fakeWordPressOrgSource = new class implements WordPressOrgSource
+{
+    public function fetchComponentInfo(string $kind, string $slug): array
+    {
+        return [
+            'name' => 'Adopt Me',
+            'version' => '2.3.4',
+        ];
+    }
+
+    public function latestVersion(string $kind, array $info): string
+    {
+        return (string) $info['version'];
+    }
+
+    public function downloadUrlForVersion(string $kind, array $info, string $version): string
+    {
+        return 'https://downloads.wordpress.org/plugin/adopt-me.' . $version . '.zip';
+    }
+};
+$fakeGitHubReleaseSource = new class implements GitHubReleaseSource
+{
+    public function fetchStableReleases(array $dependency): array
+    {
+        throw new RuntimeException('Not used in this test.');
+    }
+
+    public function latestVersion(array $release, array $dependency): string
+    {
+        throw new RuntimeException('Not used in this test.');
+    }
+
+    public function downloadReleaseToFile(array $release, array $dependency, string $destination): void
+    {
+        throw new RuntimeException('Not used in this test.');
+    }
+};
+$fakeArchiveDownloader = new class($managedArchivePath) implements ArchiveDownloader
+{
+    public function __construct(private readonly string $archivePath)
+    {
+    }
+
+    public function downloadToFile(string $url, string $destination, array $headers = []): void
+    {
+        if (! copy($this->archivePath, $destination)) {
+            throw new RuntimeException('Failed to copy archive fixture.');
+        }
+    }
+};
+
+$managedPlanRoot = sys_get_temp_dir() . '/wporg-authoring-plan-' . bin2hex(random_bytes(4));
+mkdir($managedPlanRoot . '/cms/plugins', 0777, true);
+$writeManifest($managedPlanRoot);
+$managedPlanConfig = Config::load($managedPlanRoot);
+$managedPlanService = new DependencyAuthoringService(
+    config: $managedPlanConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($managedPlanConfig->runtime),
+    manifestWriter: new ManifestWriter(),
+    wordPressOrgClient: $fakeWordPressOrgSource,
+    gitHubReleaseClient: $fakeGitHubReleaseSource,
+    archiveDownloader: $fakeArchiveDownloader,
+);
+$managedPlan = $managedPlanService->planAddDependency([
+    'source' => 'wordpress.org',
+    'kind' => 'plugin',
+    'slug' => 'adopt-me',
+]);
+$assert($managedPlan['selected_version'] === '2.3.4', 'Expected add-dependency --plan to resolve the selected upstream version.');
+$assert($managedPlan['target_path'] === 'cms/plugins/adopt-me', 'Expected add-dependency --plan to resolve the default target path.');
+$assert($managedPlan['would_replace'] === false, 'Expected add-dependency --plan to detect when no replacement is needed.');
+$assert(str_contains((string) $managedPlan['source_reference'], 'downloads.wordpress.org/plugin/adopt-me.2.3.4.zip'), 'Expected add-dependency --plan to report the resolved upstream source.');
+
+$adoptRoot = sys_get_temp_dir() . '/wporg-authoring-adopt-' . bin2hex(random_bytes(4));
+mkdir($adoptRoot . '/cms/plugins/adopt-me', 0777, true);
+file_put_contents(
+    $adoptRoot . '/cms/plugins/adopt-me/adopt-me.php',
+    "<?php\n/*\nPlugin Name: Adopt Me\nVersion: 2.3.4\n*/\n"
+);
+$writeManifest($adoptRoot, [[
+    'name' => 'Adopt Me',
+    'slug' => 'adopt-me',
+    'kind' => 'plugin',
+    'management' => 'local',
+    'source' => 'local',
+    'path' => 'cms/plugins/adopt-me',
+    'main_file' => 'adopt-me.php',
+    'version' => null,
+    'checksum' => null,
+    'archive_subdir' => '',
+    'extra_labels' => [],
+    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+    'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => []],
+]]);
+$adoptConfig = Config::load($adoptRoot);
+$adoptService = new DependencyAuthoringService(
+    config: $adoptConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($adoptConfig->runtime),
+    manifestWriter: new ManifestWriter(),
+    wordPressOrgClient: $fakeWordPressOrgSource,
+    gitHubReleaseClient: $fakeGitHubReleaseSource,
+    archiveDownloader: $fakeArchiveDownloader,
+);
+$adoptPlan = $adoptService->planAdoptDependency([
+    'kind' => 'plugin',
+    'slug' => 'adopt-me',
+    'source' => 'wordpress.org',
+    'preserve-version' => true,
+    'archive-subdir' => 'adopt-me',
+]);
+$assert($adoptPlan['selected_version'] === '2.3.4', 'Expected adopt-dependency --plan --preserve-version to resolve the installed local version.');
+$assert($adoptPlan['adopted_from'] === 'plugin:local:adopt-me', 'Expected adopt-dependency --plan to identify the source dependency.');
+$adoptedDependency = $adoptService->adoptDependency([
+    'kind' => 'plugin',
+    'slug' => 'adopt-me',
+    'source' => 'wordpress.org',
+    'preserve-version' => true,
+    'archive-subdir' => 'adopt-me',
+]);
+$assert($adoptedDependency['component_key'] === 'plugin:wordpress.org:adopt-me', 'Expected adopt-dependency to replace the local component key with the managed source.');
+$assert($adoptedDependency['version'] === '2.3.4', 'Expected adopt-dependency --preserve-version to keep the installed version.');
+$assert(! file_exists($adoptRoot . '/cms/plugins/adopt-me/README.txt'), 'Expected managed sanitation to strip README files before the managed snapshot is applied.');
+$adoptedConfig = Config::load($adoptRoot);
+$assert($adoptedConfig->dependencyByKey('plugin:wordpress.org:adopt-me')['path'] === 'cms/plugins/adopt-me', 'Expected adopt-dependency to preserve the existing runtime path.');
+$localAdoptStillExists = false;
+foreach ($adoptedConfig->dependencies() as $dependency) {
+    if ($dependency['component_key'] === 'plugin:local:adopt-me') {
+        $localAdoptStillExists = true;
+        break;
+    }
+}
+$assert(! $localAdoptStillExists, 'Expected adopt-dependency to remove the previous local manifest entry.');
+
+$rollbackArchivePath = sys_get_temp_dir() . '/wporg-authoring-rollback-' . bin2hex(random_bytes(4)) . '.zip';
+$createPluginArchive($rollbackArchivePath, 'release-package', 'rollback-plugin', '9.9.9');
+$rollbackDownloader = new class($rollbackArchivePath) implements ArchiveDownloader
+{
+    public function __construct(private readonly string $archivePath)
+    {
+    }
+
+    public function downloadToFile(string $url, string $destination, array $headers = []): void
+    {
+        if (! copy($this->archivePath, $destination)) {
+            throw new RuntimeException('Failed to copy rollback archive fixture.');
+        }
+    }
+};
+$rollbackWpSource = new class implements WordPressOrgSource
+{
+    public function fetchComponentInfo(string $kind, string $slug): array
+    {
+        return [
+            'name' => 'Rollback Plugin',
+            'version' => '9.9.9',
+        ];
+    }
+
+    public function latestVersion(string $kind, array $info): string
+    {
+        return (string) $info['version'];
+    }
+
+    public function downloadUrlForVersion(string $kind, array $info, string $version): string
+    {
+        return 'https://downloads.wordpress.org/plugin/rollback-plugin.' . $version . '.zip';
+    }
+};
+$rollbackRoot = sys_get_temp_dir() . '/wporg-authoring-rollback-root-' . bin2hex(random_bytes(4));
+mkdir($rollbackRoot . '/cms/plugins/rollback-plugin', 0777, true);
+file_put_contents(
+    $rollbackRoot . '/cms/plugins/rollback-plugin/rollback-plugin.php',
+    "<?php\n/*\nPlugin Name: Rollback Plugin\nVersion: 1.0.0\n*/\n"
+);
+$writeManifest($rollbackRoot, [[
+    'name' => 'Rollback Plugin',
+    'slug' => 'rollback-plugin',
+    'kind' => 'plugin',
+    'management' => 'local',
+    'source' => 'local',
+    'path' => 'cms/plugins/rollback-plugin',
+    'main_file' => 'rollback-plugin.php',
+    'version' => '1.0.0',
+    'checksum' => null,
+    'archive_subdir' => '',
+    'extra_labels' => [],
+    'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null],
+    'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => []],
+]]);
+$failingWriter = new class implements ConfigWriter
+{
+    public function write(Config $config): void
+    {
+        throw new RuntimeException('Synthetic manifest write failure.');
+    }
+};
+$rollbackConfig = Config::load($rollbackRoot);
+$rollbackService = new DependencyAuthoringService(
+    config: $rollbackConfig,
+    metadataResolver: new DependencyMetadataResolver(),
+    runtimeInspector: new RuntimeInspector($rollbackConfig->runtime),
+    manifestWriter: $failingWriter,
+    wordPressOrgClient: $rollbackWpSource,
+    gitHubReleaseClient: $fakeGitHubReleaseSource,
+    archiveDownloader: $rollbackDownloader,
+);
+$rollbackTriggered = false;
+
+try {
+    $rollbackService->adoptDependency([
+        'kind' => 'plugin',
+        'slug' => 'rollback-plugin',
+        'source' => 'wordpress.org',
+        'preserve-version' => true,
+        'archive-subdir' => 'rollback-plugin',
+    ]);
+} catch (RuntimeException $exception) {
+    $rollbackTriggered = str_contains($exception->getMessage(), 'Synthetic manifest write failure.');
+}
+
+$assert($rollbackTriggered, 'Expected adopt-dependency to bubble manifest write failures.');
+$restoredPlugin = (string) file_get_contents($rollbackRoot . '/cms/plugins/rollback-plugin/rollback-plugin.php');
+$assert(str_contains($restoredPlugin, 'Version: 1.0.0'), 'Expected adopt-dependency to restore the original runtime tree when manifest writing fails.');
+$rollbackConfigAfter = Config::load($rollbackRoot);
+$assert($rollbackConfigAfter->dependencyByKey('plugin:local:rollback-plugin')['version'] === '1.0.0', 'Expected rollback to leave the original local manifest entry intact.');
+$rollbackManagedMissing = true;
+foreach ($rollbackConfigAfter->dependencies() as $dependency) {
+    if ($dependency['component_key'] === 'plugin:wordpress.org:rollback-plugin') {
+        $rollbackManagedMissing = false;
+        break;
+    }
+}
+$assert($rollbackManagedMissing, 'Expected rollback to avoid persisting a managed manifest entry after failure.');
 
 file_put_contents(
     $authoringRoot . '/cms/plugins/project-plugin/project-plugin.php',
@@ -1085,7 +1387,7 @@ $ambiguousAuthoringService = new DependencyAuthoringService(
     manifestWriter: new ManifestWriter(),
     wordPressOrgClient: $wpClient,
     gitHubReleaseClient: $gitHubReleaseClient,
-    httpClient: $httpClient,
+    archiveDownloader: $httpClient,
 );
 $ambiguousRemoveRejected = false;
 

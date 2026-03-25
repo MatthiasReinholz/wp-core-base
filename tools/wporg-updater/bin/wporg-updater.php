@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use WpOrgPluginUpdater\Config;
+use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\CoreUpdater;
 use WpOrgPluginUpdater\DependencyScanner;
@@ -68,6 +69,9 @@ $force = isset($options['force']);
 $commandPrefix = $toolPath === '.'
     ? 'bin/wp-core-base'
     : sprintf('%s/bin/wp-core-base', trim((string) $toolPath, '/'));
+$phpCommandPrefix = $toolPath === '.'
+    ? 'php tools/wporg-updater/bin/wporg-updater.php'
+    : sprintf('php %s/tools/wporg-updater/bin/wporg-updater.php', trim((string) $toolPath, '/'));
 
 $maybePromptForMissing = static function (array &$options, InteractivePrompter $prompter): void {
     $source = isset($options['source']) && is_string($options['source']) ? $options['source'] : null;
@@ -120,56 +124,9 @@ $maybePromptForMissing = static function (array &$options, InteractivePrompter $
 
 try {
     if (in_array($mode, ['help', '--help', '-h'], true)) {
-        fwrite(STDOUT, <<<TEXT
-Usage:
-  bin/wp-core-base add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
-  php tools/wporg-updater/bin/wporg-updater.php sync
-  php tools/wporg-updater/bin/wporg-updater.php doctor [--repo-root=/path] [--github]
-  php tools/wporg-updater/bin/wporg-updater.php stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
-  php tools/wporg-updater/bin/wporg-updater.php scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force]
-  php tools/wporg-updater/bin/wporg-updater.php framework-sync [--repo-root=/path] [--check-only]
-  php tools/wporg-updater/bin/wporg-updater.php prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
-  php tools/wporg-updater/bin/wporg-updater.php release-verify [--repo-root=/path] [--tag=v1.0.0]
-  php tools/wporg-updater/bin/wporg-updater.php suggest-manifest [--repo-root=/path]
-  php tools/wporg-updater/bin/wporg-updater.php format-manifest [--repo-root=/path]
-  php tools/wporg-updater/bin/wporg-updater.php add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
-  php tools/wporg-updater/bin/wporg-updater.php remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
-  php tools/wporg-updater/bin/wporg-updater.php list-dependencies [--repo-root=/path]
-  php tools/wporg-updater/bin/wporg-updater.php pr-blocker
-
-Modes:
-  sync              Run WordPress core and dependency reconciliation.
-  doctor            Validate the manifest, repo structure, runtime hygiene, and optional GitHub environment.
-  stage-runtime     Assemble a clean runtime payload for image builds.
-  scaffold-downstream  Create a manifest and workflow files from the bundled templates.
-  framework-sync    Update the vendored wp-core-base framework snapshot from GitHub Releases.
-  prepare-framework-release  Bump framework release metadata and scaffold release notes for a release PR.
-  release-verify    Validate framework release metadata and release notes before publishing.
-  suggest-manifest  Print suggested manifest entries for undeclared runtime paths.
-  format-manifest   Rewrite the manifest into the normalized framework format.
-  add-dependency    Add a managed, local, or ignored dependency entry.
-  remove-dependency Remove a dependency entry, optionally deleting its path.
-  list-dependencies Print configured dependencies grouped by ownership.
-  pr-blocker        Evaluate whether the current PR should remain blocked.
-
-Flags and environment:
-  --repo-root=PATH       Override the repository root to inspect or update.
-  --tool-path=PATH       Path from the downstream repo root to the wp-core-base checkout for scaffold mode.
-  --profile=PROFILE      Downstream scaffold profile or preset: full-core, content-only, content-only-default, content-only-migration, content-only-local-mu, content-only-image-first, or content-only-image-first-compact.
-  --content-root=PATH    Override the scaffolded content root.
-  --interactive          Prompt for missing dependency-authoring inputs when attached to a TTY.
-  --private              Treat a GitHub release dependency as private and default a token env-var name when needed.
-  --output=PATH          Override the stage-runtime output path.
-  --check-only           Print framework update availability without changing files.
-  --release-type=TYPE    Release bump type for prepare-framework-release: patch, minor, major, or custom.
-  --tag=TAG              Expected release tag for release-verify mode.
-  --version=VERSION      Custom release version for prepare-framework-release.
-  --allow-current-version  Allow prepare-framework-release to reuse the current version when refreshing an existing release branch.
-  --force                Overwrite scaffolded files when they already exist.
-  WPORG_REPO_ROOT        Environment alternative to --repo-root.
-  WPORG_UPDATE_DRY_RUN   Enable dry-run behavior for sync mode.
-
-TEXT);
+        $topic = $arguments[0] ?? null;
+        $topic = is_string($topic) && ! str_starts_with($topic, '--') ? $topic : null;
+        fwrite(STDOUT, CommandHelp::render($topic, $commandPrefix, $phpCommandPrefix));
         exit(0);
     }
 
@@ -272,7 +229,12 @@ TEXT);
         exit(0);
     }
 
-    if (in_array($mode, ['add-dependency', 'remove-dependency', 'list-dependencies'], true)) {
+    if (isset($options['help']) && in_array($mode, ['add-dependency', 'adopt-dependency', 'remove-dependency', 'sync'], true)) {
+        fwrite(STDOUT, CommandHelp::render($mode, $commandPrefix, $phpCommandPrefix));
+        exit(0);
+    }
+
+    if (in_array($mode, ['add-dependency', 'adopt-dependency', 'remove-dependency', 'list-dependencies'], true)) {
         $prompter = new InteractivePrompter();
 
         if (
@@ -299,12 +261,89 @@ TEXT);
             manifestWriter: new ManifestWriter(),
             wordPressOrgClient: new WordPressOrgClient($httpClient),
             gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase()),
-            httpClient: $httpClient,
+            archiveDownloader: $httpClient,
         );
 
         if ($mode === 'add-dependency') {
+            if (isset($options['plan']) || isset($options['dry-run'])) {
+                $result = $authoringService->planAddDependency($options);
+                fwrite(STDOUT, "Planned dependency addition\n");
+                fwrite(STDOUT, sprintf("Component: %s\n", $result['component_key']));
+                fwrite(STDOUT, sprintf("Source: %s\n", $result['source']));
+                fwrite(STDOUT, sprintf("Kind: %s\n", $result['kind']));
+                fwrite(STDOUT, sprintf("Target path: %s\n", $result['target_path']));
+
+                if (($result['selected_version'] ?? null) !== null) {
+                    fwrite(STDOUT, sprintf("Selected version: %s\n", $result['selected_version']));
+                }
+
+                if (($result['main_file'] ?? null) !== null) {
+                    fwrite(STDOUT, sprintf("Main file: %s\n", $result['main_file']));
+                }
+
+                if (($result['archive_subdir'] ?? '') !== '') {
+                    fwrite(STDOUT, sprintf("Archive subdir: %s\n", $result['archive_subdir']));
+                }
+
+                fwrite(STDOUT, sprintf("Would replace existing path: %s\n", ($result['would_replace'] ?? false) ? 'yes' : 'no'));
+
+                if (($result['source_reference'] ?? null) !== null) {
+                    fwrite(STDOUT, sprintf("Resolved source: %s\n", $result['source_reference']));
+                }
+
+                fwrite(STDOUT, sprintf("Sanitize paths: %s\n", implode(', ', (array) ($result['sanitize_paths'] ?? [])) ?: '(none)'));
+                fwrite(STDOUT, sprintf("Sanitize files: %s\n", implode(', ', (array) ($result['sanitize_files'] ?? [])) ?: '(none)'));
+                exit(0);
+            }
+
             $result = $authoringService->addDependency($options);
             fwrite(STDOUT, sprintf("Added dependency %s (%s)\n", $result['component_key'], $result['path']));
+
+            if (($result['version'] ?? null) !== null) {
+                fwrite(STDOUT, sprintf("Version: %s\n", $result['version']));
+            }
+
+            if (($result['checksum'] ?? null) !== null) {
+                fwrite(STDOUT, sprintf("Checksum: %s\n", $result['checksum']));
+            }
+
+            foreach ((array) ($result['next_steps'] ?? []) as $step) {
+                fwrite(STDOUT, sprintf("Next: %s\n", $step));
+            }
+
+            exit(0);
+        }
+
+        if ($mode === 'adopt-dependency') {
+            if (isset($options['plan']) || isset($options['dry-run'])) {
+                $result = $authoringService->planAdoptDependency($options);
+                fwrite(STDOUT, "Planned dependency adoption\n");
+                fwrite(STDOUT, sprintf("Adopt from: %s\n", $result['adopted_from']));
+                fwrite(STDOUT, sprintf("To component: %s\n", $result['component_key']));
+                fwrite(STDOUT, sprintf("Target path: %s\n", $result['target_path']));
+
+                if (($result['selected_version'] ?? null) !== null) {
+                    fwrite(STDOUT, sprintf("Selected version: %s\n", $result['selected_version']));
+                }
+
+                fwrite(STDOUT, sprintf("Preserve current version: %s\n", ($result['preserve_version'] ?? false) ? 'yes' : 'no'));
+                fwrite(STDOUT, sprintf("Would replace existing path: %s\n", ($result['would_replace'] ?? false) ? 'yes' : 'no'));
+
+                if (($result['source_reference'] ?? null) !== null) {
+                    fwrite(STDOUT, sprintf("Resolved source: %s\n", $result['source_reference']));
+                }
+
+                fwrite(STDOUT, sprintf("Sanitize paths: %s\n", implode(', ', (array) ($result['sanitize_paths'] ?? [])) ?: '(none)'));
+                fwrite(STDOUT, sprintf("Sanitize files: %s\n", implode(', ', (array) ($result['sanitize_files'] ?? [])) ?: '(none)'));
+                exit(0);
+            }
+
+            $result = $authoringService->adoptDependency($options);
+            fwrite(STDOUT, sprintf(
+                "Adopted dependency %s from %s\n",
+                $result['component_key'],
+                $result['adopted_from']
+            ));
 
             if (($result['version'] ?? null) !== null) {
                 fwrite(STDOUT, sprintf("Version: %s\n", $result['version']));
