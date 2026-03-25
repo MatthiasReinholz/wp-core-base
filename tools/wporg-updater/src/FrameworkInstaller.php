@@ -39,8 +39,8 @@ final class FrameworkInstaller
         try {
             $this->runtimeInspector->copyPath($payloadRoot, $stagingPath);
             $this->swapPaths($targetPath, $stagingPath, $backupPath);
-
-            $renderedFiles = (new DownstreamScaffolder($targetPath, $this->repoRoot))->renderFrameworkManagedFiles($distributionPath);
+            $downstreamConfig = Config::load($this->repoRoot);
+            $renderedFiles = (new DownstreamScaffolder($targetPath, $this->repoRoot))->renderFrameworkManagedFiles($distributionPath, [], $downstreamConfig->paths);
             $managedFileChecksums = [];
             $changedPaths = [$distributionPath];
             $refreshedFiles = [];
@@ -84,6 +84,8 @@ final class FrameworkInstaller
             );
             (new FrameworkWriter())->write($framework);
             $changedPaths[] = '.wp-core-base/framework.php';
+            (new AdminGovernanceExporter($this->runtimeInspector))->refresh($downstreamConfig);
+            $changedPaths[] = FrameworkRuntimeFiles::governanceDataPath($downstreamConfig);
 
             return [
                 'changed_paths' => array_values(array_unique($changedPaths)),

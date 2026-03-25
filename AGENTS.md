@@ -51,6 +51,7 @@ If you are changing the framework itself:
 Treat the manifest at `.wp-core-base/manifest.php` as the downstream source of truth.
 
 Treat `add-dependency`, `remove-dependency`, and `list-dependencies` as the preferred day-to-day authoring surface for routine changes. Manual manifest editing is still valid, but it is the advanced path.
+Treat `refresh-admin-governance` as the command that reprojects manifest ownership into the runtime admin-governance data file.
 
 Treat `.wp-core-base/framework.php` as the installed framework lock file.
 
@@ -77,6 +78,9 @@ Do not blur those contracts when reasoning about the system.
 - GitHub is required only for automated PR flows, not for using the code base itself.
 - `stage-runtime` is the deployment contract whenever staged runtime is part of the architecture.
 - `framework-sync` updates the vendored `wp-core-base` framework snapshot, not the runtime manifest.
+- premium plugin credentials live in `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`, not in the manifest.
+- downstream-owned premium provider registrations live in `.wp-core-base/premium-providers.php`.
+- workflow-managed plugins may intentionally look non-updateable inside wp-admin because the governance MU plugin suppresses misleading in-dashboard update actions for them.
 
 ## Unsafe Assumptions
 
@@ -88,6 +92,7 @@ Do not assume:
 - raw Git working trees are valid managed dependency inputs
 - symlinks are acceptable runtime inputs
 - a GitHub repository without GitHub Releases is a supported `github-release` source
+- WooCommerce.com extensions are already supported as native workflow-managed sources
 
 ## How To Evaluate An Existing WordPress Repo
 

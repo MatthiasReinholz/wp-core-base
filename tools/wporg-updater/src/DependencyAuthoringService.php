@@ -14,9 +14,8 @@ final class DependencyAuthoringService
         private readonly DependencyMetadataResolver $metadataResolver,
         private readonly RuntimeInspector $runtimeInspector,
         private readonly ConfigWriter $manifestWriter,
-        private readonly WordPressOrgSource $wordPressOrgClient,
-        private readonly GitHubReleaseSource $gitHubReleaseClient,
-        private readonly ArchiveDownloader $archiveDownloader,
+        private readonly ManagedSourceRegistry $managedSourceRegistry,
+        private readonly ?AdminGovernanceExporter $adminGovernanceExporter = null,
     ) {
     }
 
@@ -206,6 +205,7 @@ final class DependencyAuthoringService
 
         try {
             $this->manifestWriter->write($nextConfig);
+            $this->refreshAdminGovernance($nextConfig);
             $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
         } catch (RuntimeException $exception) {
             if ($deletePath && $backupPath !== null && (file_exists($backupPath) || is_link($backupPath))) {
@@ -283,6 +283,7 @@ final class DependencyAuthoringService
         $source = $this->requiredString($options, 'source');
         $management = $this->resolveManagement($options, $source);
         $slug = $this->resolveSlug($options);
+        $provider = $this->resolvedPremiumProviderFromOptions($source, $options);
         $path = $this->resolvePath($kind, $slug, $options['path'] ?? null);
         $name = $this->nullableString($options['name'] ?? null);
         $version = $this->nullableString($options['version'] ?? null);
@@ -293,7 +294,7 @@ final class DependencyAuthoringService
         $force = isset($options['force']);
 
         $this->assertAddAllowed($kind, $source, $management);
-        $this->assertDoesNotAlreadyExist($kind, $source, $slug, $force);
+        $this->assertDoesNotAlreadyExist($kind, $source, $slug, $force, $provider);
 
         $rawEntry = [
             'name' => $name ?? $this->metadataResolver->displayNameFromPath($slug),
@@ -311,6 +312,9 @@ final class DependencyAuthoringService
                 'github_repository' => null,
                 'github_release_asset_pattern' => null,
                 'github_token_env' => null,
+                'credential_key' => null,
+                'provider' => null,
+                'provider_product_id' => null,
             ],
             'policy' => $this->defaultPolicy($management, $source),
         ];
@@ -323,7 +327,7 @@ final class DependencyAuthoringService
         $destinationAbsolutePath = $this->config->repoRoot . '/' . $rawEntry['path'];
         $wouldReplace = file_exists($destinationAbsolutePath) || is_link($destinationAbsolutePath);
 
-        if ($source === 'wordpress.org' || $source === 'github-release') {
+        if ($source !== 'local') {
             $managedPreparation = $this->prepareManagedDependency(
                 $rawEntry,
                 $options,
@@ -459,14 +463,7 @@ final class DependencyAuthoringService
         $extractPath = $tempDir . '/extract';
         mkdir($extractPath, 0775, true);
 
-        if ($rawEntry['source'] === 'wordpress.org') {
-            $info = $this->wordPressOrgClient->fetchComponentInfo($rawEntry['kind'], $rawEntry['slug']);
-            $version = $requestedVersion ?? $this->wordPressOrgClient->latestVersion($rawEntry['kind'], $info);
-            $downloadUrl = $this->wordPressOrgClient->downloadUrlForVersion($rawEntry['kind'], $info, $version);
-            $this->archiveDownloader->downloadToFile($downloadUrl, $archivePath);
-            $displayName = $info['name'] ?? $rawEntry['name'];
-            $sourceReference = $downloadUrl;
-        } else {
+        if ($rawEntry['source'] === 'github-release') {
             $repository = $this->requiredString($options, 'github-repository');
             $tokenEnv = $this->nullableString($options['github-token-env'] ?? null);
             $defaultTokenEnv = self::defaultGitHubTokenEnv((string) $rawEntry['slug'], $repository);
@@ -484,7 +481,7 @@ final class DependencyAuthoringService
             }
 
             try {
-                $releases = $this->gitHubReleaseClient->fetchStableReleases($rawEntry);
+                $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
             } catch (RuntimeException $exception) {
                 if ($tokenEnv === null && ($privateGitHub || $this->looksLikeGitHubAuthFailure($exception))) {
                     $rawEntry['source_config']['github_token_env'] = $defaultTokenEnv;
@@ -498,22 +495,48 @@ final class DependencyAuthoringService
                         ), previous: $exception);
                     }
 
-                    $releases = $this->gitHubReleaseClient->fetchStableReleases($rawEntry);
+                    $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
                 } else {
                     throw $exception;
                 }
             }
+        } else {
+            $rawEntry['source_config']['credential_key'] = $this->nullableString($options['credential-key'] ?? null);
+            $provider = $this->nullableString($options['provider'] ?? null);
 
-            $selectedRelease = $this->selectGitHubRelease($releases, $rawEntry, $requestedVersion);
-            $version = $this->gitHubReleaseClient->latestVersion($selectedRelease, $rawEntry);
-            $this->gitHubReleaseClient->downloadReleaseToFile($selectedRelease, $rawEntry, $archivePath);
-            $displayName = $rawEntry['name'];
-            $sourceReference = sprintf(
-                '%s@%s',
-                $repository,
-                $version
-            );
+            if ((string) $rawEntry['source'] === 'premium') {
+                if ($provider === null) {
+                    throw new RuntimeException('--provider is required when --source=premium.');
+                }
+
+                $rawEntry['source_config']['provider'] = $provider;
+            }
+
+            $providerProductId = $this->nullableString($options['provider-product-id'] ?? null);
+
+            if ($providerProductId !== null) {
+                $rawEntry['source_config']['provider_product_id'] = (int) $providerProductId;
+            }
+
+            $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
         }
+
+        $source = $this->managedSourceRegistry->for($rawEntry);
+        $version = $requestedVersion ?? (string) ($catalog['latest_version'] ?? '');
+
+        if ($version === '') {
+            throw new RuntimeException(sprintf('Could not resolve a version for %s.', $rawEntry['slug']));
+        }
+
+        $releaseData = $source->releaseDataForVersion(
+            $rawEntry,
+            $catalog,
+            $version,
+            (string) ($catalog['latest_release_at'] ?? gmdate(DATE_ATOM))
+        );
+        $source->downloadReleaseToFile($rawEntry, $releaseData, $archivePath);
+        $displayName = $rawEntry['name'];
+        $sourceReference = (string) ($releaseData['source_reference'] ?? $rawEntry['source']);
 
         $zip = new ZipArchive();
 
@@ -590,13 +613,10 @@ final class DependencyAuthoringService
     {
         $manifest = $this->config->toArray();
         $replaced = false;
+        $entryProvider = PremiumSourceResolver::providerForDependency($entry);
 
         foreach ($manifest['dependencies'] as $index => $dependency) {
-            if (
-                (string) ($dependency['kind'] ?? '') === (string) $entry['kind']
-                && (string) ($dependency['source'] ?? '') === (string) $entry['source']
-                && (string) ($dependency['slug'] ?? '') === (string) $entry['slug']
-            ) {
+            if ($this->dependencyMatchesIdentity($dependency, (string) $entry['kind'], (string) $entry['source'], (string) $entry['slug'], $entryProvider)) {
                 $manifest['dependencies'][$index] = $entry;
                 $replaced = true;
                 break;
@@ -609,6 +629,7 @@ final class DependencyAuthoringService
 
         $nextConfig = Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
         $this->manifestWriter->write($nextConfig);
+        $this->refreshAdminGovernance($nextConfig);
 
         return Config::load($this->config->repoRoot, $this->config->manifestPath);
     }
@@ -622,6 +643,7 @@ final class DependencyAuthoringService
         $manifest = $this->config->toArray();
         $dependencies = [];
         $replaced = false;
+        $entryProvider = PremiumSourceResolver::providerForDependency($entry);
 
         foreach ($manifest['dependencies'] as $dependency) {
             if (
@@ -632,11 +654,7 @@ final class DependencyAuthoringService
                 continue;
             }
 
-            if (
-                (string) ($dependency['kind'] ?? '') === (string) $entry['kind']
-                && (string) ($dependency['source'] ?? '') === (string) $entry['source']
-                && (string) ($dependency['slug'] ?? '') === (string) $entry['slug']
-            ) {
+            if ($this->dependencyMatchesIdentity($dependency, (string) $entry['kind'], (string) $entry['source'], (string) $entry['slug'], $entryProvider)) {
                 $dependencies[] = $entry;
                 $replaced = true;
                 continue;
@@ -652,6 +670,7 @@ final class DependencyAuthoringService
         $manifest['dependencies'] = array_values($dependencies);
         $nextConfig = Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
         $this->manifestWriter->write($nextConfig);
+        $this->refreshAdminGovernance($nextConfig);
 
         return Config::load($this->config->repoRoot, $this->config->manifestPath);
     }
@@ -706,15 +725,19 @@ final class DependencyAuthoringService
             throw new RuntimeException('GitHub release additions are only supported for plugin and theme kinds.');
         }
 
+        if (PremiumSourceResolver::isPremiumSource($source) && $kind !== 'plugin') {
+            throw new RuntimeException(sprintf('%s additions are only supported for plugin kind.', $source));
+        }
+
         if ($management === 'ignored' && $source !== 'local') {
             throw new RuntimeException('Ignored entries must use source=local.');
         }
     }
 
-    private function assertDoesNotAlreadyExist(string $kind, string $source, string $slug, bool $force): void
+    private function assertDoesNotAlreadyExist(string $kind, string $source, string $slug, bool $force, ?string $provider): void
     {
         foreach ($this->config->dependencies() as $dependency) {
-            if ($dependency['component_key'] !== sprintf('%s:%s:%s', $kind, $source, $slug)) {
+            if (! $this->dependencyMatchesIdentity($dependency, $kind, $source, $slug, $provider)) {
                 continue;
             }
 
@@ -724,6 +747,45 @@ final class DependencyAuthoringService
 
             throw new RuntimeException(sprintf('Dependency already exists: %s', $dependency['component_key']));
         }
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $options
+     */
+    private function resolvedPremiumProviderFromOptions(string $source, array $options): ?string
+    {
+        if (! PremiumSourceResolver::isPremiumSource($source)) {
+            return null;
+        }
+
+        if ($source === 'premium') {
+            return $this->nullableString($options['provider'] ?? null);
+        }
+
+        return PremiumSourceResolver::providerFor($source);
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    private function dependencyMatchesIdentity(array $dependency, string $kind, string $source, string $slug, ?string $provider): bool
+    {
+        if ((string) ($dependency['kind'] ?? '') !== $kind || (string) ($dependency['slug'] ?? '') !== $slug) {
+            return false;
+        }
+
+        $dependencySource = (string) ($dependency['source'] ?? '');
+
+        if ($dependencySource === $source) {
+            return true;
+        }
+
+        if (! PremiumSourceResolver::isPremiumSource($dependencySource) || ! PremiumSourceResolver::isPremiumSource($source) || $provider === null) {
+            return false;
+        }
+
+        return PremiumSourceResolver::providerForDependency($dependency) === $provider;
     }
 
     private function resolveManagement(array $options, string $source): string
@@ -796,6 +858,7 @@ final class DependencyAuthoringService
             'class' => match (true) {
                 $management === 'managed' && $source === 'wordpress.org' => 'managed-upstream',
                 $management === 'managed' && $source === 'github-release' => 'managed-private',
+                $management === 'managed' && PremiumSourceResolver::isPremiumSource($source) => 'managed-premium',
                 $management === 'ignored' => 'ignored',
                 default => 'local-owned',
             },
@@ -811,30 +874,6 @@ final class DependencyAuthoringService
         }
 
         return $policy;
-    }
-
-    /**
-     * @param list<array<string, mixed>> $releases
-     * @param array<string, mixed> $dependency
-     * @return array<string, mixed>
-     */
-    private function selectGitHubRelease(array $releases, array $dependency, ?string $requestedVersion): array
-    {
-        if ($requestedVersion === null) {
-            return $releases[0];
-        }
-
-        foreach ($releases as $release) {
-            if ($this->gitHubReleaseClient->latestVersion($release, $dependency) === $requestedVersion) {
-                return $release;
-            }
-        }
-
-        throw new RuntimeException(sprintf(
-            'No published stable GitHub release matching version %s was found for %s.',
-            $requestedVersion,
-            $dependency['slug']
-        ));
     }
 
     /**
@@ -877,6 +916,14 @@ final class DependencyAuthoringService
         if (is_string($tokenEnv) && $tokenEnv !== '') {
             $steps[] = sprintf('Export %s locally before running authoring or sync commands.', $tokenEnv);
             $steps[] = sprintf('Add a GitHub Actions secret named %s in the downstream repository.', $tokenEnv);
+        }
+
+        if (PremiumSourceResolver::isPremiumSource((string) $dependency['source'])) {
+            $steps[] = sprintf(
+                'Provide premium credentials for %s through %s locally and in GitHub Actions.',
+                $dependency['component_key'],
+                PremiumCredentialsStore::envName()
+            );
         }
 
         return $steps;
@@ -941,5 +988,12 @@ final class DependencyAuthoringService
         }
 
         return $currentVersion;
+    }
+
+    private function refreshAdminGovernance(Config $config): void
+    {
+        if ($this->adminGovernanceExporter !== null) {
+            $this->adminGovernanceExporter->refresh($config);
+        }
     }
 }

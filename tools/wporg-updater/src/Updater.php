@@ -15,6 +15,7 @@ final class Updater
         private readonly DependencyScanner $dependencyScanner,
         private readonly WordPressOrgClient $wordPressOrgClient,
         private readonly GitHubReleaseClient $gitHubReleaseClient,
+        private readonly ManagedSourceRegistry $managedSourceRegistry,
         private readonly SupportForumClient $supportForumClient,
         private readonly ReleaseClassifier $releaseClassifier,
         private readonly PrBodyRenderer $prBodyRenderer,
@@ -71,6 +72,7 @@ final class Updater
             'kind:runtime-directory' => ['color' => 'd4c5f9', 'description' => 'Runtime directory dependency'],
             'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from WordPress.org'],
             'source:github-release' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
+            'source:premium' => ['color' => '7c3aed', 'description' => 'Update sourced from a premium provider integration'],
             'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],
             'release:minor' => ['color' => 'fbca04', 'description' => 'Minor release'],
             'release:major' => ['color' => 'd93f0b', 'description' => 'Major release'],
@@ -416,12 +418,7 @@ final class Updater
      */
     private function downloadArchiveForRelease(array $dependency, array $releaseData, string $archivePath): void
     {
-        if ($dependency['source'] === 'github-release') {
-            $this->gitHubReleaseClient->downloadReleaseToFile($releaseData['release'], $dependency, $archivePath);
-            return;
-        }
-
-        $this->httpClient->downloadToFile((string) $releaseData['download_url'], $archivePath);
+        $this->managedSourceRegistry->for($dependency)->downloadReleaseToFile($dependency, $releaseData, $archivePath);
     }
 
     /**
@@ -429,37 +426,7 @@ final class Updater
      */
     private function fetchReleaseCatalog(array $dependency): array
     {
-        if ($dependency['source'] === 'github-release') {
-            $releases = $this->gitHubReleaseClient->fetchStableReleases($dependency);
-            $releasesByVersion = [];
-
-            foreach ($releases as $release) {
-                $version = (string) ($release['normalized_version'] ?? '');
-
-                if ($version !== '') {
-                    $releasesByVersion[$version] = $release;
-                }
-            }
-
-            $latest = $releases[0];
-
-            return [
-                'source' => 'github-release',
-                'repository' => $this->gitHubReleaseClient->repository($dependency),
-                'latest_version' => (string) $latest['normalized_version'],
-                'latest_release_at' => $this->gitHubReleaseClient->latestReleaseAt($latest),
-                'releases_by_version' => $releasesByVersion,
-            ];
-        }
-
-        $info = $this->wordPressOrgClient->fetchComponentInfo((string) $dependency['kind'], (string) $dependency['slug']);
-
-        return [
-            'source' => 'wordpress.org',
-            'info' => $info,
-            'latest_version' => $this->wordPressOrgClient->latestVersion((string) $dependency['kind'], $info),
-            'latest_release_at' => $this->wordPressOrgClient->latestReleaseAt((string) $dependency['kind'], $info),
-        ];
+        return $this->managedSourceRegistry->for($dependency)->fetchCatalog($dependency);
     }
 
     /**
@@ -469,53 +436,12 @@ final class Updater
      */
     private function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
     {
-        if ($dependency['source'] === 'github-release') {
-            $repository = (string) $catalog['repository'];
-            $release = $catalog['releases_by_version'][$targetVersion] ?? null;
-
-            if (! is_array($release)) {
-                throw new RuntimeException(sprintf(
-                    'Could not find GitHub release metadata for %s version %s.',
-                    $repository,
-                    $targetVersion
-                ));
-            }
-
-            $notesMarkup = $this->gitHubReleaseClient->releaseNotesMarkdown($release, $targetVersion);
-
-            return [
-                'source' => 'github-release',
-                'version' => $targetVersion,
-                'repository' => $repository,
-                'release_url' => $this->gitHubReleaseClient->releaseUrl($release, $repository),
-                'issues_url' => $this->gitHubReleaseClient->issuesUrl($repository),
-                'archive_subdir' => $this->gitHubReleaseClient->archiveSubdir($dependency),
-                'notes_markup' => $notesMarkup,
-                'notes_text' => $this->gitHubReleaseClient->markdownToText($notesMarkup),
-                'release_at' => $this->gitHubReleaseClient->latestReleaseAt($release),
-                'release' => $release,
-            ];
-        }
-
-        $info = $catalog['info'] ?? null;
-
-        if (! is_array($info)) {
-            throw new RuntimeException(sprintf('Missing WordPress.org catalog metadata for %s.', (string) $dependency['slug']));
-        }
-
-        $notesMarkup = $this->wordPressOrgClient->extractReleaseNotes((string) $dependency['kind'], $info, $targetVersion);
-
-        return [
-            'source' => 'wordpress.org',
-            'version' => $targetVersion,
-            'component_url' => $this->wordPressOrgClient->componentUrl((string) $dependency['kind'], (string) $dependency['slug']),
-            'support_url' => $dependency['kind'] === 'plugin' ? $this->wordPressOrgClient->supportUrl((string) $dependency['slug']) : '',
-            'download_url' => $this->wordPressOrgClient->downloadUrlForVersion((string) $dependency['kind'], $info, $targetVersion),
-            'archive_subdir' => trim((string) $dependency['archive_subdir'], '/'),
-            'notes_markup' => $notesMarkup,
-            'notes_text' => $this->wordPressOrgClient->htmlToText($notesMarkup),
-            'release_at' => $fallbackReleaseAt,
-        ];
+        return $this->managedSourceRegistry->for($dependency)->releaseDataForVersion(
+            $dependency,
+            $catalog,
+            $targetVersion,
+            $fallbackReleaseAt
+        );
     }
 
     /**
@@ -538,37 +464,6 @@ final class Updater
         array $supportTopics,
         array $metadata,
     ): string {
-        if ($dependency['source'] === 'github-release') {
-            return $this->prBodyRenderer->renderDependencyUpdate(
-                dependencyName: $dependencyState['name'],
-                dependencySlug: (string) $dependency['slug'],
-                dependencyKind: (string) $dependency['kind'],
-                dependencyPath: $dependencyState['path'],
-                currentVersion: $currentVersion,
-                targetVersion: $targetVersion,
-                releaseScope: $scope,
-                releaseAt: $releaseAt,
-                labels: $labels,
-                sourceDetails: [
-                    ['label' => 'Source repository', 'value' => sprintf('[`%s`](https://github.com/%s)', $releaseData['repository'], $releaseData['repository'])],
-                    ['label' => 'GitHub release', 'value' => sprintf('[Open](%s)', $releaseData['release_url'])],
-                    ['label' => 'Issue tracker', 'value' => sprintf('[Open](%s)', $releaseData['issues_url'])],
-                ],
-                releaseNotesHeading: 'Release Notes',
-                releaseNotesBody: (string) $releaseData['notes_markup'],
-                supportTopics: [],
-                metadata: $metadata,
-            );
-        }
-
-        $sourceDetails = [
-            ['label' => 'WordPress.org page', 'value' => sprintf('[Open](%s)', $releaseData['component_url'])],
-        ];
-
-        if ($dependency['kind'] === 'plugin') {
-            $sourceDetails[] = ['label' => 'WordPress.org support forum', 'value' => sprintf('[Open](%s)', $releaseData['support_url'])];
-        }
-
         return $this->prBodyRenderer->renderDependencyUpdate(
             dependencyName: $dependencyState['name'],
             dependencySlug: (string) $dependency['slug'],
@@ -579,10 +474,10 @@ final class Updater
             releaseScope: $scope,
             releaseAt: $releaseAt,
             labels: $labels,
-            sourceDetails: $sourceDetails,
+            sourceDetails: (array) ($releaseData['source_details'] ?? []),
             releaseNotesHeading: 'Release Notes',
             releaseNotesBody: (string) $releaseData['notes_markup'],
-            supportTopics: $supportTopics,
+            supportTopics: $this->supportsForumSync($dependency) ? $supportTopics : [],
             metadata: $metadata,
         );
     }
@@ -791,7 +686,7 @@ final class Updater
 
     private function supportsForumSync(array $dependency): bool
     {
-        return $dependency['source'] === 'wordpress.org' && $dependency['kind'] === 'plugin';
+        return $this->managedSourceRegistry->for($dependency)->supportsForumSync($dependency);
     }
 
     private function titleForPullRequest(string $dependencyName, string $baseVersion, string $targetVersion): string

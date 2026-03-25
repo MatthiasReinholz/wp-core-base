@@ -17,7 +17,10 @@ final class RuntimeOwnershipInspector
     public function undeclaredRuntimePaths(): array
     {
         $entries = [];
-        $declaredPaths = array_map(static fn (array $dependency): string => (string) $dependency['path'], $this->config->dependencies());
+        $declaredPaths = array_merge(
+            array_map(static fn (array $dependency): string => (string) $dependency['path'], $this->config->dependencies()),
+            array_map(static fn (array $entry): string => $entry['path'], FrameworkRuntimeFiles::runtimeEntries($this->config))
+        );
         $allowedPaths = (array) $this->config->runtime['allow_runtime_paths'];
 
         foreach ($this->rootSpecifications() as $spec) {
@@ -83,12 +86,17 @@ final class RuntimeOwnershipInspector
                 'github_repository' => null,
                 'github_release_asset_pattern' => null,
                 'github_token_env' => null,
+                'credential_key' => null,
+                'provider' => null,
+                'provider_product_id' => null,
             ],
             'policy' => [
                 'class' => 'local-owned',
                 'allow_runtime_paths' => [],
                 'strip_paths' => [],
                 'strip_files' => [],
+                'sanitize_paths' => [],
+                'sanitize_files' => [],
             ],
         ];
     }

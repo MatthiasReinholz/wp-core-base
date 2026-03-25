@@ -110,7 +110,7 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 
 If you want ongoing upstream framework maintenance, keep the scaffolded `.wp-core-base/framework.php` file and the `wp-core-base` self-update workflow enabled.
 
-Scaffolding also writes `.wp-core-base/USAGE.md` and a downstream `AGENTS.md`. Treat those as the local entry points for routine dependency authoring and agentic coding inside the project repo.
+Scaffolding also writes `.wp-core-base/USAGE.md`, `.wp-core-base/premium-providers.php`, and a downstream `AGENTS.md`. Treat those as the local entry points for routine dependency authoring, premium-provider registration, and agentic coding inside the project repo.
 
 The standalone `wp-core-base Runtime Validation` workflow is the default because it gives downstreams a small canonical runtime-contract check even when they do not yet have a mature PR build pipeline. The scaffold also writes a separate merged-PR reconciliation workflow so scheduled/manual update runs stay distinct from post-merge queue unblocking. If your main PR workflow already runs `doctor` and `stage-runtime`, the compact image-first scaffold profile is usually the better fit.
 

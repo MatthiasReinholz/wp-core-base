@@ -47,10 +47,11 @@ return array (
   array (
     'managed_files' => 
     array (
-      '.github/workflows/wp-core-base-self-update.yml' => 'sha256:4c0ab44280dbc5034949c05e021edfb81b6d5968fc71ec1107ec09b0ca61917d',
-      '.github/workflows/wporg-update-pr-blocker.yml' => 'sha256:fc94926c42731f7b8f24b5297f9b5804dd16931a028d0c51f9356f0ad38dd2e2',
-      '.github/workflows/wporg-updates.yml' => 'sha256:6b584c770412b609c5a6f133f394b9130de5a3175fff163799bd8b880ee852c4',
-      '.github/workflows/wporg-validate-runtime.yml' => 'sha256:7c24158389778abfce6f9f5a715cdab6646ea7e0d272c499e56985cbbbe930e1',
+      '.github/workflows/wporg-update-pr-blocker.yml' => 'sha256:1b0fc1a0e4ded7a05d4eba125dc5c2a872d5d7b504f626632770796efdaee6cc',
+      '.github/workflows/wporg-updates-reconcile.yml' => 'sha256:1f4a3e0a61c117b86160f327593ea92bab269478967d2670faef1100b837535b',
+      '.github/workflows/wporg-updates.yml' => 'sha256:c8e4762557dce205198151e81b788edc039f1604461890ed4b60d7995a35e49e',
+      '.github/workflows/wporg-validate-runtime.yml' => 'sha256:84e04c185c2ec0d6a3dbe19e932bc454333e6aca0070f9697a72a64e22dee675',
+      'wp-content/mu-plugins/wp-core-base-admin-governance.php' => 'sha256:c78013d7f970c203241e8dd4140e1c767281612e6d194907086490c5b5e8ffdf',
     ),
   ),
 );

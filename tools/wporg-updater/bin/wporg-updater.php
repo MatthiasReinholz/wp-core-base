@@ -6,6 +6,7 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\CoreUpdater;
+use WpOrgPluginUpdater\AdminGovernanceExporter;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DependencyAuthoringService;
 use WpOrgPluginUpdater\DependencyMetadataResolver;
@@ -24,15 +25,22 @@ use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
+use WpOrgPluginUpdater\ManagedSourceRegistry;
+use WpOrgPluginUpdater\PremiumProviderRegistry;
+use WpOrgPluginUpdater\PremiumProviderScaffolder;
+use WpOrgPluginUpdater\PremiumSourceResolver;
 use WpOrgPluginUpdater\PrBodyRenderer;
+use WpOrgPluginUpdater\PremiumCredentialsStore;
 use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeStager;
+use WpOrgPluginUpdater\WordPressOrgManagedSource;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\Updater;
 use WpOrgPluginUpdater\WordPressCoreClient;
 use WpOrgPluginUpdater\WordPressOrgClient;
+use WpOrgPluginUpdater\GitHubReleaseManagedSource;
 
 require dirname(__DIR__) . '/src/Autoload.php';
 
@@ -73,12 +81,16 @@ $phpCommandPrefix = $toolPath === '.'
     ? 'php tools/wporg-updater/bin/wporg-updater.php'
     : sprintf('php %s/tools/wporg-updater/bin/wporg-updater.php', trim((string) $toolPath, '/'));
 
-$maybePromptForMissing = static function (array &$options, InteractivePrompter $prompter): void {
+$maybePromptForMissing = static function (array &$options, InteractivePrompter $prompter, array $premiumProviders): void {
     $source = isset($options['source']) && is_string($options['source']) ? $options['source'] : null;
     $kind = isset($options['kind']) && is_string($options['kind']) ? $options['kind'] : null;
 
     if ($source === null || $source === '') {
-        $options['source'] = $prompter->choose('Select dependency source', ['wordpress.org', 'github-release', 'local'], 'local');
+        $options['source'] = $prompter->choose(
+            'Select dependency source',
+            ['wordpress.org', 'github-release', 'premium', 'local'],
+            'local'
+        );
         $source = $options['source'];
     }
 
@@ -113,6 +125,28 @@ $maybePromptForMissing = static function (array &$options, InteractivePrompter $
 
             if ($tokenEnv !== '') {
                 $options['github-token-env'] = $tokenEnv;
+            }
+        }
+    }
+
+    if (PremiumSourceResolver::isPremiumSource($source)) {
+        if ($source === 'premium' && (! isset($options['provider']) || ! is_string($options['provider']) || trim($options['provider']) === '')) {
+            if ($premiumProviders === []) {
+                throw new RuntimeException('No premium providers are registered. Scaffold one with scaffold-premium-provider or add it to .wp-core-base/premium-providers.php.');
+            }
+
+            $options['provider'] = $prompter->choose(
+                'Select premium provider',
+                $premiumProviders,
+                $premiumProviders[0]
+            );
+        }
+
+        if (! isset($options['credential-key']) || ! is_string($options['credential-key']) || trim($options['credential-key']) === '') {
+            $credentialKey = $prompter->ask('Premium credential lookup key (leave blank for component key)', '');
+
+            if ($credentialKey !== '') {
+                $options['credential-key'] = $credentialKey;
             }
         }
     }
@@ -173,6 +207,23 @@ try {
         exit($scaffolder->scaffold((string) $toolPath, (string) $profile, is_string($contentRoot) ? $contentRoot : null, $force));
     }
 
+    if ($mode === 'scaffold-premium-provider') {
+        $provider = isset($options['provider']) && is_string($options['provider']) ? $options['provider'] : null;
+
+        if ($provider === null || trim($provider) === '') {
+            throw new RuntimeException('scaffold-premium-provider requires --provider=your-provider.');
+        }
+
+        $class = isset($options['class']) && is_string($options['class']) ? $options['class'] : null;
+        $path = isset($options['path']) && is_string($options['path']) ? $options['path'] : null;
+        $result = (new PremiumProviderScaffolder($frameworkRoot, $repoRoot))->scaffold($provider, $class, $path, $force);
+        fwrite(STDOUT, sprintf("Scaffolded premium provider %s\n", $result['provider']));
+        fwrite(STDOUT, sprintf("Registry: %s\n", $result['registry_path']));
+        fwrite(STDOUT, sprintf("Class: %s\n", $result['class']));
+        fwrite(STDOUT, sprintf("Path: %s\n", $result['path']));
+        exit(0);
+    }
+
     if ($mode === 'framework-apply') {
         $payloadRoot = $options['payload-root'] ?? null;
         $distributionPath = $options['distribution-path'] ?? null;
@@ -204,10 +255,18 @@ try {
     $httpClient = new HttpClient(
         userAgent: 'wp-core-base/' . ($mode === 'sync' ? 'sync' : $mode)
     );
+    $premiumProviderRegistry = PremiumProviderRegistry::load($repoRoot);
+    $premiumProviders = $premiumProviderRegistry->providerKeys();
+    $managedSourceRegistry = new ManagedSourceRegistry(
+        new WordPressOrgManagedSource(new WordPressOrgClient($httpClient), $httpClient),
+        new GitHubReleaseManagedSource(new GitHubReleaseClient($httpClient, $config->githubApiBase())),
+        ...array_values($premiumProviderRegistry->instantiate($httpClient, new PremiumCredentialsStore()))
+    );
+    $adminGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));
 
     if ($mode === 'stage-runtime') {
         $runtimeInspector = new RuntimeInspector($config->runtime);
-        $stager = new RuntimeStager($config, $runtimeInspector);
+        $stager = new RuntimeStager($config, $runtimeInspector, $adminGovernanceExporter);
         $stagedPaths = $stager->stage((string) ($options['output'] ?? $config->runtime['stage_dir']));
         fwrite(STDOUT, "Staged runtime paths:\n");
 
@@ -215,6 +274,12 @@ try {
             fwrite(STDOUT, sprintf("- %s\n", $path));
         }
 
+        exit(0);
+    }
+
+    if ($mode === 'refresh-admin-governance') {
+        $adminGovernanceExporter->refresh($config);
+        fwrite(STDOUT, "Refreshed admin governance runtime data\n");
         exit(0);
     }
 
@@ -229,7 +294,7 @@ try {
         exit(0);
     }
 
-    if (isset($options['help']) && in_array($mode, ['add-dependency', 'adopt-dependency', 'remove-dependency', 'sync'], true)) {
+    if (isset($options['help']) && in_array($mode, ['add-dependency', 'adopt-dependency', 'remove-dependency', 'scaffold-premium-provider', 'sync'], true)) {
         fwrite(STDOUT, CommandHelp::render($mode, $commandPrefix, $phpCommandPrefix));
         exit(0);
     }
@@ -251,7 +316,7 @@ try {
                 )
             )
         ) {
-            $maybePromptForMissing($options, $prompter);
+            $maybePromptForMissing($options, $prompter, $premiumProviders);
         }
 
         $authoringService = new DependencyAuthoringService(
@@ -259,9 +324,8 @@ try {
             metadataResolver: new DependencyMetadataResolver(),
             runtimeInspector: new RuntimeInspector($config->runtime),
             manifestWriter: new ManifestWriter(),
-            wordPressOrgClient: new WordPressOrgClient($httpClient),
-            gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase()),
-            archiveDownloader: $httpClient,
+            managedSourceRegistry: $managedSourceRegistry,
+            adminGovernanceExporter: $adminGovernanceExporter,
         );
 
         if ($mode === 'add-dependency') {
@@ -382,6 +446,7 @@ try {
             dependencyScanner: new DependencyScanner(),
             wordPressOrgClient: new WordPressOrgClient($httpClient),
             gitHubReleaseClient: new GitHubReleaseClient($httpClient, $config->githubApiBase()),
+            managedSourceRegistry: $managedSourceRegistry,
             supportForumClient: new SupportForumClient($httpClient, 100),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),

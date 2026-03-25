@@ -92,6 +92,124 @@ Optional flags:
 
 Use `--archive-subdir` only when the extracted payload is not resolved correctly by default. Standard WordPress.org plugin ZIPs should not need it.
 
+## Add A Premium Plugin
+
+Premium workflow updates use a downstream-registered provider adapter.
+
+No premium vendor is built into `wp-core-base`.
+
+First scaffold or register a provider in `.wp-core-base/premium-providers.php`.
+
+The workflow credential contract is a single JSON env var or GitHub Actions secret:
+
+- `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+
+The manifest stores only the dependency source and optional lookup keys. It never stores premium license keys.
+
+### Scaffold a premium provider
+
+```bash
+vendor/wp-core-base/bin/wp-core-base scaffold-premium-provider \
+  --repo-root=. \
+  --provider=example-vendor
+```
+
+That creates:
+
+- `.wp-core-base/premium-providers.php`
+- `.wp-core-base/premium-providers/example-vendor.php`
+
+The generated class extends `AbstractPremiumManagedSource`. Implement the provider-specific HTTP contract there.
+
+### Agent-ready workflow for a custom premium source
+
+If a downstream coding agent needs to make a premium plugin work, it should use this exact order:
+
+1. inspect `.wp-core-base/premium-providers.php`
+2. reuse an existing provider if it already matches the upstream contract
+3. scaffold a provider only if one does not exist yet
+4. implement the generated provider class
+5. set `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+6. run `doctor --repo-root=. --github`
+7. if the plugin already exists as a local dependency, use `adopt-dependency`; otherwise use `add-dependency`
+8. run `stage-runtime`
+
+That keeps provider setup, credential setup, manifest authoring, and runtime validation clearly separated.
+
+For agents, prefer explicit non-interactive commands instead of `--interactive`.
+
+### Add a premium plugin through a registered provider
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=premium \
+  --provider=example-vendor \
+  --kind=plugin \
+  --slug=premium-plugin
+```
+
+Credentials JSON entry:
+
+```json
+{
+  "plugin:premium:premium-plugin": {
+    "license_key": "provider-specific-secret"
+  }
+}
+```
+
+By default, the JSON object key is the dependency component key, for example `plugin:premium:premium-plugin`.
+If the manifest uses `source_config.credential_key`, that override becomes the lookup key instead.
+
+Example shared-license pattern:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=premium \
+  --provider=example-vendor \
+  --kind=plugin \
+  --slug=premium-plugin \
+  --credential-key=example-vendor:team-license \
+  --provider-product-id=42
+```
+
+```json
+{
+  "example-vendor:team-license": {
+    "license_key": "provider-specific-secret",
+    "site_url": "https://example.com"
+  }
+}
+```
+
+If your provider class needs a stable product identifier, include `--provider-product-id=...` when you add or adopt the dependency and read it from `source_config.provider_product_id`.
+
+The provider class contract is documented in [adding-premium-provider.md](/Users/matthias/DEV/wp-core-base/docs/adding-premium-provider.md), including:
+
+- the required return shape of `fetchCatalog()`
+- the required return shape of `releaseDataForVersion()`
+- the expected behavior of `downloadReleaseToFile()`
+- minimal credential validation patterns
+
+### Local and GitHub setup for premium credentials
+
+Local shell example:
+
+```bash
+export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:premium:premium-plugin":{"license_key":"provider-specific-secret"}}'
+```
+
+GitHub Actions setup:
+
+- create one repository secret named `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+- store the same JSON object there
+
+Premium source failures remain per-dependency warnings during `sync`. A broken premium source does not stop healthy managed dependency updates from continuing.
+
+If a premium source cannot be expressed through a deterministic HTTP contract that can resolve version metadata and download a ZIP archive in CI, keep it `local` instead of forcing it into managed premium automation.
+
 ## Add A Private GitHub Release Plugin
 
 ```bash
@@ -237,6 +355,22 @@ vendor/wp-core-base/bin/wp-core-base adopt-dependency \
   --preserve-version
 ```
 
+### Adopt a local premium plugin into managed premium ownership
+
+```bash
+vendor/wp-core-base/bin/wp-core-base scaffold-premium-provider \
+  --repo-root=. \
+  --provider=example-vendor
+
+vendor/wp-core-base/bin/wp-core-base adopt-dependency \
+  --repo-root=. \
+  --kind=plugin \
+  --slug=premium-plugin \
+  --source=premium \
+  --provider=example-vendor \
+  --preserve-version
+```
+
 ### Preview an adoption before it changes anything
 
 ```bash
@@ -261,6 +395,17 @@ Important scope note:
 - a single `adopt-dependency` run is atomic
 - a batch of several separate commands is not transactional across invocations
 - if you are migrating many entries, do them one by one and review each result
+
+## Unsupported Premium Path In This Phase
+
+WooCommerce.com extensions are still outside the native workflow-update contract in this phase.
+
+Use them as:
+
+- `local` dependencies
+- or another manual/project-specific process
+
+Do not model them as native managed sources yet.
 
 ## Remove An Entry
 

@@ -61,6 +61,7 @@ final class EnvironmentDoctor
             $this->inspectConfiguredStructure($config);
             $this->inspectDependencies($config);
             $this->inspectRuntimeOwnership($config);
+            $this->inspectAdminGovernance($config);
             $this->inspectRuntimeStaging($config);
         }
 
@@ -259,7 +260,7 @@ final class EnvironmentDoctor
     {
         $stagePath = $config->repoRoot . '/.wp-core-base/build/doctor-runtime';
         $runtimeInspector = new RuntimeInspector($config->runtime);
-        $stager = new RuntimeStager($config, $runtimeInspector);
+        $stager = new RuntimeStager($config, $runtimeInspector, new AdminGovernanceExporter($runtimeInspector));
 
         try {
             $stagedPaths = $stager->stage('.wp-core-base/build/doctor-runtime');
@@ -304,8 +305,61 @@ final class EnvironmentDoctor
             return;
         }
 
+        $premiumRegistry = null;
+        $premiumSources = [];
+
+        try {
+            $premiumRegistry = PremiumProviderRegistry::load($this->repoRoot);
+
+            if ($premiumRegistry->exists()) {
+                $premiumSources = $premiumRegistry->instantiate(
+                    new HttpClient(userAgent: 'wp-core-base/doctor'),
+                    new PremiumCredentialsStore()
+                );
+                $this->ok(sprintf(
+                    'Premium provider registry loaded from %s with %d provider(s).',
+                    $premiumRegistry->path(),
+                    count($premiumSources)
+                ));
+            }
+        } catch (RuntimeException $exception) {
+            if ($requireGitHub) {
+                $this->error($exception->getMessage());
+            } else {
+                $this->warn($exception->getMessage());
+            }
+        }
+
         foreach ($config->managedDependencies() as $dependency) {
             if ($dependency['source'] !== 'github-release') {
+                if (PremiumSourceResolver::isPremiumSource((string) $dependency['source'])) {
+                    $provider = PremiumSourceResolver::providerForDependency($dependency);
+
+                    try {
+                        if ($premiumRegistry === null || ! $premiumRegistry->hasProvider((string) $provider)) {
+                            throw new RuntimeException(sprintf(
+                                'Premium provider `%s` is not registered for %s. Add it to .wp-core-base/premium-providers.php.',
+                                (string) $provider,
+                                $dependency['component_key']
+                            ));
+                        }
+
+                        $premiumSources[(string) $provider]->validateCredentialConfiguration($dependency);
+
+                        $this->ok(sprintf(
+                            'Premium credentials are configured for %s via %s.',
+                            $dependency['component_key'],
+                            PremiumCredentialsStore::envName()
+                        ));
+                    } catch (RuntimeException $exception) {
+                        if ($requireGitHub) {
+                            $this->error($exception->getMessage());
+                        } else {
+                            $this->warn($exception->getMessage());
+                        }
+                    }
+                }
+
                 continue;
             }
 
@@ -328,6 +382,36 @@ final class EnvironmentDoctor
                 $this->error($message);
             } else {
                 $this->warn($message);
+            }
+        }
+    }
+
+    private function inspectAdminGovernance(Config $config): void
+    {
+        $loaderPath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceLoaderPath($config);
+        $dataPath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config);
+        $exporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));
+
+        $this->okIf(
+            is_file($loaderPath),
+            sprintf('Admin governance loader exists: %s', FrameworkRuntimeFiles::governanceLoaderPath($config)),
+            sprintf('Admin governance loader is missing: %s', FrameworkRuntimeFiles::governanceLoaderPath($config))
+        );
+
+        $this->okIf(
+            is_file($dataPath),
+            sprintf('Admin governance data exists: %s', FrameworkRuntimeFiles::governanceDataPath($config)),
+            sprintf('Admin governance data is missing: %s. Run refresh-admin-governance.', FrameworkRuntimeFiles::governanceDataPath($config))
+        );
+
+        if (is_file($dataPath)) {
+            if ($exporter->isStaleOrMissing($config)) {
+                $this->warn(sprintf(
+                    'Admin governance data is stale relative to the manifest: %s. Run refresh-admin-governance.',
+                    FrameworkRuntimeFiles::governanceDataPath($config)
+                ));
+            } else {
+                $this->ok('Admin governance data matches the current manifest.');
             }
         }
     }

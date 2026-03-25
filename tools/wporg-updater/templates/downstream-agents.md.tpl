@@ -9,12 +9,14 @@ Read these local files first:
 1. `.wp-core-base/USAGE.md`
 2. `.wp-core-base/manifest.php`
 3. `.wp-core-base/framework.php`
+4. `.wp-core-base/premium-providers.php`
 
 If you need deeper framework rules, then read:
 
 1. `__WPORG_TOOL_ROOT__/AGENTS.md`
 2. `__WPORG_TOOL_ROOT__/docs/managing-dependencies.md`
 3. `__WPORG_TOOL_ROOT__/docs/downstream-usage.md`
+4. `__WPORG_TOOL_ROOT__/docs/adding-premium-provider.md`
 
 ## Dependency Changes
 
@@ -26,10 +28,60 @@ For routine plugin, theme, MU plugin, runtime-file, or runtime-directory changes
 
 Do not start by hand-editing `.wp-core-base/manifest.php` unless the change is unusual or clearly advanced.
 
+## Premium Plugin Workflow
+
+No premium vendor is built into `wp-core-base`.
+
+If a task involves a premium plugin source:
+
+1. check whether `.wp-core-base/premium-providers.php` already registers a matching provider
+2. if a matching provider already exists, reuse it instead of inventing a second provider for the same upstream contract
+3. if no matching provider exists, scaffold one with `__WPORG_WRAPPER_PATH__ scaffold-premium-provider --repo-root=. --provider=your-provider`
+4. implement the provider class in `.wp-core-base/premium-providers/your-provider.php`
+5. configure `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON` locally or as a GitHub repository secret
+6. run `__WPORG_PHP_PATH__ doctor --repo-root=. --github`
+7. if the plugin already exists in the repo as a `local` dependency, use `adopt-dependency`; otherwise use `add-dependency`
+8. run `__WPORG_PHP_PATH__ stage-runtime --repo-root=. --output=.wp-core-base/build/runtime`
+
+For agents, prefer non-interactive commands with explicit flags. Use interactive mode only when a human explicitly asks for guided prompts.
+
+When implementing a premium provider, do not guess the contract. Read:
+
+1. `.wp-core-base/premium-providers.php`
+2. the generated provider class file
+3. `__WPORG_TOOL_ROOT__/docs/adding-premium-provider.md`
+
+The provider class must:
+
+- return `latest_version` and `latest_release_at` from `fetchCatalog()`
+- return `version` and `release_at` from `releaseDataForVersion()`
+- write the ZIP archive to the destination path in `downloadReleaseToFile()`
+- keep secrets only in `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`, never in the manifest
+
+Credential lookup rules:
+
+- by default, credentials are looked up by the dependency component key, for example `plugin:premium:premium-plugin`
+- if the manifest sets `source_config.credential_key`, that override is used instead
+
+Minimal credentials JSON example:
+
+```json
+{
+  "plugin:premium:premium-plugin": {
+    "license_key": "provider-specific-secret"
+  }
+}
+```
+
+If multiple premium dependencies share one account or license, set `--credential-key=...` when authoring the dependency and use that same string as the JSON lookup key.
+
+If a premium source cannot be implemented through a deterministic HTTP contract, do not fake support for it. Keep that plugin `local` or otherwise outside managed premium automation.
+
 ## Source Of Truth
 
 - `.wp-core-base/manifest.php` is the downstream runtime/dependency source of truth
 - `.wp-core-base/framework.php` is the installed framework lock and managed-file metadata
+- `.wp-core-base/premium-providers.php` registers downstream-owned premium source adapters
 
 ## Ownership Model
 

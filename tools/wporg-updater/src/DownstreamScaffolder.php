@@ -74,9 +74,14 @@ final class DownstreamScaffolder
                     '__WPORG_TOOL_ROOT__' => $toolRoot,
                 ],
             ],
+            [
+                'source' => $this->frameworkRoot . '/tools/wporg-updater/templates/premium-providers.php.tpl',
+                'target' => $this->repoRoot . '/.wp-core-base/premium-providers.php',
+                'replacements' => [],
+            ],
         ];
 
-        $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset);
+        $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset, $paths);
 
         foreach ($managedFiles as $relativePath => $rendered) {
             $writes[] = [
@@ -116,10 +121,15 @@ final class DownstreamScaffolder
         (new FrameworkWriter())->write($frameworkConfig);
         fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/.wp-core-base/framework.php'));
 
+        $config = Config::load($this->repoRoot);
+        (new AdminGovernanceExporter(new RuntimeInspector($config->runtime)))->refresh($config);
+        fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config)));
+
         fwrite(STDOUT, "\n");
         fwrite(STDOUT, "Next steps:\n");
         fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Review the local usage guidance at %s/.wp-core-base/USAGE.md and %s/AGENTS.md.\n", $this->repoRoot, $this->repoRoot));
+        fwrite(STDOUT, sprintf("[next] Register custom premium providers in %s/.wp-core-base/premium-providers.php if your project needs premium workflow sources.\n", $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $doctorCommand));
         fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 
@@ -140,8 +150,12 @@ final class DownstreamScaffolder
      * @param array{include_runtime_validation?:bool} $preset
      * @return array<string, string>
      */
-    public function renderFrameworkManagedFiles(string $toolPath, array $preset = []): array
+    public function renderFrameworkManagedFiles(string $toolPath, array $preset = [], ?array $paths = null): array
     {
+        if ($paths === null) {
+            $paths = Config::load($this->repoRoot)->paths;
+        }
+
         $syncCommand = $this->updaterCommand($toolPath, 'sync');
         $frameworkSyncCommand = $this->updaterCommand($toolPath, 'framework-sync --repo-root=.');
         $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
@@ -171,6 +185,10 @@ final class DownstreamScaffolder
             '.github/workflows/wp-core-base-self-update.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-framework-self-update-workflow.yml.tpl',
                 ['__WPORG_FRAMEWORK_SYNC_COMMAND__' => $frameworkSyncCommand]
+            ),
+            $paths['mu_plugins_root'] . '/' . FrameworkRuntimeFiles::GOVERNANCE_LOADER_BASENAME => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/admin-governance-loader.php.tpl',
+                ['__WP_CORE_BASE_GOVERNANCE_DATA_BASENAME__' => FrameworkRuntimeFiles::GOVERNANCE_DATA_BASENAME]
             ),
         ];
 
