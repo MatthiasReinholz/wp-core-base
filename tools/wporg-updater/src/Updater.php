@@ -33,13 +33,14 @@ final class Updater
     public function sync(): array
     {
         $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
+        $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
         $this->gitHubClient->ensureLabels($this->labelDefinitionsForRun());
         $openPrs = $this->indexManagedPullRequests($this->gitHubClient->listOpenPullRequests());
         $errors = [];
 
         foreach ($this->config->managedDependencies() as $dependency) {
             try {
-                $this->syncDependency($dependency, $openPrs[$dependency['component_key']] ?? [], $defaultBranch);
+                $this->syncDependency($dependency, $openPrs[$dependency['component_key']] ?? [], $defaultBranch, $baseRevision);
             } catch (\Throwable $throwable) {
                 $errors[] = sprintf('%s: %s', $dependency['component_key'], $throwable->getMessage());
                 fwrite(STDERR, sprintf("[warn] %s\n", end($errors)));
@@ -88,7 +89,7 @@ final class Updater
      * @param array<string, mixed> $dependency
      * @param list<array<string, mixed>> $existingPrs
      */
-    private function syncDependency(array $dependency, array $existingPrs, string $defaultBranch): void
+    private function syncDependency(array $dependency, array $existingPrs, string $defaultBranch, string $baseRevision): void
     {
         $dependencyState = $this->dependencyScanner->inspect($this->config->repoRoot, $dependency);
         $this->assertManagedDependencyChecksum($dependency);
@@ -98,7 +99,7 @@ final class Updater
         $plannedPrs = [];
 
         foreach ($existingPrs as $pr) {
-            $plannedPrs[] = $this->planExistingPullRequest($pr, $dependencyState['version'], $latestVersion, $latestReleaseAt);
+            $plannedPrs[] = $this->planExistingPullRequest($pr, $dependencyState['version'], $latestVersion, $latestReleaseAt, $baseRevision);
         }
 
         usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
@@ -119,6 +120,7 @@ final class Updater
                 plannedPr: $plannedPr,
                 blockedBy: $blockedBy,
                 defaultBranch: $defaultBranch,
+                baseRevision: $baseRevision,
             );
         }
 
@@ -142,6 +144,7 @@ final class Updater
                 scope: $scope,
                 blockedBy: array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $plannedPrs)),
                 defaultBranch: $defaultBranch,
+                baseRevision: $baseRevision,
             );
         }
     }
@@ -150,7 +153,7 @@ final class Updater
      * @param array<string, mixed> $pullRequest
      * @return array<string, mixed>
      */
-    private function planExistingPullRequest(array $pullRequest, string $baseVersion, string $latestVersion, string $latestReleaseAt): array
+    private function planExistingPullRequest(array $pullRequest, string $baseVersion, string $latestVersion, string $latestReleaseAt, string $baseRevision): array
     {
         $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
@@ -166,7 +169,7 @@ final class Updater
             throw new RuntimeException(sprintf('Managed pull request #%d has incomplete metadata.', $pullRequest['number']));
         }
 
-        $requiresCodeUpdate = false;
+        $requiresBranchRefresh = $this->branchRefreshRequired($metadata, $baseRevision);
 
         if (
             $this->releaseClassifier->samePatchLine($targetVersion, $latestVersion) &&
@@ -176,16 +179,16 @@ final class Updater
             $targetVersion = $latestVersion;
             $releaseAt = $latestReleaseAt;
             $scope = 'patch';
-            $requiresCodeUpdate = true;
+            $requiresBranchRefresh = true;
         }
 
-        $metadata['base_version'] = $metadata['base_version'] ?? $baseVersion;
+        $metadata['base_version'] = $baseVersion;
 
         $pullRequest['metadata'] = $metadata;
         $pullRequest['planned_target_version'] = $targetVersion;
         $pullRequest['planned_release_at'] = $releaseAt;
         $pullRequest['planned_scope'] = $scope;
-        $pullRequest['requires_code_update'] = $requiresCodeUpdate;
+        $pullRequest['requires_branch_refresh'] = $requiresBranchRefresh;
 
         return $pullRequest;
     }
@@ -204,6 +207,7 @@ final class Updater
         array $plannedPr,
         array $blockedBy,
         string $defaultBranch,
+        string $baseRevision,
     ): void {
         $metadata = $plannedPr['metadata'];
         $targetVersion = (string) $plannedPr['planned_target_version'];
@@ -217,13 +221,14 @@ final class Updater
 
         $releaseData = $this->releaseDataForVersion($dependency, $catalog, $targetVersion, $releaseAt);
 
-        if ((bool) $plannedPr['requires_code_update']) {
-            $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData);
+        if ((bool) $plannedPr['requires_branch_refresh']) {
+            $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData, true);
             $dependency = $updatedDependency;
             $this->gitRunner->commitAndPush(
                 $branch,
                 sprintf('Update %s to %s', $dependency['slug'], $targetVersion),
-                [$dependency['path'], $this->relativeManifestPath()]
+                [$dependency['path'], $this->relativeManifestPath()],
+                true
             );
         }
 
@@ -237,6 +242,9 @@ final class Updater
         $releaseData = $this->normalizedReleaseData($releaseData, $targetVersion);
         $labels = $this->deriveDependencyLabels($dependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
 
+        $metadata['base_branch'] = $defaultBranch;
+        $metadata['base_version'] = $dependencyState['version'];
+        $metadata['base_revision'] = $baseRevision;
         $metadata['target_version'] = $targetVersion;
         $metadata['release_at'] = $releaseAt;
         $metadata['scope'] = $scope;
@@ -281,6 +289,7 @@ final class Updater
         string $scope,
         array $blockedBy,
         string $defaultBranch,
+        string $baseRevision,
     ): void {
         $branch = $this->newBranchName($dependency['slug'], $dependency['kind'], $latestVersion);
         $releaseData = $this->normalizedReleaseData(
@@ -314,6 +323,7 @@ final class Updater
             'branch' => $branch,
             'base_branch' => $defaultBranch,
             'base_version' => $dependencyState['version'],
+            'base_revision' => $baseRevision,
             'target_version' => $latestVersion,
             'scope' => $scope,
             'release_at' => $latestReleaseAt,
@@ -350,8 +360,9 @@ final class Updater
         string $branch,
         array $dependency,
         array $releaseData,
+        bool $resetToBase = false,
     ): array {
-        $this->gitRunner->checkoutBranch($defaultBranch, $branch);
+        $this->gitRunner->checkoutBranch($defaultBranch, $branch, $resetToBase);
         $tempDir = sys_get_temp_dir() . '/wporg-update-' . bin2hex(random_bytes(6));
 
         if (! mkdir($tempDir, 0775, true) && ! is_dir($tempDir)) {
@@ -593,6 +604,22 @@ final class Updater
         $labels = LabelHelper::normalizeList($labels);
         sort($labels);
         return $labels;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function branchRefreshRequired(array $metadata, string $baseRevision): bool
+    {
+        if ($baseRevision === '') {
+            return false;
+        }
+
+        $recordedBaseRevision = $metadata['base_revision'] ?? null;
+
+        return ! is_string($recordedBaseRevision)
+            || $recordedBaseRevision === ''
+            || ! hash_equals($recordedBaseRevision, $baseRevision);
     }
 
     /**

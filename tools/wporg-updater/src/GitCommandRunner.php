@@ -14,11 +14,11 @@ final class GitCommandRunner
     ) {
     }
 
-    public function checkoutBranch(string $baseBranch, string $branch): void
+    public function checkoutBranch(string $baseBranch, string $branch, bool $resetToBase = false): void
     {
         $this->run(sprintf('git fetch origin %s', escapeshellarg($baseBranch)));
 
-        if ($this->remoteBranchExists($branch)) {
+        if (! $resetToBase && $this->remoteBranchExists($branch)) {
             $this->run(sprintf('git fetch origin %s', escapeshellarg($branch)));
             $this->run(sprintf('git checkout -B %1$s origin/%1$s', escapeshellarg($branch)));
             return;
@@ -27,7 +27,7 @@ final class GitCommandRunner
         $this->run(sprintf('git checkout -B %s origin/%s', escapeshellarg($branch), escapeshellarg($baseBranch)));
     }
 
-    public function commitAndPush(string $branch, string $message, array $paths): bool
+    public function commitAndPush(string $branch, string $message, array $paths, bool $force = false): bool
     {
         $pathArgs = implode(' ', array_map(static fn (string $path): string => escapeshellarg($path), $paths));
         $this->run(sprintf('git add --all -- %s', $pathArgs));
@@ -37,9 +37,16 @@ final class GitCommandRunner
         }
 
         $this->run(sprintf('git commit -m %s', escapeshellarg($message)));
-        $this->run(sprintf('git push -u origin %s', escapeshellarg($branch)));
+        $this->run(sprintf('git push %s-u origin %s', $force ? '--force ' : '', escapeshellarg($branch)));
 
         return true;
+    }
+
+    public function remoteRevision(string $branch): string
+    {
+        $this->run(sprintf('git fetch origin %s', escapeshellarg($branch)));
+
+        return trim($this->run(sprintf('git rev-parse origin/%s', escapeshellarg($branch))));
     }
 
     private function hasStagedChanges(): bool

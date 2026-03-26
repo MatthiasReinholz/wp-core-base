@@ -1106,6 +1106,20 @@ $assert(
     $normalizedFallback['notes_text'] === 'Release notes unavailable for version 6.3.0.',
     'Expected the updater to synthesize fallback notes text when a source omits release notes.'
 );
+$branchRefreshRequired = $updaterReflection->getMethod('branchRefreshRequired');
+$branchRefreshRequired->setAccessible(true);
+$assert(
+    $branchRefreshRequired->invoke($updaterWithoutConstructor, [], 'abc123') === true,
+    'Expected updater PR metadata without a recorded base revision to refresh once against the current base branch.'
+);
+$assert(
+    $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'abc123'], 'abc123') === false,
+    'Expected updater PR metadata with a matching base revision to avoid unnecessary branch refreshes.'
+);
+$assert(
+    $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'stale456'], 'abc123') === true,
+    'Expected updater PR metadata with a stale base revision to require branch refresh.'
+);
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);

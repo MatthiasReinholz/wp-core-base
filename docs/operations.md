@@ -56,6 +56,8 @@ Blocked PRs are intentional.
 
 The framework updates patch releases in place on the same line, but opens separate blocked PRs for later minor or major releases if an older PR is still unresolved.
 
+When one automation PR merges, the reconciliation workflow also refreshes the remaining open dependency PRs onto the new base branch state. That keeps manifest checksums and other baseline metadata current across sibling PRs.
+
 That queueing behavior depends on the blocker workflow.
 
 ## Runtime Validation In CI
