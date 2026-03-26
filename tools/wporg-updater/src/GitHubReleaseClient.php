@@ -22,14 +22,26 @@ final class GitHubReleaseClient implements GitHubReleaseSource
     public function fetchStableReleases(array $dependency): array
     {
         $repository = $this->repository($dependency);
+        $headers = $this->headers($dependency);
         $releases = [];
         $page = 1;
 
         do {
-            $chunk = $this->requestJson(
-                sprintf('/repos/%s/releases?per_page=100&page=%d', $this->repositoryPath($repository), $page),
-                $this->headers($dependency)
-            );
+            try {
+                $chunk = $this->requestJson(
+                    sprintf('/repos/%s/releases?per_page=100&page=%d', $this->repositoryPath($repository), $page),
+                    $headers
+                );
+            } catch (HttpStatusRuntimeException $exception) {
+                if (! isset($headers['Authorization']) && $exception->status() === 404) {
+                    throw new RuntimeException(sprintf(
+                        'GitHub releases for %s were not accessible without authentication. If the repository is private, set source_config.github_token_env. If it is public, verify source_config.github_repository.',
+                        $repository
+                    ), previous: $exception);
+                }
+
+                throw $exception;
+            }
 
             if (! array_is_list($chunk)) {
                 throw new RuntimeException(sprintf('GitHub releases payload for %s was not a list.', $repository));
@@ -243,7 +255,7 @@ final class GitHubReleaseClient implements GitHubReleaseSource
         );
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
-            throw new RuntimeException(sprintf(
+            throw new HttpStatusRuntimeException($response['status'], sprintf(
                 'GitHub source API GET %s failed with status %d: %s',
                 $path,
                 $response['status'],

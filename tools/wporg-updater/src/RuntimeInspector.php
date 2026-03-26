@@ -196,6 +196,8 @@ final class RuntimeInspector
                 throw new RuntimeException(sprintf('Failed to copy file to %s', $destination));
             }
 
+            $this->preservePermissions($source, $destination);
+
             return;
         }
 
@@ -237,6 +239,8 @@ final class RuntimeInspector
             if (! copy($item->getPathname(), $target)) {
                 throw new RuntimeException(sprintf('Failed to copy file to %s', $target));
             }
+
+            $this->preservePermissions($item->getPathname(), $target);
         }
     }
 
@@ -250,6 +254,19 @@ final class RuntimeInspector
         }
 
         $this->copyPath($source, $destination, $excludedPaths);
+    }
+
+    private function preservePermissions(string $source, string $destination): void
+    {
+        $sourcePermissions = @fileperms($source);
+
+        if ($sourcePermissions === false) {
+            throw new RuntimeException(sprintf('Failed to read permissions from %s', $source));
+        }
+
+        if (! @chmod($destination, $sourcePermissions & 0777)) {
+            throw new RuntimeException(sprintf('Failed to apply permissions to %s', $destination));
+        }
     }
 
     /**
