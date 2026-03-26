@@ -23,6 +23,7 @@ use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\GitHubReleaseManagedSource;
 use WpOrgPluginUpdater\GitHubReleaseSource;
+use WpOrgPluginUpdater\HttpStatusRuntimeException;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManagedDependencySource;
@@ -417,6 +418,8 @@ $assert($gitHubReleaseClient->repository($dependencyConfig) === 'example/example
 $gitHubLabels = $classifier->deriveLabels('source:github-release', 'minor', $gitHubReleaseClient->markdownToText((string) $gitHubRelease['body']), []);
 $assert(in_array('type:security-bugfix', $gitHubLabels, true), 'Expected GitHub release notes with fix language to set the bugfix label.');
 $assert(in_array('type:feature', $gitHubLabels, true), 'Expected GitHub release notes with add language to set the feature label.');
+$httpStatusException = new HttpStatusRuntimeException(404, 'Example 404.');
+$assert($httpStatusException->status() === 404, 'Expected HTTP status exceptions to retain the structured status code.');
 
 $frameworkConfig = FrameworkConfig::load($repoRoot);
 $currentFrameworkVersion = $frameworkConfig->version;
@@ -1055,6 +1058,19 @@ $scaffoldedFrameworkWorkflow = (string) file_get_contents($tempScaffoldRoot . '/
 $assert(str_contains($scaffoldedFrameworkWorkflow, 'framework-sync --repo-root=.'), 'Expected scaffolded self-update workflow to run framework-sync.');
 $assert(str_contains($scaffoldedFrameworkWorkflow, $checkoutActionSha), 'Expected scaffolded framework self-update workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($scaffoldedFrameworkWorkflow, $setupPhpActionSha), 'Expected scaffolded framework self-update workflow to pin setup-php by full commit SHA.');
+$premiumSourceDetailsWithoutNotes = [
+    'version' => '6.3.0',
+    'release_at' => gmdate(DATE_ATOM),
+    'download_url' => 'https://example.com/example-vendor.zip',
+    'source_reference' => 'https://example.com/example-vendor',
+    'source_details' => [
+        ['label' => 'Update contract', 'value' => '`premium` provider `example-vendor`'],
+    ],
+];
+$assert(
+    ! isset($premiumSourceDetailsWithoutNotes['notes_markup']) && ! isset($premiumSourceDetailsWithoutNotes['notes_text']),
+    'Expected the premium fixture without notes fields to model providers that do not return release notes.'
+);
 
 $migrationScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-migration-' . bin2hex(random_bytes(4));
 mkdir($migrationScaffoldRoot, 0777, true);
@@ -1076,6 +1092,20 @@ mkdir($compactScaffoldRoot, 0777, true);
 $assert(! file_exists($compactScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml'), 'Expected compact image-first scaffold profile to omit the standalone runtime-validation workflow.');
 $compactReconcileWorkflow = (string) file_get_contents($compactScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $assert(str_contains($compactReconcileWorkflow, "automation:framework-update"), 'Expected compact scaffold to keep merged automation PR reconciliation in the dedicated reconciliation workflow.');
+
+$updaterReflection = new ReflectionClass(\WpOrgPluginUpdater\Updater::class);
+$normalizedReleaseData = $updaterReflection->getMethod('normalizedReleaseData');
+$normalizedReleaseData->setAccessible(true);
+$updaterWithoutConstructor = $updaterReflection->newInstanceWithoutConstructor();
+$normalizedFallback = $normalizedReleaseData->invoke($updaterWithoutConstructor, $premiumSourceDetailsWithoutNotes, '6.3.0');
+$assert(
+    $normalizedFallback['notes_markup'] === '_Release notes unavailable for version 6.3.0._',
+    'Expected the updater to synthesize fallback notes markup when a source omits release notes.'
+);
+$assert(
+    $normalizedFallback['notes_text'] === 'Release notes unavailable for version 6.3.0.',
+    'Expected the updater to synthesize fallback notes text when a source omits release notes.'
+);
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);
@@ -1104,6 +1134,7 @@ $assert(
     'Expected skipped managed file checksum to remain pinned to the previous managed version.'
 );
 $assert(file_exists($tempScaffoldRoot . '/vendor/wp-core-base/.wp-core-base/framework.php'), 'Expected framework installer to replace the vendored framework snapshot.');
+$assert(is_executable($tempScaffoldRoot . '/vendor/wp-core-base/bin/wp-core-base'), 'Expected framework installer to preserve the executable wrapper bit.');
 
 $corePayload = json_decode((string) file_get_contents($fixtureDir . '/wp-core-version-check.json'), true, 512, JSON_THROW_ON_ERROR);
 $coreOffer = $coreClient->parseLatestStableOffer($corePayload);

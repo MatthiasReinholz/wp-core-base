@@ -42,7 +42,7 @@ final class Updater
                 $this->syncDependency($dependency, $openPrs[$dependency['component_key']] ?? [], $defaultBranch);
             } catch (\Throwable $throwable) {
                 $errors[] = sprintf('%s: %s', $dependency['component_key'], $throwable->getMessage());
-                fwrite(STDERR, sprintf("[error] %s\n", end($errors)));
+                fwrite(STDERR, sprintf("[warn] %s\n", end($errors)));
             }
         }
 
@@ -234,6 +234,7 @@ final class Updater
             metadata: $metadata,
         );
 
+        $releaseData = $this->normalizedReleaseData($releaseData, $targetVersion);
         $labels = $this->deriveDependencyLabels($dependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
 
         $metadata['target_version'] = $targetVersion;
@@ -282,7 +283,10 @@ final class Updater
         string $defaultBranch,
     ): void {
         $branch = $this->newBranchName($dependency['slug'], $dependency['kind'], $latestVersion);
-        $releaseData = $this->releaseDataForVersion($dependency, $catalog, $latestVersion, $latestReleaseAt);
+        $releaseData = $this->normalizedReleaseData(
+            $this->releaseDataForVersion($dependency, $catalog, $latestVersion, $latestReleaseAt),
+            $latestVersion
+        );
         $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData);
         $changed = $this->gitRunner->commitAndPush(
             $branch,
@@ -480,6 +484,40 @@ final class Updater
             supportTopics: $this->supportsForumSync($dependency) ? $supportTopics : [],
             metadata: $metadata,
         );
+    }
+
+    /**
+     * @param array<string, mixed> $releaseData
+     * @return array<string, mixed>
+     */
+    private function normalizedReleaseData(array $releaseData, string $targetVersion): array
+    {
+        $notesMarkup = trim((string) ($releaseData['notes_markup'] ?? ''));
+        $notesText = trim((string) ($releaseData['notes_text'] ?? ''));
+        $hadNotesMarkup = $notesMarkup !== '';
+
+        if ($notesMarkup === '') {
+            $notesMarkup = sprintf('_Release notes unavailable for version %s._', $targetVersion);
+        }
+
+        if ($notesText === '') {
+            if ($hadNotesMarkup) {
+                $notesText = trim(
+                    preg_replace('/\s+/', ' ', preg_replace('/[`*_>#-]+/', ' ', strip_tags($notesMarkup)) ?? '') ?? ''
+                );
+            } else {
+                $notesText = sprintf('Release notes unavailable for version %s.', $targetVersion);
+            }
+        }
+
+        if ($notesText === '') {
+            $notesText = sprintf('Release notes unavailable for version %s.', $targetVersion);
+        }
+
+        $releaseData['notes_markup'] = $notesMarkup;
+        $releaseData['notes_text'] = $notesText;
+
+        return $releaseData;
     }
 
     /**
