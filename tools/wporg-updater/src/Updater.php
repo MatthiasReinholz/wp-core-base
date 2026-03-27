@@ -24,6 +24,7 @@ final class Updater
         private readonly RuntimeInspector $runtimeInspector,
         private readonly ManifestWriter $manifestWriter,
         private readonly HttpClient $httpClient,
+        private readonly ?AdminGovernanceExporter $adminGovernanceExporter = null,
     ) {
     }
 
@@ -100,6 +101,19 @@ final class Updater
 
         foreach ($existingPrs as $pr) {
             $plannedPrs[] = $this->planExistingPullRequest($pr, $dependencyState['version'], $latestVersion, $latestReleaseAt, $baseRevision);
+        }
+
+        [$plannedPrs, $duplicatePrs] = $this->partitionPullRequestsByTargetVersion($plannedPrs);
+
+        foreach ($duplicatePrs as $duplicatePr) {
+            $this->closeSupersededPullRequest(
+                (int) $duplicatePr['number'],
+                sprintf(
+                    'Another automation PR already covers `%s` at `%s`. This duplicate PR is being closed to keep one live PR per dependency/version pair.',
+                    $dependency['component_key'],
+                    (string) $duplicatePr['planned_target_version']
+                )
+            );
         }
 
         usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
@@ -219,17 +233,41 @@ final class Updater
             throw new RuntimeException(sprintf('Managed pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
+        if ($this->pullRequestAlreadySatisfied($dependencyState['version'], $targetVersion)) {
+            $this->closeSupersededPullRequest(
+                (int) $plannedPr['number'],
+                sprintf(
+                    'Base branch already contains `%s` at `%s`. This stale automation PR is no longer applicable and has been closed.',
+                    $dependency['component_key'],
+                    $targetVersion
+                )
+            );
+            return;
+        }
+
         $releaseData = $this->releaseDataForVersion($dependency, $catalog, $targetVersion, $releaseAt);
 
         if ((bool) $plannedPr['requires_branch_refresh']) {
             $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData, true);
             $dependency = $updatedDependency;
-            $this->gitRunner->commitAndPush(
+            $changed = $this->gitRunner->commitAndPush(
                 $branch,
                 sprintf('Update %s to %s', $dependency['slug'], $targetVersion),
-                [$dependency['path'], $this->relativeManifestPath()],
+                $this->commitPathsForDependency($dependency),
                 true
             );
+
+            if (! $changed) {
+                $this->closeSupersededPullRequest(
+                    (int) $plannedPr['number'],
+                    sprintf(
+                        'Refreshing this automation PR from the latest base branch produced no remaining file changes for `%s` at `%s`. The PR has been closed as a no-op.',
+                        $dependency['component_key'],
+                        $targetVersion
+                    )
+                );
+                return;
+            }
         }
 
         $supportTopics = $this->supportTopicsForExistingPullRequest(
@@ -291,6 +329,18 @@ final class Updater
         string $defaultBranch,
         string $baseRevision,
     ): void {
+        $existingPullRequest = $this->findOpenPullRequestForTarget($dependency['component_key'], $latestVersion);
+
+        if ($existingPullRequest !== null) {
+            fwrite(STDOUT, sprintf(
+                "Skipping PR creation for %s because PR #%d already covers %s.\n",
+                $dependency['slug'],
+                (int) $existingPullRequest['number'],
+                $latestVersion
+            ));
+            return;
+        }
+
         $branch = $this->newBranchName($dependency['slug'], $dependency['kind'], $latestVersion);
         $releaseData = $this->normalizedReleaseData(
             $this->releaseDataForVersion($dependency, $catalog, $latestVersion, $latestReleaseAt),
@@ -300,7 +350,7 @@ final class Updater
         $changed = $this->gitRunner->commitAndPush(
             $branch,
             sprintf('Update %s to %s', $dependency['slug'], $latestVersion),
-            [$dependency['path'], $this->relativeManifestPath()]
+            $this->commitPathsForDependency($dependency)
         );
 
         if (! $changed) {
@@ -420,6 +470,7 @@ final class Updater
                 (string) $releaseData['version'],
                 $checksum
             );
+            $this->refreshAdminGovernance($this->config);
 
             return $this->config->dependencyByKey($dependency['component_key']);
         } finally {
@@ -622,6 +673,11 @@ final class Updater
             || ! hash_equals($recordedBaseRevision, $baseRevision);
     }
 
+    private function pullRequestAlreadySatisfied(string $baseVersion, string $targetVersion): bool
+    {
+        return version_compare($targetVersion, $baseVersion, '<=');
+    }
+
     /**
      * @param list<array<string, mixed>> $pullRequests
      * @return array<string, list<array<string, mixed>>>
@@ -648,6 +704,39 @@ final class Updater
         }
 
         return $indexed;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $plannedPrs
+     * @return array{0:list<array<string, mixed>>,1:list<array<string, mixed>>}
+     */
+    private function partitionPullRequestsByTargetVersion(array $plannedPrs): array
+    {
+        usort(
+            $plannedPrs,
+            static fn (array $left, array $right): int => ((int) $left['number'] <=> (int) $right['number'])
+        );
+
+        $canonicalByTarget = [];
+        $duplicates = [];
+
+        foreach ($plannedPrs as $plannedPr) {
+            $targetVersion = (string) ($plannedPr['planned_target_version'] ?? '');
+
+            if ($targetVersion === '') {
+                $duplicates[] = $plannedPr;
+                continue;
+            }
+
+            if (! isset($canonicalByTarget[$targetVersion])) {
+                $canonicalByTarget[$targetVersion] = $plannedPr;
+                continue;
+            }
+
+            $duplicates[] = $plannedPr;
+        }
+
+        return [array_values($canonicalByTarget), $duplicates];
     }
 
     /**
@@ -747,6 +836,62 @@ final class Updater
     private function relativeManifestPath(): string
     {
         return ltrim(str_replace($this->config->repoRoot, '', $this->config->manifestPath), '/');
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @return list<string>
+     */
+    private function commitPathsForDependency(array $dependency): array
+    {
+        $paths = [$dependency['path'], $this->relativeManifestPath()];
+
+        if ($this->adminGovernanceExporter !== null) {
+            $paths[] = FrameworkRuntimeFiles::governanceDataPath($this->config);
+        }
+
+        return array_values(array_unique($paths));
+    }
+
+    private function refreshAdminGovernance(Config $config): void
+    {
+        if ($this->adminGovernanceExporter === null) {
+            return;
+        }
+
+        $this->adminGovernanceExporter->refresh($config);
+    }
+
+    private function closeSupersededPullRequest(int $number, string $reason): void
+    {
+        fwrite(STDOUT, sprintf("Closing PR #%d: %s\n", $number, $reason));
+        $this->gitHubClient->closePullRequest($number, $reason);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findOpenPullRequestForTarget(string $componentKey, string $targetVersion): ?array
+    {
+        foreach ($this->gitHubClient->listOpenPullRequests() as $pullRequest) {
+            $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
+
+            if ($metadata === null) {
+                continue;
+            }
+
+            if (($metadata['component_key'] ?? null) !== $componentKey) {
+                continue;
+            }
+
+            if (($metadata['target_version'] ?? null) !== $targetVersion) {
+                continue;
+            }
+
+            return $pullRequest;
+        }
+
+        return null;
     }
 
     private function supportsForumSync(array $dependency): bool

@@ -1120,6 +1120,34 @@ $assert(
     $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'stale456'], 'abc123') === true,
     'Expected updater PR metadata with a stale base revision to require branch refresh.'
 );
+$partitionPullRequestsByTargetVersion = $updaterReflection->getMethod('partitionPullRequestsByTargetVersion');
+$partitionPullRequestsByTargetVersion->setAccessible(true);
+[$canonicalPrs, $duplicatePrs] = $partitionPullRequestsByTargetVersion->invoke($updaterWithoutConstructor, [
+    ['number' => 38, 'planned_target_version' => '0.1.0'],
+    ['number' => 37, 'planned_target_version' => '0.1.0'],
+    ['number' => 39, 'planned_target_version' => '0.2.0'],
+]);
+$assert(count($canonicalPrs) === 2, 'Expected updater duplicate partitioning to keep one canonical PR per target version.');
+$assert((int) $canonicalPrs[0]['number'] === 37, 'Expected updater duplicate partitioning to keep the oldest PR for a duplicated target version.');
+$assert(count($duplicatePrs) === 1 && (int) $duplicatePrs[0]['number'] === 38, 'Expected updater duplicate partitioning to mark later PRs for the same target version as duplicates.');
+$pullRequestAlreadySatisfied = $updaterReflection->getMethod('pullRequestAlreadySatisfied');
+$pullRequestAlreadySatisfied->setAccessible(true);
+$assert(
+    $pullRequestAlreadySatisfied->invoke($updaterWithoutConstructor, '0.1.0', '0.1.0') === true,
+    'Expected updater to treat matching base and target versions as already satisfied.'
+);
+$assert(
+    $pullRequestAlreadySatisfied->invoke($updaterWithoutConstructor, '0.1.0', '0.0.9') === true,
+    'Expected updater to treat older target versions as stale once base is newer.'
+);
+$assert(
+    $pullRequestAlreadySatisfied->invoke($updaterWithoutConstructor, '0.1.0', '0.2.0') === false,
+    'Expected updater to keep PRs open when the target version is still ahead of base.'
+);
+$scaffoldedUpdatesWorkflow = (string) file_get_contents($imageFirstScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+$scaffoldedReconcileWorkflow = (string) file_get_contents($imageFirstScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
+$assert(str_contains($scaffoldedUpdatesWorkflow, 'group: wp-core-base-dependency-sync'), 'Expected scaffolded updates workflow to use the shared dependency-sync concurrency group.');
+$assert(str_contains($scaffoldedReconcileWorkflow, 'group: wp-core-base-dependency-sync'), 'Expected scaffolded reconcile workflow to share the dependency-sync concurrency group.');
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);

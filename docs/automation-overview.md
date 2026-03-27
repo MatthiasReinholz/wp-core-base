@@ -111,7 +111,9 @@ Rules:
 
 - same release line + newer patch => update existing PR in place
 - newer minor or major while older PR still open => open a later blocked PR
+- one dependency/version pair => one live PR; duplicate PRs for the same target are closed as superseded
 - when the base branch changes after another automation PR merges, open dependency PRs are rebuilt onto the new base branch state so their manifest/checksum baseline stays current
+- if the target version is already present on the base branch after reconciliation, the stale PR is closed instead of being kept as a no-op
 - support topics refresh incrementally for WordPress.org plugins
 
 Framework PRs use the same queueing behavior, but operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.

@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: wp-core-base-updates
+  group: wp-core-base-dependency-sync
   cancel-in-progress: false
 
 jobs:
