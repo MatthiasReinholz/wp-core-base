@@ -26,6 +26,8 @@ Usage:
   {$commandPrefix} add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
   {$commandPrefix} adopt-dependency --kind=plugin --slug=woocommerce --source=wordpress.org --preserve-version
   {$phpCommandPrefix} sync
+  {$phpCommandPrefix} render-sync-report --report-json=.wp-core-base/build/sync-report.json [--summary-path=/tmp/summary.md]
+  {$phpCommandPrefix} sync-report-issue --report-json=.wp-core-base/build/sync-report.json
   {$phpCommandPrefix} doctor [--repo-root=/path] [--github]
   {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
   {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
@@ -218,14 +220,19 @@ Common flags:
   --repo-root=PATH
   WPORG_REPO_ROOT=PATH
   WPORG_UPDATE_DRY_RUN=1
+  --report-json=PATH
+  --fail-on-source-errors
 
 Notes:
   - sync acts only on manifest-declared managed dependencies.
   - local dependencies are never overwritten by sync.
   - dependency-source failures are reported per dependency and do not stop healthy updates from proceeding.
+  - --report-json writes a machine-readable result summary for workflow follow-up steps.
+  - --fail-on-source-errors exits non-zero after processing healthy updates when dependency-source warnings were recorded.
 
 Examples:
   {$phpCommandPrefix} sync
+  {$phpCommandPrefix} sync --report-json=.wp-core-base/build/sync-report.json --fail-on-source-errors
   WPORG_REPO_ROOT=. {$phpCommandPrefix} sync
 
 TEXT;

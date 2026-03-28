@@ -117,6 +117,100 @@ final class GitHubClient
     }
 
     /**
+     * @return list<array<string, mixed>>
+     */
+    public function listOpenIssues(?string $label = null): array
+    {
+        $page = 1;
+        $issues = [];
+
+        do {
+            $query = sprintf('/repos/%s/issues?state=open&per_page=100&page=%d', $this->repository, $page);
+
+            if (is_string($label) && $label !== '') {
+                $query .= '&labels=' . rawurlencode($label);
+            }
+
+            $chunk = $this->requestJson('GET', $query);
+
+            if (! array_is_list($chunk)) {
+                throw new RuntimeException('GitHub returned a non-list payload for issue listing.');
+            }
+
+            foreach ($chunk as $issue) {
+                if (! is_array($issue) || isset($issue['pull_request'])) {
+                    continue;
+                }
+
+                $issues[] = $issue;
+            }
+
+            $page++;
+        } while (count($chunk) === 100);
+
+        return $issues;
+    }
+
+    /**
+     * @param list<string> $labels
+     * @return array<string, mixed>
+     */
+    public function createIssue(string $title, string $body, array $labels = []): array
+    {
+        $labels = LabelHelper::normalizeList($labels);
+
+        if ($this->dryRun) {
+            fwrite(STDOUT, sprintf("[dry-run] Create issue (%s)\n", $title));
+            return ['number' => 0, 'title' => $title];
+        }
+
+        return $this->requestJson('POST', '/repos/' . $this->repository . '/issues', [
+            'title' => $title,
+            'body' => $body,
+            'labels' => $labels,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function updateIssue(int $number, string $title, string $body): array
+    {
+        if ($this->dryRun) {
+            fwrite(STDOUT, sprintf("[dry-run] Update issue #%d (%s)\n", $number, $title));
+            return ['number' => $number];
+        }
+
+        return $this->requestJson('PATCH', sprintf('/repos/%s/issues/%d', $this->repository, $number), [
+            'title' => $title,
+            'body' => $body,
+        ]);
+    }
+
+    public function closeIssue(int $number, ?string $comment = null): void
+    {
+        if ($this->dryRun) {
+            fwrite(STDOUT, sprintf("[dry-run] Close issue #%d\n", $number));
+
+            if (is_string($comment) && $comment !== '') {
+                fwrite(STDOUT, sprintf("[dry-run] Comment on issue #%d: %s\n", $number, $comment));
+            }
+
+            return;
+        }
+
+        if (is_string($comment) && $comment !== '') {
+            $this->requestJson('POST', sprintf('/repos/%s/issues/%d/comments', $this->repository, $number), [
+                'body' => $comment,
+            ]);
+        }
+
+        $this->requestJson('PATCH', sprintf('/repos/%s/issues/%d', $this->repository, $number), [
+            'state' => 'closed',
+        ]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function createPullRequest(string $title, string $head, string $base, string $body, bool $draft): array

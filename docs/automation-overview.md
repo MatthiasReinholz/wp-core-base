@@ -53,6 +53,14 @@ Managed dependencies are explicit. Folder presence alone never makes something u
 
 Dependency-source failures are isolated per managed dependency. If one plugin or theme source fails, `sync` still continues processing the remaining managed dependencies and reports the failed sources as warnings at the end of the run.
 
+The recommended workflow pattern is:
+
+- run `sync --report-json=... --fail-on-source-errors`
+- keep healthy updates and PR refreshes from that same run
+- publish the sync report into the GitHub Actions job summary
+- open or update one deduplicated issue for ongoing source failures
+- close that issue automatically once a later sync run is clean
+
 The scaffolded automation now separates:
 
 - scheduled or manual update runs
