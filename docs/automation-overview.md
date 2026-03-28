@@ -118,6 +118,11 @@ Rules:
 
 Framework PRs use the same queueing behavior, but operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.
 
+Core and framework automation now follow the same stale/no-op rules as dependency PRs:
+
+- duplicate PRs for the same target version are collapsed to one canonical PR
+- if reconciliation discovers that the base branch already contains the target version, the stale PR is closed automatically
+
 ## Scaffolding
 
 `scaffold-downstream` renders:

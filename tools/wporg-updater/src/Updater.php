@@ -117,17 +117,18 @@ final class Updater
         }
 
         usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
+        $activePlannedPrs = [];
 
-        foreach ($plannedPrs as $index => $plannedPr) {
+        foreach ($plannedPrs as $plannedPr) {
             $blockedBy = array_values(array_unique(array_merge(
                 $this->unresolvedBlockedBy((array) (($plannedPr['metadata']['blocked_by'] ?? []))),
                 array_values(array_map(
                     static fn (array $previous): int => (int) $previous['number'],
-                    array_slice($plannedPrs, 0, $index)
+                    $activePlannedPrs
                 ))
             )));
 
-            $this->refreshPullRequest(
+            if ($this->refreshPullRequest(
                 dependency: $dependency,
                 dependencyState: $dependencyState,
                 catalog: $catalog,
@@ -135,12 +136,14 @@ final class Updater
                 blockedBy: $blockedBy,
                 defaultBranch: $defaultBranch,
                 baseRevision: $baseRevision,
-            );
+            )) {
+                $activePlannedPrs[] = $plannedPr;
+            }
         }
 
         $highestCoveredVersion = $dependencyState['version'];
 
-        foreach ($plannedPrs as $plannedPr) {
+        foreach ($activePlannedPrs as $plannedPr) {
             if (version_compare($plannedPr['planned_target_version'], $highestCoveredVersion, '>')) {
                 $highestCoveredVersion = $plannedPr['planned_target_version'];
             }
@@ -156,7 +159,7 @@ final class Updater
                 latestVersion: $latestVersion,
                 latestReleaseAt: $latestReleaseAt,
                 scope: $scope,
-                blockedBy: array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $plannedPrs)),
+                blockedBy: array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
                 defaultBranch: $defaultBranch,
                 baseRevision: $baseRevision,
             );
@@ -222,7 +225,7 @@ final class Updater
         array $blockedBy,
         string $defaultBranch,
         string $baseRevision,
-    ): void {
+    ): bool {
         $metadata = $plannedPr['metadata'];
         $targetVersion = (string) $plannedPr['planned_target_version'];
         $releaseAt = (string) $plannedPr['planned_release_at'];
@@ -242,7 +245,7 @@ final class Updater
                     $targetVersion
                 )
             );
-            return;
+            return false;
         }
 
         $releaseData = $this->releaseDataForVersion($dependency, $catalog, $targetVersion, $releaseAt);
@@ -266,7 +269,7 @@ final class Updater
                         $targetVersion
                     )
                 );
-                return;
+                return false;
             }
         }
 
@@ -310,6 +313,7 @@ final class Updater
         $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
         $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
         $this->syncDraftState($plannedPr, $blockedBy);
+        return true;
     }
 
     /**

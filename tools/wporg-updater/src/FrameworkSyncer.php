@@ -62,20 +62,35 @@ final class FrameworkSyncer
             $plannedPrs[] = $this->planExistingPullRequest($pr, $this->framework->version, (string) $latestRelease['version'], (string) $latestRelease['release_at']);
         }
 
-        usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
+        [$plannedPrs, $duplicatePrs] = $this->partitionPullRequestsByTargetVersion($plannedPrs);
 
-        foreach ($plannedPrs as $index => $plannedPr) {
+        foreach ($duplicatePrs as $duplicatePr) {
+            $this->closeSupersededPullRequest(
+                (int) $duplicatePr['number'],
+                sprintf(
+                    'Another automation PR already covers `wp-core-base` at `%s`. This duplicate PR is being closed to keep one live PR per target version.',
+                    (string) $duplicatePr['planned_target_version']
+                )
+            );
+        }
+
+        usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
+        $activePlannedPrs = [];
+
+        foreach ($plannedPrs as $plannedPr) {
             $blockedBy = array_values(array_unique(array_merge(
                 $this->unresolvedBlockedBy((array) (($plannedPr['metadata']['blocked_by'] ?? []))),
-                array_values(array_map(static fn (array $previous): int => (int) $previous['number'], array_slice($plannedPrs, 0, $index)))
+                array_values(array_map(static fn (array $previous): int => (int) $previous['number'], $activePlannedPrs))
             )));
 
-            $this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch);
+            if ($this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch)) {
+                $activePlannedPrs[] = $plannedPr;
+            }
         }
 
         $highestCoveredVersion = $this->framework->version;
 
-        foreach ($plannedPrs as $plannedPr) {
+        foreach ($activePlannedPrs as $plannedPr) {
             if (version_compare($plannedPr['planned_target_version'], $highestCoveredVersion, '>')) {
                 $highestCoveredVersion = $plannedPr['planned_target_version'];
             }
@@ -87,7 +102,7 @@ final class FrameworkSyncer
             $this->createPullRequestForLatest(
                 $latestRelease,
                 $scope,
-                array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $plannedPrs)),
+                array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
                 $defaultBranch
             );
         }
@@ -141,7 +156,7 @@ final class FrameworkSyncer
      * @param array<string, mixed> $latestRelease
      * @param list<int> $blockedBy
      */
-    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch): void
+    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch): bool
     {
         $metadata = $plannedPr['metadata'];
         $targetVersion = (string) $plannedPr['planned_target_version'];
@@ -153,6 +168,17 @@ final class FrameworkSyncer
             throw new RuntimeException(sprintf('Managed framework pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
+        if ($this->pullRequestAlreadySatisfied($this->framework->version, $targetVersion)) {
+            $this->closeSupersededPullRequest(
+                (int) $plannedPr['number'],
+                sprintf(
+                    'Base branch already contains `wp-core-base` `%s`. This stale automation PR is no longer applicable and has been closed.',
+                    $targetVersion
+                )
+            );
+            return false;
+        }
+
         $releaseData = $this->findReleaseDataForVersion($targetVersion);
         $skippedFiles = (array) ($metadata['skipped_managed_files'] ?? []);
 
@@ -160,11 +186,22 @@ final class FrameworkSyncer
             $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData);
             $this->framework = FrameworkConfig::load($this->repoRoot);
             $skippedFiles = $result['skipped_files'];
-            $this->gitRunner->commitAndPush(
+            $changed = $this->gitRunner->commitAndPush(
                 $branch,
                 sprintf('Update wp-core-base from %s to %s', (string) $metadata['base_version'], $targetVersion),
                 $result['changed_paths']
             );
+
+            if (! $changed) {
+                $this->closeSupersededPullRequest(
+                    (int) $plannedPr['number'],
+                    sprintf(
+                        'Refreshing this `wp-core-base` PR from the latest base branch produced no remaining file changes for `%s`. The PR has been closed as a no-op.',
+                        $targetVersion
+                    )
+                );
+                return false;
+            }
         }
 
         $labels = $this->deriveFrameworkLabels($scope, $blockedBy);
@@ -199,6 +236,7 @@ final class FrameworkSyncer
         $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
         $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
         $this->syncDraftState($plannedPr, $blockedBy);
+        return true;
     }
 
     /**
@@ -207,6 +245,17 @@ final class FrameworkSyncer
      */
     private function createPullRequestForLatest(array $latestRelease, string $scope, array $blockedBy, string $defaultBranch): void
     {
+        $existingPullRequest = $this->findOpenPullRequestForTarget((string) $latestRelease['version']);
+
+        if ($existingPullRequest !== null) {
+            fwrite(STDOUT, sprintf(
+                "Skipping framework PR creation because PR #%d already covers %s.\n",
+                (int) $existingPullRequest['number'],
+                (string) $latestRelease['version']
+            ));
+            return;
+        }
+
         $branch = $this->newBranchName((string) $latestRelease['version']);
         $baseFramework = $this->framework;
         $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $latestRelease);
@@ -261,6 +310,11 @@ final class FrameworkSyncer
 
         $pullRequest = $this->gitHubClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
         $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
+    }
+
+    private function pullRequestAlreadySatisfied(string $baseVersion, string $targetVersion): bool
+    {
+        return version_compare($targetVersion, $baseVersion, '<=');
     }
 
     /**
@@ -451,6 +505,39 @@ final class FrameworkSyncer
         return $indexed;
     }
 
+    /**
+     * @param list<array<string, mixed>> $plannedPrs
+     * @return array{0:list<array<string, mixed>>,1:list<array<string, mixed>>}
+     */
+    private function partitionPullRequestsByTargetVersion(array $plannedPrs): array
+    {
+        usort(
+            $plannedPrs,
+            static fn (array $left, array $right): int => ((int) $left['number'] <=> (int) $right['number'])
+        );
+
+        $canonicalByTarget = [];
+        $duplicates = [];
+
+        foreach ($plannedPrs as $plannedPr) {
+            $targetVersion = (string) ($plannedPr['planned_target_version'] ?? '');
+
+            if ($targetVersion === '') {
+                $duplicates[] = $plannedPr;
+                continue;
+            }
+
+            if (! isset($canonicalByTarget[$targetVersion])) {
+                $canonicalByTarget[$targetVersion] = $plannedPr;
+                continue;
+            }
+
+            $duplicates[] = $plannedPr;
+        }
+
+        return [array_values($canonicalByTarget), $duplicates];
+    }
+
     private function titleForPullRequest(string $baseVersion, string $targetVersion): string
     {
         return sprintf('Update wp-core-base from %s to %s', $baseVersion, $targetVersion);
@@ -460,6 +547,28 @@ final class FrameworkSyncer
     {
         $fragment = preg_replace('/[^a-z0-9]+/i', '-', strtolower('framework-' . $version . '-' . gmdate('YmdHis')));
         return 'codex/' . trim((string) $fragment, '-');
+    }
+
+    private function closeSupersededPullRequest(int $number, string $reason): void
+    {
+        fwrite(STDOUT, sprintf("Closing PR #%d: %s\n", $number, $reason));
+        $this->gitHubClient->closePullRequest($number, $reason);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findOpenPullRequestForTarget(string $targetVersion): ?array
+    {
+        foreach ($this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests()) as $pullRequest) {
+            $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
+
+            if (($metadata['target_version'] ?? null) === $targetVersion) {
+                return $pullRequest;
+            }
+        }
+
+        return null;
     }
 
     /**

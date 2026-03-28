@@ -60,6 +60,8 @@ When one automation PR merges, the reconciliation workflow also refreshes the re
 
 The dependency updater also keeps one live PR per dependency/version pair. If duplicate PRs exist for the same target version, the updater keeps one canonical PR and closes the others as superseded. If a previously open PR is already satisfied on the base branch, it is closed automatically as stale/no-op.
 
+WordPress core and framework self-update PRs follow the same rule: one live PR per target version, with stale/no-op PRs closed during reconciliation instead of left open.
+
 That queueing behavior depends on the blocker workflow.
 
 ## Runtime Validation In CI
