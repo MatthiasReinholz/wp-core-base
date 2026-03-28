@@ -37,29 +37,44 @@ final class CoreUpdater
             $plannedPrs[] = $this->planExistingPullRequest($pr, $current['version'], (string) $release['version'], (string) $release['release_at']);
         }
 
-        usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
+        [$plannedPrs, $duplicatePrs] = $this->partitionPullRequestsByTargetVersion($plannedPrs);
 
-        foreach ($plannedPrs as $index => $plannedPr) {
+        foreach ($duplicatePrs as $duplicatePr) {
+            $this->closeSupersededPullRequest(
+                (int) $duplicatePr['number'],
+                sprintf(
+                    'Another automation PR already covers WordPress core at `%s`. This duplicate PR is being closed to keep one live PR per target version.',
+                    (string) $duplicatePr['planned_target_version']
+                )
+            );
+        }
+
+        usort($plannedPrs, fn (array $left, array $right): int => version_compare($left['planned_target_version'], $right['planned_target_version']));
+        $activePlannedPrs = [];
+
+        foreach ($plannedPrs as $plannedPr) {
             $blockedBy = array_values(array_unique(array_merge(
                 $this->unresolvedBlockedBy((array) (($plannedPr['metadata']['blocked_by'] ?? []))),
                 array_values(array_map(
                     static fn (array $previous): int => (int) $previous['number'],
-                    array_slice($plannedPrs, 0, $index)
+                    $activePlannedPrs
                 ))
             )));
 
-            $this->refreshPullRequest(
+            if ($this->refreshPullRequest(
                 currentVersion: $current['version'],
                 release: $release,
                 plannedPr: $plannedPr,
                 blockedBy: $blockedBy,
                 defaultBranch: $defaultBranch,
-            );
+            )) {
+                $activePlannedPrs[] = $plannedPr;
+            }
         }
 
         $highestCoveredVersion = $current['version'];
 
-        foreach ($plannedPrs as $plannedPr) {
+        foreach ($activePlannedPrs as $plannedPr) {
             if (version_compare($plannedPr['planned_target_version'], $highestCoveredVersion, '>')) {
                 $highestCoveredVersion = $plannedPr['planned_target_version'];
             }
@@ -71,7 +86,7 @@ final class CoreUpdater
                 currentVersion: $current['version'],
                 release: $release,
                 scope: $scope,
-                blockedBy: array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $plannedPrs)),
+                blockedBy: array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
                 defaultBranch: $defaultBranch,
             );
         }
@@ -146,7 +161,7 @@ final class CoreUpdater
         array $plannedPr,
         array $blockedBy,
         string $defaultBranch,
-    ): void {
+    ): bool {
         $metadata = $plannedPr['metadata'];
         $targetVersion = (string) $plannedPr['planned_target_version'];
         $releaseAt = (string) $plannedPr['planned_release_at'];
@@ -157,9 +172,31 @@ final class CoreUpdater
             throw new RuntimeException(sprintf('Managed core pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
+        if ($this->pullRequestAlreadySatisfied($currentVersion, $targetVersion)) {
+            $this->closeSupersededPullRequest(
+                (int) $plannedPr['number'],
+                sprintf(
+                    'Base branch already contains WordPress core `%s`. This stale automation PR is no longer applicable and has been closed.',
+                    $targetVersion
+                )
+            );
+            return false;
+        }
+
         if ((bool) $plannedPr['requires_code_update']) {
             $paths = $this->checkoutAndApplyCoreVersion($defaultBranch, $branch, (string) $release['download_url']);
-            $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
+            $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
+
+            if (! $changed) {
+                $this->closeSupersededPullRequest(
+                    (int) $plannedPr['number'],
+                    sprintf(
+                        'Refreshing this WordPress core PR from the latest base branch produced no remaining file changes for `%s`. The PR has been closed as a no-op.',
+                        $targetVersion
+                    )
+                );
+                return false;
+            }
         }
 
         $releaseForTarget = $this->coreClient->releaseForVersion($targetVersion, $release);
@@ -197,6 +234,7 @@ final class CoreUpdater
         $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $this->titleForPullRequest((string) $metadata['base_version'], $targetVersion), $body);
         $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
         $this->syncDraftState($plannedPr, $blockedBy);
+        return true;
     }
 
     /**
@@ -210,6 +248,17 @@ final class CoreUpdater
         array $blockedBy,
         string $defaultBranch,
     ): void {
+        $existingPullRequest = $this->findOpenPullRequestForTarget((string) $release['version']);
+
+        if ($existingPullRequest !== null) {
+            fwrite(STDOUT, sprintf(
+                "Skipping WordPress core PR creation because PR #%d already covers %s.\n",
+                (int) $existingPullRequest['number'],
+                (string) $release['version']
+            ));
+            return;
+        }
+
         $branch = $this->newBranchName((string) $release['version']);
         $paths = $this->checkoutAndApplyCoreVersion($defaultBranch, $branch, (string) $release['download_url']);
         $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $release['version']), $paths);
@@ -264,6 +313,66 @@ final class CoreUpdater
         );
 
         $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
+    }
+
+    private function pullRequestAlreadySatisfied(string $baseVersion, string $targetVersion): bool
+    {
+        return version_compare($targetVersion, $baseVersion, '<=');
+    }
+
+    /**
+     * @param list<array<string, mixed>> $plannedPrs
+     * @return array{0:list<array<string, mixed>>,1:list<array<string, mixed>>}
+     */
+    private function partitionPullRequestsByTargetVersion(array $plannedPrs): array
+    {
+        usort(
+            $plannedPrs,
+            static fn (array $left, array $right): int => ((int) $left['number'] <=> (int) $right['number'])
+        );
+
+        $canonicalByTarget = [];
+        $duplicates = [];
+
+        foreach ($plannedPrs as $plannedPr) {
+            $targetVersion = (string) ($plannedPr['planned_target_version'] ?? '');
+
+            if ($targetVersion === '') {
+                $duplicates[] = $plannedPr;
+                continue;
+            }
+
+            if (! isset($canonicalByTarget[$targetVersion])) {
+                $canonicalByTarget[$targetVersion] = $plannedPr;
+                continue;
+            }
+
+            $duplicates[] = $plannedPr;
+        }
+
+        return [array_values($canonicalByTarget), $duplicates];
+    }
+
+    private function closeSupersededPullRequest(int $number, string $reason): void
+    {
+        fwrite(STDOUT, sprintf("Closing PR #%d: %s\n", $number, $reason));
+        $this->gitHubClient->closePullRequest($number, $reason);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function findOpenPullRequestForTarget(string $targetVersion): ?array
+    {
+        foreach ($this->existingCorePrs() as $pullRequest) {
+            $metadata = $pullRequest['metadata'] ?? [];
+
+            if (($metadata['target_version'] ?? null) === $targetVersion) {
+                return $pullRequest;
+            }
+        }
+
+        return null;
     }
 
     /**

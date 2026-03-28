@@ -1120,6 +1120,78 @@ $assert(
     $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'stale456'], 'abc123') === true,
     'Expected updater PR metadata with a stale base revision to require branch refresh.'
 );
+$partitionPullRequestsByTargetVersion = $updaterReflection->getMethod('partitionPullRequestsByTargetVersion');
+$partitionPullRequestsByTargetVersion->setAccessible(true);
+[$canonicalPrs, $duplicatePrs] = $partitionPullRequestsByTargetVersion->invoke($updaterWithoutConstructor, [
+    ['number' => 38, 'planned_target_version' => '0.1.0'],
+    ['number' => 37, 'planned_target_version' => '0.1.0'],
+    ['number' => 39, 'planned_target_version' => '0.2.0'],
+]);
+$assert(count($canonicalPrs) === 2, 'Expected updater duplicate partitioning to keep one canonical PR per target version.');
+$assert((int) $canonicalPrs[0]['number'] === 37, 'Expected updater duplicate partitioning to keep the oldest PR for a duplicated target version.');
+$assert(count($duplicatePrs) === 1 && (int) $duplicatePrs[0]['number'] === 38, 'Expected updater duplicate partitioning to mark later PRs for the same target version as duplicates.');
+$pullRequestAlreadySatisfied = $updaterReflection->getMethod('pullRequestAlreadySatisfied');
+$pullRequestAlreadySatisfied->setAccessible(true);
+$assert(
+    $pullRequestAlreadySatisfied->invoke($updaterWithoutConstructor, '0.1.0', '0.1.0') === true,
+    'Expected updater to treat matching base and target versions as already satisfied.'
+);
+$assert(
+    $pullRequestAlreadySatisfied->invoke($updaterWithoutConstructor, '0.1.0', '0.0.9') === true,
+    'Expected updater to treat older target versions as stale once base is newer.'
+);
+$assert(
+    $pullRequestAlreadySatisfied->invoke($updaterWithoutConstructor, '0.1.0', '0.2.0') === false,
+    'Expected updater to keep PRs open when the target version is still ahead of base.'
+);
+$coreUpdaterReflection = new ReflectionClass(\WpOrgPluginUpdater\CoreUpdater::class);
+$coreUpdaterWithoutConstructor = $coreUpdaterReflection->newInstanceWithoutConstructor();
+$corePartition = $coreUpdaterReflection->getMethod('partitionPullRequestsByTargetVersion');
+$corePartition->setAccessible(true);
+[$coreCanonical, $coreDuplicates] = $corePartition->invoke($coreUpdaterWithoutConstructor, [
+    ['number' => 11, 'planned_target_version' => '6.9.4'],
+    ['number' => 12, 'planned_target_version' => '6.9.4'],
+    ['number' => 13, 'planned_target_version' => '7.0.0'],
+]);
+$assert(count($coreCanonical) === 2, 'Expected core updater duplicate partitioning to keep one canonical PR per target version.');
+$assert((int) $coreCanonical[0]['number'] === 11, 'Expected core updater duplicate partitioning to keep the oldest PR for a duplicated target version.');
+$assert(count($coreDuplicates) === 1 && (int) $coreDuplicates[0]['number'] === 12, 'Expected core updater duplicate partitioning to mark later PRs for the same target version as duplicates.');
+$coreSatisfied = $coreUpdaterReflection->getMethod('pullRequestAlreadySatisfied');
+$coreSatisfied->setAccessible(true);
+$assert(
+    $coreSatisfied->invoke($coreUpdaterWithoutConstructor, '6.9.4', '6.9.4') === true,
+    'Expected core updater to treat matching base and target versions as already satisfied.'
+);
+$assert(
+    $coreSatisfied->invoke($coreUpdaterWithoutConstructor, '6.9.4', '7.0.0') === false,
+    'Expected core updater to keep PRs open when the target version is still ahead of base.'
+);
+$frameworkSyncerReflection = new ReflectionClass(\WpOrgPluginUpdater\FrameworkSyncer::class);
+$frameworkSyncerWithoutConstructor = $frameworkSyncerReflection->newInstanceWithoutConstructor();
+$frameworkPartition = $frameworkSyncerReflection->getMethod('partitionPullRequestsByTargetVersion');
+$frameworkPartition->setAccessible(true);
+[$frameworkCanonical, $frameworkDuplicates] = $frameworkPartition->invoke($frameworkSyncerWithoutConstructor, [
+    ['number' => 21, 'planned_target_version' => '1.3.1'],
+    ['number' => 22, 'planned_target_version' => '1.3.1'],
+    ['number' => 23, 'planned_target_version' => '1.4.0'],
+]);
+$assert(count($frameworkCanonical) === 2, 'Expected framework sync duplicate partitioning to keep one canonical PR per target version.');
+$assert((int) $frameworkCanonical[0]['number'] === 21, 'Expected framework sync duplicate partitioning to keep the oldest PR for a duplicated target version.');
+$assert(count($frameworkDuplicates) === 1 && (int) $frameworkDuplicates[0]['number'] === 22, 'Expected framework sync duplicate partitioning to mark later PRs for the same target version as duplicates.');
+$frameworkSatisfied = $frameworkSyncerReflection->getMethod('pullRequestAlreadySatisfied');
+$frameworkSatisfied->setAccessible(true);
+$assert(
+    $frameworkSatisfied->invoke($frameworkSyncerWithoutConstructor, '1.3.1', '1.3.1') === true,
+    'Expected framework sync to treat matching base and target versions as already satisfied.'
+);
+$assert(
+    $frameworkSatisfied->invoke($frameworkSyncerWithoutConstructor, '1.3.1', '1.4.0') === false,
+    'Expected framework sync to keep PRs open when the target version is still ahead of base.'
+);
+$scaffoldedUpdatesWorkflow = (string) file_get_contents($imageFirstScaffoldRoot . '/.github/workflows/wporg-updates.yml');
+$scaffoldedReconcileWorkflow = (string) file_get_contents($imageFirstScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
+$assert(str_contains($scaffoldedUpdatesWorkflow, 'group: wp-core-base-dependency-sync'), 'Expected scaffolded updates workflow to use the shared dependency-sync concurrency group.');
+$assert(str_contains($scaffoldedReconcileWorkflow, 'group: wp-core-base-dependency-sync'), 'Expected scaffolded reconcile workflow to share the dependency-sync concurrency group.');
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);

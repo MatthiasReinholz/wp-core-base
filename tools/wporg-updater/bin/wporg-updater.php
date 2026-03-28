@@ -455,6 +455,7 @@ try {
             runtimeInspector: $runtimeInspector,
             manifestWriter: new ManifestWriter(),
             httpClient: $httpClient,
+            adminGovernanceExporter: $adminGovernanceExporter,
         );
         $coreUpdater = new CoreUpdater(
             config: $config,

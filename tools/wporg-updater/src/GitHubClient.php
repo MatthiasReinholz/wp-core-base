@@ -151,6 +151,29 @@ final class GitHubClient
         ]);
     }
 
+    public function closePullRequest(int $number, ?string $comment = null): void
+    {
+        if ($this->dryRun) {
+            fwrite(STDOUT, sprintf("[dry-run] Close PR #%d\n", $number));
+
+            if (is_string($comment) && $comment !== '') {
+                fwrite(STDOUT, sprintf("[dry-run] Comment on PR #%d: %s\n", $number, $comment));
+            }
+
+            return;
+        }
+
+        if (is_string($comment) && $comment !== '') {
+            $this->requestJson('POST', sprintf('/repos/%s/issues/%d/comments', $this->repository, $number), [
+                'body' => $comment,
+            ]);
+        }
+
+        $this->requestJson('PATCH', sprintf('/repos/%s/issues/%d', $this->repository, $number), [
+            'state' => 'closed',
+        ]);
+    }
+
     /**
      * @param list<string> $labels
      */
