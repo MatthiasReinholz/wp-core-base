@@ -40,4 +40,18 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
           WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON: ${{ secrets.WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON }}
           WPORG_REPO_ROOT: ${{ github.workspace }}
-        run: __WPORG_SYNC_COMMAND__
+        run: __WPORG_SYNC_COMMAND__ --report-json=.wp-core-base/build/sync-report.json --fail-on-source-errors
+
+      - name: Publish sync summary
+        if: ${{ always() }}
+        env:
+          WPORG_REPO_ROOT: ${{ github.workspace }}
+        run: __WPORG_PHP_PATH__ render-sync-report --repo-root=. --report-json=.wp-core-base/build/sync-report.json --summary-path="${GITHUB_STEP_SUMMARY}"
+
+      - name: Sync source-failure issue
+        if: ${{ always() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          WPORG_REPO_ROOT: ${{ github.workspace }}
+        run: __WPORG_PHP_PATH__ sync-report-issue --repo-root=. --report-json=.wp-core-base/build/sync-report.json

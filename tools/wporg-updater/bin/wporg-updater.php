@@ -35,6 +35,7 @@ use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeStager;
+use WpOrgPluginUpdater\SyncReport;
 use WpOrgPluginUpdater\WordPressOrgManagedSource;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\Updater;
@@ -167,6 +168,60 @@ try {
     if ($mode === 'doctor') {
         $doctor = new EnvironmentDoctor($repoRoot);
         exit($doctor->run(isset($options['github'])));
+    }
+
+    if ($mode === 'render-sync-report') {
+        $reportPath = isset($options['report-json']) && is_string($options['report-json']) ? $options['report-json'] : null;
+
+        if ($reportPath === null || trim($reportPath) === '') {
+            throw new RuntimeException('render-sync-report requires --report-json=/path/to/report.json.');
+        }
+
+        $summary = SyncReport::exists($reportPath)
+            ? SyncReport::renderSummary(SyncReport::read($reportPath))
+            : "## wp-core-base Sync Report\n\nNo sync report was written before the workflow ended.\n";
+        $summaryPath = isset($options['summary-path']) && is_string($options['summary-path']) ? $options['summary-path'] : null;
+
+        if ($summaryPath !== null && trim($summaryPath) !== '') {
+            if (file_put_contents($summaryPath, $summary) === false) {
+                throw new RuntimeException(sprintf('Unable to write sync summary: %s', $summaryPath));
+            }
+        } else {
+            fwrite(STDOUT, $summary);
+        }
+
+        exit(0);
+    }
+
+    if ($mode === 'sync-report-issue') {
+        $reportPath = isset($options['report-json']) && is_string($options['report-json']) ? $options['report-json'] : null;
+
+        if ($reportPath === null || trim($reportPath) === '') {
+            throw new RuntimeException('sync-report-issue requires --report-json=/path/to/report.json.');
+        }
+
+        if (! SyncReport::exists($reportPath)) {
+            fwrite(STDOUT, "No sync report was written; skipping source-failure issue sync.\n");
+            exit(0);
+        }
+
+        $config = Config::load($repoRoot);
+        $gitHubClient = GitHubClient::fromEnvironment(
+            new HttpClient(userAgent: 'wp-core-base/sync-report-issue'),
+            $config->githubApiBase(),
+            $config->dryRun()
+        );
+        $runUrl = null;
+        $serverUrl = getenv('GITHUB_SERVER_URL');
+        $repository = getenv('GITHUB_REPOSITORY');
+        $runId = getenv('GITHUB_RUN_ID');
+
+        if (is_string($serverUrl) && $serverUrl !== '' && is_string($repository) && $repository !== '' && is_string($runId) && $runId !== '') {
+            $runUrl = sprintf('%s/%s/actions/runs/%s', rtrim($serverUrl, '/'), $repository, $runId);
+        }
+
+        SyncReport::syncIssue($gitHubClient, SyncReport::read($reportPath), $runUrl);
+        exit(0);
     }
 
     if ($mode === 'release-verify') {
@@ -468,6 +523,8 @@ try {
         );
         $errors = [];
         $dependencyWarnings = [];
+        $reportPath = isset($options['report-json']) && is_string($options['report-json']) ? $options['report-json'] : null;
+        $failOnSourceErrors = isset($options['fail-on-source-errors']);
 
         foreach ([
             'core' => static fn () => $coreUpdater->sync(),
@@ -482,6 +539,10 @@ try {
             }
         }
 
+        if ($reportPath !== null && trim($reportPath) !== '') {
+            SyncReport::write(SyncReport::build($errors, $dependencyWarnings), $reportPath);
+        }
+
         if ($errors !== []) {
             throw new RuntimeException(implode("\n\n", $errors));
         }
@@ -493,6 +554,10 @@ try {
                 implode("\n- ", $dependencyWarnings) .
                 "\n"
             );
+
+            if ($failOnSourceErrors) {
+                exit(SyncReport::EXIT_SOURCE_WARNINGS);
+            }
         }
 
         exit(0);

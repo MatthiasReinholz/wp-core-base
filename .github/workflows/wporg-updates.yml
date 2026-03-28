@@ -38,4 +38,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
-        run: php tools/wporg-updater/bin/wporg-updater.php sync
+        run: php tools/wporg-updater/bin/wporg-updater.php sync --report-json=.wp-core-base/build/sync-report.json --fail-on-source-errors
+
+      - name: Publish sync summary
+        if: ${{ always() }}
+        run: php tools/wporg-updater/bin/wporg-updater.php render-sync-report --report-json=.wp-core-base/build/sync-report.json --summary-path="${GITHUB_STEP_SUMMARY}"
+
+      - name: Sync source-failure issue
+        if: ${{ always() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: php tools/wporg-updater/bin/wporg-updater.php sync-report-issue --report-json=.wp-core-base/build/sync-report.json

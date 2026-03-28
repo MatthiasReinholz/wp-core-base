@@ -93,6 +93,8 @@ Check:
 - the source type
 - GitHub release configuration if the source is `github-release`
 
+If the workflow still processed other dependencies, look at the GitHub Actions summary and the managed issue `wp-core-base dependency source failures`. The framework keeps healthy updates moving, but the job should still fail after the run when source warnings were reported.
+
 ### Framework self-update skips a workflow file
 
 That means a scaffolded workflow no longer matches the last framework-managed checksum in `.wp-core-base/framework.php`.

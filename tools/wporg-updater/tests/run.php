@@ -40,6 +40,7 @@ use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
 use WpOrgPluginUpdater\SupportForumClient;
+use WpOrgPluginUpdater\SyncReport;
 use WpOrgPluginUpdater\ArchiveDownloader;
 use WpOrgPluginUpdater\WordPressCoreClient;
 use WpOrgPluginUpdater\WordPressOrgManagedSource;
@@ -1192,6 +1193,19 @@ $scaffoldedUpdatesWorkflow = (string) file_get_contents($imageFirstScaffoldRoot 
 $scaffoldedReconcileWorkflow = (string) file_get_contents($imageFirstScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $assert(str_contains($scaffoldedUpdatesWorkflow, 'group: wp-core-base-dependency-sync'), 'Expected scaffolded updates workflow to use the shared dependency-sync concurrency group.');
 $assert(str_contains($scaffoldedReconcileWorkflow, 'group: wp-core-base-dependency-sync'), 'Expected scaffolded reconcile workflow to share the dependency-sync concurrency group.');
+$assert(str_contains($scaffoldedUpdatesWorkflow, '--report-json=.wp-core-base/build/sync-report.json --fail-on-source-errors'), 'Expected scaffolded updates workflow to fail after the run when dependency-source warnings were recorded.');
+$assert(str_contains($scaffoldedUpdatesWorkflow, 'render-sync-report'), 'Expected scaffolded updates workflow to publish a sync summary.');
+$assert(str_contains($scaffoldedUpdatesWorkflow, 'sync-report-issue'), 'Expected scaffolded updates workflow to synchronize the dependency source-failure issue.');
+$assert(str_contains($scaffoldedReconcileWorkflow, '--report-json=.wp-core-base/build/sync-report.json --fail-on-source-errors'), 'Expected scaffolded reconcile workflow to fail after the run when dependency-source warnings were recorded.');
+$assert(str_contains($scaffoldedReconcileWorkflow, 'sync-report-issue'), 'Expected scaffolded reconcile workflow to synchronize the dependency source-failure issue.');
+$syncReport = SyncReport::build([], ['plugin:premium:private-plugin: Invalid access credentials.']);
+$assert($syncReport['status'] === SyncReport::STATUS_WARNING, 'Expected sync report builder to mark dependency-source warnings as warning status.');
+$assert(SyncReport::renderSummary($syncReport) !== '', 'Expected sync report renderer to produce summary markdown.');
+$syncReportPath = sys_get_temp_dir() . '/wporg-sync-report-' . bin2hex(random_bytes(4)) . '.json';
+SyncReport::write($syncReport, $syncReportPath);
+$assert(SyncReport::exists($syncReportPath), 'Expected sync report writer to create the requested report file.');
+$reloadedSyncReport = SyncReport::read($syncReportPath);
+$assert(($reloadedSyncReport['warning_count'] ?? null) === 1, 'Expected sync report reader to reload the written warning count.');
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);

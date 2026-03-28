@@ -156,6 +156,7 @@ final class DownstreamScaffolder
             $paths = Config::load($this->repoRoot)->paths;
         }
 
+        $phpPath = $this->updaterCommand($toolPath, '');
         $syncCommand = $this->updaterCommand($toolPath, 'sync');
         $frameworkSyncCommand = $this->updaterCommand($toolPath, 'framework-sync --repo-root=.');
         $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
@@ -165,11 +166,17 @@ final class DownstreamScaffolder
         $files = [
             '.github/workflows/wporg-updates.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
-                ['__WPORG_SYNC_COMMAND__' => $syncCommand]
+                [
+                    '__WPORG_SYNC_COMMAND__' => $syncCommand,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                ]
             ),
             '.github/workflows/wporg-updates-reconcile.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-updates-reconcile-workflow.yml.tpl',
-                ['__WPORG_SYNC_COMMAND__' => $syncCommand]
+                [
+                    '__WPORG_SYNC_COMMAND__' => $syncCommand,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                ]
             ),
             '.github/workflows/wporg-update-pr-blocker.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
