@@ -545,7 +545,7 @@ $assert($normalizedManifestLabel === $normalizedLongLabel, 'Expected manifest la
 $scanner = new DependencyScanner();
 $woocommerce = $config->dependencyByKey('plugin:wordpress.org:woocommerce');
 $woocommerceState = $scanner->inspect($repoRoot, $woocommerce);
-$assert($woocommerceState['version'] === '10.6.1', 'Expected bundled WooCommerce version to match the manifest.');
+$assert($woocommerceState['version'] === $woocommerce['version'], 'Expected bundled WooCommerce version to match the manifest.');
 
 $runtimeInspector = new RuntimeInspector($config->runtime);
 $runtimeInspector->assertTreeIsClean($repoRoot . '/wp-content/plugins/woocommerce');
