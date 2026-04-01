@@ -447,7 +447,7 @@ final class Updater
                 $this->config->isFileKind((string) $dependency['kind']),
             );
 
-            [$sanitizePaths, $sanitizeFiles] = $this->translatedManagedSanitizeRulesForDependency($dependency);
+            [$sanitizePaths, $sanitizeFiles] = $this->config->managedSanitizeRules($dependency);
             $this->runtimeInspector->stripPath($sourcePath, $sanitizePaths, $sanitizeFiles);
             $this->runtimeInspector->assertPathIsClean(
                 $sourcePath,
@@ -772,7 +772,7 @@ final class Updater
     private function assertManagedDependencyChecksum(array $dependency): void
     {
         $dependencyPath = $this->config->repoRoot . '/' . $dependency['path'];
-        [$sanitizePaths, $sanitizeFiles] = $this->translatedManagedSanitizeRulesForDependency($dependency);
+        [$sanitizePaths, $sanitizeFiles] = $this->config->managedSanitizeRules($dependency);
         $this->runtimeInspector->assertPathIsClean(
             $dependencyPath,
             (array) $dependency['policy']['allow_runtime_paths'],
@@ -790,32 +790,6 @@ final class Updater
                 $checksum
             ));
         }
-    }
-
-    /**
-     * @param array<string, mixed> $dependency
-     * @return array{0:list<string>,1:list<string>}
-     */
-    private function translatedManagedSanitizeRulesForDependency(array $dependency): array
-    {
-        $rootPath = (string) $dependency['path'];
-        $sanitizePaths = [];
-
-        foreach ((array) $this->config->runtime['managed_sanitize_paths'] as $sanitizePath) {
-            if ($sanitizePath === $rootPath) {
-                $sanitizePaths[] = '';
-                continue;
-            }
-
-            if (str_starts_with($sanitizePath, $rootPath . '/')) {
-                $sanitizePaths[] = substr($sanitizePath, strlen($rootPath) + 1);
-            }
-        }
-
-        return [
-            array_values(array_unique(array_merge($sanitizePaths, $this->config->dependencySanitizePaths($dependency)))),
-            array_values(array_unique(array_merge($this->config->managedSanitizeFiles(), $this->config->dependencySanitizeFiles($dependency)))),
-        ];
     }
 
     private function updateDependencyInManifest(string $componentKey, string $version, string $checksum): Config

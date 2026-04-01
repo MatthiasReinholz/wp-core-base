@@ -321,8 +321,25 @@ final class Config
             return [[], []];
         }
 
+        $rootPath = $this->rootForKind((string) $dependency['kind']);
+        $sanitizePaths = [];
+
+        foreach ($this->managedSanitizePaths() as $sanitizePath) {
+            if ($sanitizePath === $rootPath) {
+                $sanitizePaths[] = '';
+                continue;
+            }
+
+            if (str_starts_with($sanitizePath, $rootPath . '/')) {
+                $sanitizePaths[] = substr($sanitizePath, strlen($rootPath) + 1);
+            }
+        }
+
         return [
-            array_values(array_unique(array_merge($this->managedSanitizePaths(), $this->dependencySanitizePaths($dependency)))),
+            array_values(array_unique(array_merge(
+                $this->expandNestedManagedSanitizePaths($sanitizePaths),
+                $this->dependencySanitizePaths($dependency)
+            ))),
             array_values(array_unique(array_merge($this->managedSanitizeFiles(), $this->dependencySanitizeFiles($dependency)))),
         ];
     }
@@ -936,6 +953,32 @@ final class Config
         }
 
         return self::normalizedRelativePath($value, $key);
+    }
+
+    /**
+     * Promote single-segment legacy sanitize rules such as `docs` to also match nested occurrences.
+     *
+     * @param list<string> $sanitizePaths
+     * @return list<string>
+     */
+    private function expandNestedManagedSanitizePaths(array $sanitizePaths): array
+    {
+        $expanded = $sanitizePaths;
+
+        foreach ($sanitizePaths as $sanitizePath) {
+            if (
+                $sanitizePath === ''
+                || str_contains($sanitizePath, '/')
+                || str_contains($sanitizePath, '*')
+                || str_contains($sanitizePath, '?')
+            ) {
+                continue;
+            }
+
+            $expanded[] = '**/' . $sanitizePath;
+        }
+
+        return array_values(array_unique($expanded));
     }
 
     private static function pathStartsWith(string $path, string $prefix): bool

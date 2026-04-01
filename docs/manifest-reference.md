@@ -214,6 +214,8 @@ Use `dependencies[].policy.sanitize_paths` and `dependencies[].policy.sanitize_f
 
 Managed sanitation applies during `sync` before the dependency is validated, copied into the repo, and checksummed. The manifest checksum for a managed dependency is therefore the checksum of the sanitized runtime tree, not the raw upstream archive.
 
+`sanitize_paths` entries may use a `**/name` form to remove matching nested subtrees anywhere inside the managed dependency root.
+
 Ideal packaging is still preferred: managed artifacts should already be runtime-ready. Sanitation exists to normalize common WordPress ecosystem extras such as `README*`, build metadata, or test directories when they appear in otherwise valid release archives.
 
 ## Managed Versus Local

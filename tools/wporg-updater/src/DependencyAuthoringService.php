@@ -568,7 +568,7 @@ final class DependencyAuthoringService
         $rawEntry['main_file'] = $resolved['main_file'];
         $rawEntry['version'] = $resolved['version'] ?? $version;
 
-        [$sanitizePaths, $sanitizeFiles] = $this->translatedManagedSanitizeRulesForPath((string) $rawEntry['path'], $rawEntry);
+        [$sanitizePaths, $sanitizeFiles] = $this->config->managedSanitizeRules($rawEntry);
         $this->runtimeInspector->stripPath($sourcePath, $sanitizePaths, $sanitizeFiles);
         $this->runtimeInspector->assertPathIsClean($sourcePath, (array) $rawEntry['policy']['allow_runtime_paths'], [], $sanitizePaths, $sanitizeFiles);
         $rawEntry['checksum'] = $this->runtimeInspector->computeChecksum($sourcePath, [], $sanitizePaths, $sanitizeFiles);
@@ -874,31 +874,6 @@ final class DependencyAuthoringService
         }
 
         return $policy;
-    }
-
-    /**
-     * @param array<string, mixed> $dependency
-     * @return array{0:list<string>,1:list<string>}
-     */
-    private function translatedManagedSanitizeRulesForPath(string $rootPath, array $dependency): array
-    {
-        $sanitizePaths = [];
-
-        foreach ((array) $this->config->runtime['managed_sanitize_paths'] as $sanitizePath) {
-            if ($sanitizePath === $rootPath) {
-                $sanitizePaths[] = '';
-                continue;
-            }
-
-            if (str_starts_with($sanitizePath, $rootPath . '/')) {
-                $sanitizePaths[] = substr($sanitizePath, strlen($rootPath) + 1);
-            }
-        }
-
-        return [
-            array_values(array_unique(array_merge($sanitizePaths, (array) ($dependency['policy']['sanitize_paths'] ?? [])))),
-            array_values(array_unique(array_merge($this->config->managedSanitizeFiles(), (array) ($dependency['policy']['sanitize_files'] ?? [])))),
-        ];
     }
 
     /**
