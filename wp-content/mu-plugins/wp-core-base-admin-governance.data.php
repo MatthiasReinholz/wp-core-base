@@ -3,8 +3,8 @@
 declare(strict_types=1);
 
 return array (
-  'generated_at' => '2026-03-25T19:34:55+00:00',
-  'manifest_checksum' => 'sha256:a50723c2d85b5cd7e861107487f62777584dd13fa4fde0bdd4b93906fe6ae134',
+  'generated_at' => '2026-04-01T19:43:13+00:00',
+  'manifest_checksum' => 'sha256:825597a7a1cdf037d2ac916b79e65436b824311a0f4810837e789934824c08f9',
   'plugins' => 
   array (
     'akismet/akismet.php' => 
