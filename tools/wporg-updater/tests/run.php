@@ -554,6 +554,22 @@ $assert(
     'Expected managed dependency checksum to match the sanitized tree.'
 );
 
+$nestedSanitizeRoot = sys_get_temp_dir() . '/wporg-nested-sanitize-' . bin2hex(random_bytes(4));
+mkdir($nestedSanitizeRoot . '/packages/blueprint/src/docs', 0777, true);
+file_put_contents($nestedSanitizeRoot . '/packages/blueprint/src/docs/notes.md', "# Notes\n");
+file_put_contents($nestedSanitizeRoot . '/woocommerce.php', "<?php\n");
+$assert(
+    $runtimeInspector->matchingStrippedEntries($nestedSanitizeRoot, ['**/docs']) === [
+        'packages/blueprint/src/docs',
+        'packages/blueprint/src/docs/notes.md',
+    ],
+    'Expected wildcard sanitize paths to match nested documentation directories.'
+);
+$runtimeInspector->stripPath($nestedSanitizeRoot, ['**/docs']);
+$assert(! is_dir($nestedSanitizeRoot . '/packages/blueprint/src/docs'), 'Expected wildcard sanitize paths to strip nested documentation directories.');
+$runtimeInspector->assertPathIsClean($nestedSanitizeRoot, [], [], ['**/docs']);
+$runtimeInspector->clearPath($nestedSanitizeRoot);
+
 $stageDir = '.wp-core-base/build/test-runtime';
 $stagedPaths = (new RuntimeStager($config, $runtimeInspector))->stage($stageDir);
 $assert(in_array('wp-content/plugins/woocommerce', $stagedPaths, true), 'Expected runtime staging to include managed plugin paths.');

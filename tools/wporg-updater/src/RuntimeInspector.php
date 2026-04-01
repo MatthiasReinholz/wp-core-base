@@ -436,7 +436,7 @@ final class RuntimeInspector
     private function isStripped(string $relativePath, array $stripPaths, array $stripFiles): bool
     {
         foreach ($stripPaths as $stripPath) {
-            if ($relativePath === $stripPath || str_starts_with($relativePath, $stripPath . '/')) {
+            if ($this->matchesStripPath($relativePath, $stripPath)) {
                 return true;
             }
         }
@@ -450,5 +450,27 @@ final class RuntimeInspector
         }
 
         return false;
+    }
+
+    private function matchesStripPath(string $relativePath, string $stripPath): bool
+    {
+        if ($stripPath === '' || $stripPath === '.') {
+            return true;
+        }
+
+        if (str_starts_with($stripPath, '**/')) {
+            $suffix = substr($stripPath, 3);
+
+            if ($suffix === '') {
+                return true;
+            }
+
+            return $relativePath === $suffix
+                || str_starts_with($relativePath, $suffix . '/')
+                || str_ends_with($relativePath, '/' . $suffix)
+                || str_contains($relativePath, '/' . $suffix . '/');
+        }
+
+        return $relativePath === $stripPath || str_starts_with($relativePath, $stripPath . '/');
     }
 }
