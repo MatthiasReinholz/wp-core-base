@@ -187,6 +187,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
@@ -217,8 +220,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/woocommerce',
       'main_file' => 'woocommerce.php',
-      'version' => '10.6.1',
-      'checksum' => 'sha256:def6c41bee9bd9ef329992e0bd2b6e0f9a85f4769fe7c593bb6637c671ab96bb',
+      'version' => '10.6.2',
+      'checksum' => 'sha256:debd49f867f994c77f10fc6be15a2bcac6924b07bc6793f0e4b25711b1722fce',
       'archive_subdir' => '',
       'extra_labels' => 
       array (
@@ -229,6 +232,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
@@ -271,6 +277,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
@@ -313,6 +322,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
@@ -355,6 +367,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
@@ -397,6 +412,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
@@ -439,6 +457,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
@@ -481,6 +502,9 @@ return array (
         'github_repository' => NULL,
         'github_release_asset_pattern' => NULL,
         'github_token_env' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
       ),
       'policy' => 
       array (
