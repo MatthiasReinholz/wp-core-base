@@ -377,7 +377,8 @@ final class EnvironmentDoctor
             if ($premiumRegistry->exists()) {
                 $premiumSources = $premiumRegistry->instantiate(
                     new HttpClient(userAgent: 'wp-core-base/doctor'),
-                    new PremiumCredentialsStore()
+                    new PremiumCredentialsStore(),
+                    $config->managedDependencies(),
                 );
                 $this->ok(sprintf(
                     'Premium provider registry loaded from %s with %d provider(s).',
@@ -550,6 +551,7 @@ final class EnvironmentDoctor
         $this->okIf($hasValidationWorkflow, 'Found a GitHub workflow that stages runtime output.', 'No GitHub workflow found that runs `wporg-updater.php stage-runtime`.');
         $this->okIf($hasFrameworkSyncWorkflow, 'Found a GitHub workflow that runs framework-sync mode.', 'No GitHub workflow found that runs `wporg-updater.php framework-sync`.');
         $this->inspectWorkflowPermissions($workflowDir);
+        $this->inspectWorkflowSemantics($workflowDir);
     }
 
     private function inspectFrameworkDistributionPath(FrameworkConfig $framework, bool $requireGitHub): void
@@ -853,6 +855,104 @@ final class EnvironmentDoctor
 
             $this->ok(sprintf('Workflow permissions match the scaffolded baseline for %s.', $fileName));
         }
+    }
+
+    private function inspectWorkflowSemantics(string $workflowDir): void
+    {
+        $updatesWorkflow = $this->readWorkflow($workflowDir . '/wporg-updates.yml');
+        $reconcileWorkflow = $this->readWorkflow($workflowDir . '/wporg-updates-reconcile.yml');
+        $blockerWorkflow = $this->readWorkflow($workflowDir . '/wporg-update-pr-blocker.yml');
+
+        if ($updatesWorkflow !== null) {
+            $this->okIf(
+                str_contains($updatesWorkflow, "schedule:") && str_contains($updatesWorkflow, "workflow_dispatch:"),
+                'Updates workflow exposes schedule and manual dispatch triggers.',
+                'Updates workflow should define both schedule and workflow_dispatch triggers.'
+            );
+            $this->okIf(
+                str_contains($updatesWorkflow, "concurrency:") && str_contains($updatesWorkflow, "group: wp-core-base-dependency-sync"),
+                'Updates workflow defines the shared dependency-sync concurrency group.',
+                'Updates workflow should define concurrency.group=wp-core-base-dependency-sync.'
+            );
+            $this->okIf(
+                ! str_contains($updatesWorkflow, 'pull_request_target:'),
+                'Updates workflow avoids pull_request_target for scheduled/manual sync.',
+                'Updates workflow should not use pull_request_target.'
+            );
+        }
+
+        if ($reconcileWorkflow !== null) {
+            $this->okIf(
+                str_contains($reconcileWorkflow, "pull_request_target:") && str_contains($reconcileWorkflow, "- closed"),
+                'Reconcile workflow is wired to closed pull_request_target events.',
+                'Reconcile workflow should trigger on pull_request_target closed events.'
+            );
+            $this->okIf(
+                str_contains($reconcileWorkflow, "workflow_dispatch:") || str_contains($reconcileWorkflow, "schedule:"),
+                'Reconcile workflow includes a manual/scheduled recovery trigger.',
+                'Reconcile workflow should include workflow_dispatch or schedule for recovery retries.'
+            );
+            $this->okIf(
+                str_contains($reconcileWorkflow, "github.event.pull_request.merged == true"),
+                'Reconcile workflow gates closed-PR events to merged PRs.',
+                'Reconcile workflow should gate pull_request_target closed events to merged PRs.'
+            );
+            $this->okIf(
+                str_contains($reconcileWorkflow, "automation:dependency-update")
+                && str_contains($reconcileWorkflow, "automation:framework-update"),
+                'Reconcile workflow scopes execution to automation PR labels.',
+                'Reconcile workflow should scope pull_request_target closed execution to automation PR labels.'
+            );
+            $this->okIf(
+                str_contains($reconcileWorkflow, "concurrency:") && str_contains($reconcileWorkflow, "group: wp-core-base-dependency-sync"),
+                'Reconcile workflow defines the shared dependency-sync concurrency group.',
+                'Reconcile workflow should define concurrency.group=wp-core-base-dependency-sync.'
+            );
+            $this->okIf(
+                ! str_contains($reconcileWorkflow, "\npull_request:\n"),
+                'Reconcile workflow avoids pull_request (uses pull_request_target for safe metadata reads).',
+                'Reconcile workflow should avoid pull_request and use pull_request_target for PR metadata reconciliation.'
+            );
+        }
+
+        if ($blockerWorkflow !== null) {
+            $this->okIf(
+                str_contains($blockerWorkflow, "pull_request_target:") && str_contains($blockerWorkflow, "- opened"),
+                'PR blocker workflow listens to pull_request_target update events.',
+                'PR blocker workflow should trigger on pull_request_target open/sync events.'
+            );
+            $this->okIf(
+                str_contains($blockerWorkflow, "workflow_dispatch:") || str_contains($blockerWorkflow, "schedule:"),
+                'PR blocker workflow includes a manual/scheduled recovery path.',
+                'PR blocker workflow should include workflow_dispatch or schedule for degraded-state recovery.'
+            );
+            $this->okIf(
+                str_contains($blockerWorkflow, "pr-blocker-reconcile") || str_contains($blockerWorkflow, "pr-blocker --pr-number"),
+                'PR blocker workflow includes an explicit blocker recovery execution path.',
+                'PR blocker workflow should include a reconciliation/manual retry execution path (pr-blocker-reconcile or pr-blocker --pr-number).'
+            );
+            $this->okIf(
+                ! str_contains($blockerWorkflow, "\npull_request:\n"),
+                'PR blocker workflow avoids pull_request (uses pull_request_target for safe metadata reads).',
+                'PR blocker workflow should avoid pull_request and use pull_request_target for PR metadata checks.'
+            );
+        }
+    }
+
+    private function readWorkflow(string $path): ?string
+    {
+        if (! is_file($path)) {
+            return null;
+        }
+
+        $contents = file_get_contents($path);
+
+        if ($contents === false) {
+            $this->warn(sprintf('Unable to read workflow semantic contract for %s.', basename($path)));
+            return null;
+        }
+
+        return $contents;
     }
 
     /**

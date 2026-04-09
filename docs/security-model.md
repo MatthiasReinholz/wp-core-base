@@ -69,6 +69,31 @@ Framework releases use:
 
 The release snapshot intentionally excludes temp paths, CI-only material, and framework tests.
 
+### Key Rotation
+
+Framework signature verification supports multiple public keys selected by `key_id`.
+
+Candidate verification keys are resolved from:
+
+- the explicit key passed to `release-verify --public-key` (when provided)
+- the default key at `tools/wporg-updater/keys/framework-release-public.pem`
+- rotated key files matching `tools/wporg-updater/keys/framework-release-public-*.pem`
+- optional extra paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated absolute paths)
+
+Rotation procedure:
+
+1. Add the new public key as `tools/wporg-updater/keys/framework-release-public-<yyyymm>.pem`.
+2. Start signing new release checksums with the corresponding private key.
+3. Verify release artifacts in CI with `release-verify`; verification selects the matching key via signature `key_id`.
+4. Keep at least one prior key published until all supported release lines have moved to the new key.
+5. Promote the new key to `framework-release-public.pem` only after old signatures are no longer needed.
+
+Revocation procedure:
+
+1. Remove compromised keys from `tools/wporg-updater/keys/` and any `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` values.
+2. Re-sign current release checksums with a trusted key.
+3. Publish a security advisory noting the revoked key identifier(s) and replacement key identifier.
+
 ## Secret Handling
 
 Secrets belong in environment variables, not in the manifest.

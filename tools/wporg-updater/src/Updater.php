@@ -10,6 +10,9 @@ use ZipArchive;
 
 final class Updater
 {
+    /** @var array<string, DependencyTrustRecord> */
+    private array $lastRunTrustStates = [];
+
     public function __construct(
         private Config $config,
         private readonly DependencyScanner $dependencyScanner,
@@ -33,6 +36,7 @@ final class Updater
      */
     public function sync(): array
     {
+        $this->lastRunTrustStates = [];
         $this->gitRunner->assertCleanWorktree();
         $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
@@ -57,6 +61,17 @@ final class Updater
         }
 
         return $errors;
+    }
+
+    /**
+     * @return list<array{component_key:string,target_version:string,trust_state:string,trust_details:string}>
+     */
+    public function lastRunTrustStates(): array
+    {
+        return array_values(array_map(
+            static fn (DependencyTrustRecord $record): array => $record->toArray(),
+            $this->lastRunTrustStates
+        ));
     }
 
     /**
@@ -318,6 +333,8 @@ final class Updater
             $metadata['blocked_by'] = $blockedBy;
             $metadata['support_synced_at'] = gmdate(DATE_ATOM);
             $metadata['updated_at'] = gmdate(DATE_ATOM);
+            $metadata['trust_state'] = (string) ($releaseData['trust_state'] ?? DependencyTrustState::METADATA_ONLY);
+            $metadata['trust_details'] = (string) ($releaseData['trust_details'] ?? 'Archive authenticity was not independently verified.');
 
             $title = $this->titleForPullRequest($dependencyState['name'], (string) $metadata['base_version'], $targetVersion);
             $body = $this->renderDependencyPullRequest(
@@ -332,6 +349,7 @@ final class Updater
                 supportTopics: $supportTopics,
                 metadata: $metadata,
             );
+            $this->recordTrustState($dependency, $targetVersion, $metadata);
 
             $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
             $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
@@ -424,6 +442,8 @@ final class Updater
                 'blocked_by' => $blockedBy,
                 'support_synced_at' => gmdate(DATE_ATOM),
                 'updated_at' => gmdate(DATE_ATOM),
+                'trust_state' => (string) ($releaseData['trust_state'] ?? DependencyTrustState::METADATA_ONLY),
+                'trust_details' => (string) ($releaseData['trust_details'] ?? 'Archive authenticity was not independently verified.'),
             ];
 
             $title = $this->titleForPullRequest($dependencyState['name'], $dependencyState['version'], $latestVersion);
@@ -439,6 +459,7 @@ final class Updater
                 supportTopics: $supportTopics,
                 metadata: $metadata,
             );
+            $this->recordTrustState($updatedDependency, $latestVersion, $metadata);
 
             $pullRequest = $this->gitHubClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
             $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
@@ -469,7 +490,9 @@ final class Updater
 
         $archivePath = $tempDir . '/dependency.zip';
         $extractPath = $tempDir . '/extract';
-        mkdir($extractPath, 0775, true);
+        if (! mkdir($extractPath, 0775, true) && ! is_dir($extractPath)) {
+            throw new RuntimeException(sprintf('Failed to create extraction directory: %s', $extractPath));
+        }
 
         try {
             $this->downloadArchiveForRelease($dependency, $releaseData, $archivePath);
@@ -571,6 +594,13 @@ final class Updater
         $publishedAt = (string) ($releaseData['release_at'] ?? $fallbackReleaseAt);
         $this->assertDependencyReleaseAgeEligible($dependency, $targetVersion, $publishedAt);
         $releaseData['expected_checksum_sha256'] = $this->expectedManagedReleaseChecksumSha256($dependency, $releaseData);
+        [$trustState, $trustDetails] = $this->deriveTrustState($dependency, $releaseData);
+        $releaseData['trust_state'] = $trustState;
+        $releaseData['trust_details'] = $trustDetails;
+        $releaseData['source_details'] = array_merge((array) ($releaseData['source_details'] ?? []), [
+            ['label' => 'Artifact trust state', 'value' => sprintf('`%s`', $trustState)],
+            ['label' => 'Artifact provenance', 'value' => $trustDetails],
+        ]);
 
         return $releaseData;
     }
@@ -1281,6 +1311,56 @@ final class Updater
         usort($topicsWithDates, static fn (array $left, array $right): int => strcmp($right['opened_at'], $left['opened_at']));
 
         return array_values(array_merge($topicsWithDates, $topicsWithoutDates));
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $releaseData
+     * @return array{0:string,1:string}
+     */
+    private function deriveTrustState(array $dependency, array $releaseData): array
+    {
+        $source = (string) ($dependency['source'] ?? '');
+        $hasChecksum = is_string($releaseData['expected_checksum_sha256'] ?? null)
+            && trim((string) $releaseData['expected_checksum_sha256']) !== '';
+
+        if ($source === 'github-release' && $hasChecksum) {
+            return [
+                DependencyTrustState::VERIFIED,
+                'Archive checksum was independently verified against a release-side checksum sidecar.',
+            ];
+        }
+
+        if ($source === 'premium') {
+            return [
+                DependencyTrustState::PROVIDER_ASSERTED,
+                'Artifact provenance is asserted by the premium provider integration and was not independently verified by checksum-sidecar.',
+            ];
+        }
+
+        return [
+            DependencyTrustState::METADATA_ONLY,
+            (string) ($releaseData['trust_details'] ?? 'Archive authenticity was not independently verified; release metadata only.'),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $metadata
+     */
+    private function recordTrustState(array $dependency, string $targetVersion, array $metadata): void
+    {
+        $componentKey = (string) ($dependency['component_key'] ?? '');
+
+        if ($componentKey === '') {
+            return;
+        }
+
+        $this->lastRunTrustStates[$componentKey] = DependencyTrustRecord::fromMetadata(
+            $componentKey,
+            $targetVersion,
+            $metadata
+        );
     }
 
 }

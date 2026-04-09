@@ -75,10 +75,10 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
             $this->downloadReleaseAsset($framework, $release, $destination);
             $this->gitHubReleaseClient->downloadReleaseToFile($release, $this->checksumDependencyShape($framework), $checksumPath);
             $this->gitHubReleaseClient->downloadReleaseToFile($release, $this->signatureDependencyShape($framework), $signaturePath);
-            FrameworkReleaseSignature::verifyChecksumFile(
+            FrameworkReleaseSignature::verifyChecksumFileWithKeyPaths(
                 $checksumPath,
                 $signaturePath,
-                ReleaseSignatureKeyStore::defaultPublicKeyPath($framework)
+                ReleaseSignatureKeyStore::publicKeyPaths($framework)
             );
 
             $checksumContents = file_get_contents($checksumPath);
@@ -103,11 +103,15 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
             }
         } finally {
             if (is_file($signaturePath)) {
-                @unlink($signaturePath);
+                if (! unlink($signaturePath)) {
+                    fwrite(STDERR, sprintf("[warn] Failed to remove temporary signature file %s\n", $signaturePath));
+                }
             }
 
             if (is_file($checksumPath)) {
-                @unlink($checksumPath);
+                if (! unlink($checksumPath)) {
+                    fwrite(STDERR, sprintf("[warn] Failed to remove temporary checksum file %s\n", $checksumPath));
+                }
             }
         }
     }

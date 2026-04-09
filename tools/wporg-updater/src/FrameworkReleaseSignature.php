@@ -64,6 +64,14 @@ final class FrameworkReleaseSignature
 
     public static function verifyChecksumFile(string $checksumPath, string $signaturePath, string $publicKeyPath): array
     {
+        return self::verifyChecksumFileWithKeyPaths($checksumPath, $signaturePath, [$publicKeyPath]);
+    }
+
+    /**
+     * @param list<string> $publicKeyPaths
+     */
+    public static function verifyChecksumFileWithKeyPaths(string $checksumPath, string $signaturePath, array $publicKeyPaths): array
+    {
         self::assertOpenSslAvailable('release signature verification');
 
         if (! is_file($checksumPath)) {
@@ -74,14 +82,8 @@ final class FrameworkReleaseSignature
             throw new RuntimeException(sprintf('Release signature file not found: %s', $signaturePath));
         }
 
-        if (! is_file($publicKeyPath)) {
-            throw new RuntimeException(sprintf('Release public key file not found: %s', $publicKeyPath));
-        }
-
-        $publicKeyPem = file_get_contents($publicKeyPath);
-
-        if (! is_string($publicKeyPem) || trim($publicKeyPem) === '') {
-            throw new RuntimeException(sprintf('Unable to read release public key file: %s', $publicKeyPath));
+        if ($publicKeyPaths === []) {
+            throw new RuntimeException('At least one release public key path must be provided for signature verification.');
         }
 
         $document = self::readSignatureDocument($signaturePath);
@@ -111,12 +113,11 @@ final class FrameworkReleaseSignature
             ));
         }
 
-        $expectedKeyId = self::keyId($publicKeyPem);
+        [$publicKeyPem, $resolvedPublicKeyPath] = self::resolveVerificationKey($publicKeyPaths, $document['key_id']);
 
-        if (! hash_equals($document['key_id'], $expectedKeyId)) {
+        if ($resolvedPublicKeyPath === null) {
             throw new RuntimeException(sprintf(
-                'Release signature key mismatch. Expected %s but found %s.',
-                $expectedKeyId,
+                'Release signature key %s is not present in configured public keys.',
                 $document['key_id']
             ));
         }
@@ -145,6 +146,47 @@ final class FrameworkReleaseSignature
         }
 
         return $document;
+    }
+
+    /**
+     * @param list<string> $publicKeyPaths
+     * @return array{0:string,1:?string}
+     */
+    private static function resolveVerificationKey(array $publicKeyPaths, string $expectedKeyId): array
+    {
+        $firstReadablePem = null;
+        $firstReadablePath = null;
+
+        foreach ($publicKeyPaths as $path) {
+            if (! is_string($path) || trim($path) === '') {
+                continue;
+            }
+
+            if (! is_file($path)) {
+                continue;
+            }
+
+            $publicKeyPem = file_get_contents($path);
+
+            if (! is_string($publicKeyPem) || trim($publicKeyPem) === '') {
+                continue;
+            }
+
+            if ($firstReadablePem === null) {
+                $firstReadablePem = $publicKeyPem;
+                $firstReadablePath = $path;
+            }
+
+            if (hash_equals($expectedKeyId, self::keyId($publicKeyPem))) {
+                return [$publicKeyPem, $path];
+            }
+        }
+
+        if ($firstReadablePem !== null) {
+            return [$firstReadablePem, null];
+        }
+
+        throw new RuntimeException('No readable release public key files were found.');
     }
 
     private static function assertOpenSslAvailable(string $operation): void

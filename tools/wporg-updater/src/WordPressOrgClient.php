@@ -12,6 +12,14 @@ use RuntimeException;
 
 final class WordPressOrgClient implements WordPressOrgSource
 {
+    /** @var list<string> */
+    private const ALLOWED_REDIRECT_HOSTS = [
+        'api.wordpress.org',
+        'wordpress.org',
+        'downloads.wordpress.org',
+        'downloads.w.org',
+    ];
+
     public function __construct(private readonly HttpClient $httpClient)
     {
     }
@@ -140,7 +148,10 @@ final class WordPressOrgClient implements WordPressOrgSource
             ],
         ]);
 
-        return $this->httpClient->getJson('https://api.wordpress.org/plugins/info/1.2/?' . $query);
+        return $this->httpClient->getJsonWithOptions('https://api.wordpress.org/plugins/info/1.2/?' . $query, [], [
+            'allowed_redirect_hosts' => self::ALLOWED_REDIRECT_HOSTS,
+            'max_redirects' => 3,
+        ]);
     }
 
     /**
@@ -159,7 +170,10 @@ final class WordPressOrgClient implements WordPressOrgSource
             ],
         ]);
 
-        return $this->httpClient->getJson('https://api.wordpress.org/themes/info/1.2/?' . $query);
+        return $this->httpClient->getJsonWithOptions('https://api.wordpress.org/themes/info/1.2/?' . $query, [], [
+            'allowed_redirect_hosts' => self::ALLOWED_REDIRECT_HOSTS,
+            'max_redirects' => 3,
+        ]);
     }
 
     private function extractChangelogSection(string $changelogHtml, string $targetVersion): string

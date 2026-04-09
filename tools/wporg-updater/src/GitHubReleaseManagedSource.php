@@ -67,6 +67,8 @@ final class GitHubReleaseManagedSource implements ManagedDependencySource
             'notes_markup' => $notesMarkup,
             'notes_text' => $this->client->markdownToText($notesMarkup),
             'source_reference' => sprintf('%s@%s', $repository, $targetVersion),
+            'trust_state' => DependencyTrustState::METADATA_ONLY,
+            'trust_details' => 'GitHub release metadata was resolved, but artifact authenticity was not yet independently verified.',
             'source_details' => [
                 ['label' => 'Source repository', 'value' => sprintf('[`%s`](https://github.com/%s)', $repository, $repository)],
                 ['label' => 'GitHub release', 'value' => sprintf('[Open](%s)', $this->client->releaseUrl($release, $repository))],

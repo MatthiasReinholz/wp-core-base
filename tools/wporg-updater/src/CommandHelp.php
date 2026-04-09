@@ -44,7 +44,8 @@ Usage:
   {$phpCommandPrefix} remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
   {$phpCommandPrefix} list-dependencies [--repo-root=/path]
   {$phpCommandPrefix} scaffold-premium-provider [--repo-root=/path] --provider=your-provider [--class=Project\\WpCoreBase\\Premium\\YourProviderManagedSource] [--path=.wp-core-base/premium-providers/your-provider.php]
-  {$phpCommandPrefix} pr-blocker
+  {$phpCommandPrefix} pr-blocker [--pr-number=123] [--json]
+  {$phpCommandPrefix} pr-blocker-reconcile [--json]
 
 Use:
   {$commandPrefix} help add-dependency

@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class PremiumCredentialsStore
+class PremiumCredentialsStore
 {
     public function __construct(
         private readonly ?string $json = null,

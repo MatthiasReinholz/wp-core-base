@@ -906,6 +906,13 @@ final class Config
                 throw new RuntimeException(sprintf('GitHub release dependency %s must define source_config.github_repository.', $slug));
             }
 
+            if ($source === 'github-release' && $githubReleaseAssetPattern === null && $verificationMode !== 'none') {
+                throw new RuntimeException(sprintf(
+                    'GitHub release dependency %s must define source_config.github_release_asset_pattern unless source_config.verification_mode is explicitly set to none.',
+                    $slug
+                ));
+            }
+
             if (! in_array($verificationMode, ['inherit', 'none', 'checksum-sidecar-optional', 'checksum-sidecar-required'], true)) {
                 throw new RuntimeException(sprintf(
                     'Dependency %s must use source_config.verification_mode of inherit, none, checksum-sidecar-optional, or checksum-sidecar-required.',

@@ -8,6 +8,14 @@ use RuntimeException;
 
 final class WordPressOrgManagedSource implements ManagedDependencySource
 {
+    /** @var list<string> */
+    private const ALLOWED_REDIRECT_HOSTS = [
+        'api.wordpress.org',
+        'wordpress.org',
+        'downloads.wordpress.org',
+        'downloads.w.org',
+    ];
+
     public function __construct(
         private readonly WordPressOrgClient $client,
         private readonly HttpClient $httpClient,
@@ -62,13 +70,20 @@ final class WordPressOrgManagedSource implements ManagedDependencySource
             'notes_markup' => $notesMarkup,
             'notes_text' => $this->client->htmlToText($notesMarkup),
             'source_reference' => $componentUrl,
+            'trust_state' => DependencyTrustState::METADATA_ONLY,
+            'trust_details' => 'WordPress.org plugin/theme APIs do not provide version-bound archive checksums for independent artifact verification.',
             'source_details' => $sourceDetails,
         ];
     }
 
     public function downloadReleaseToFile(array $dependency, array $releaseData, string $destination): void
     {
-        $this->httpClient->downloadToFile((string) $releaseData['download_url'], $destination);
+        $this->httpClient->downloadToFileWithOptions((string) $releaseData['download_url'], $destination, [], [
+            'allowed_redirect_hosts' => self::ALLOWED_REDIRECT_HOSTS,
+            'strip_auth_on_cross_origin_redirect' => true,
+            'max_redirects' => 3,
+            'max_download_bytes' => 512 * 1024 * 1024,
+        ]);
     }
 
     public function supportsForumSync(array $dependency): bool

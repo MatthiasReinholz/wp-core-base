@@ -194,7 +194,10 @@ final class DownstreamScaffolder
             ),
             '.github/workflows/wporg-update-pr-blocker.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
-                ['__WPORG_BLOCKER_COMMAND__' => $blockerCommand]
+                [
+                    '__WPORG_BLOCKER_COMMAND__' => $blockerCommand,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                ]
             ),
             '.github/workflows/wporg-validate-runtime.yml' => $this->renderTemplate(
                 $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-validate-runtime-workflow.yml.tpl',

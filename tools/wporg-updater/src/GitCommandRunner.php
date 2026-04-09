@@ -36,8 +36,28 @@ final class GitCommandRunner implements GitRunnerInterface
             return false;
         }
 
+        $baselineRevision = trim($this->run('git rev-parse HEAD'));
         $this->run(sprintf('git commit -m %s', escapeshellarg($message)));
-        $this->run(sprintf('git push %s-u origin %s', $force ? '--force ' : '', escapeshellarg($branch)));
+
+        try {
+            $this->run(sprintf('git push %s-u origin %s', $force ? '--force ' : '', escapeshellarg($branch)));
+        } catch (RuntimeException $exception) {
+            try {
+                $this->run(sprintf('git reset --hard %s', escapeshellarg($baselineRevision)));
+            } catch (RuntimeException $rollbackException) {
+                throw new RuntimeException(sprintf(
+                    "Push failed after creating a local commit and rollback failed.\nPush error: %s\nRollback error: %s",
+                    $exception->getMessage(),
+                    $rollbackException->getMessage()
+                ), previous: $exception);
+            }
+
+            throw new RuntimeException(sprintf(
+                "Push failed after creating a local commit. The branch was reset to %s.\n%s",
+                $baselineRevision,
+                $exception->getMessage()
+            ), previous: $exception);
+        }
 
         return true;
     }
