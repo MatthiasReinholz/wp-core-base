@@ -44,17 +44,8 @@ final class AdminGovernanceExporter
 
     private function writeDataFile(Config $config, string $path): void
     {
-        $directory = dirname($path);
-
-        if (! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) {
-            throw new RuntimeException(sprintf('Unable to create admin governance directory: %s', $directory));
-        }
-
         $contents = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($this->payload($config), true) . ";\n";
-
-        if (file_put_contents($path, $contents) === false) {
-            throw new RuntimeException(sprintf('Unable to write admin governance data: %s', $path));
-        }
+        (new AtomicFileWriter())->write($path, $contents);
     }
 
     /**

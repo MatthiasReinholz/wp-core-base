@@ -166,8 +166,8 @@ vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=.
 - `managed` entries must define `version` and `checksum`
 - `local` entries may define `version`, but do not need `checksum`
 - `ignored` entries are excluded from runtime staging
-- directory kinds require `main_file`
-- file kinds may omit `main_file`; when omitted, the file at `path` is the runtime entry
+- `plugin`, `theme`, and `mu-plugin-package` entries require `main_file`
+- `mu-plugin-file`, `runtime-file`, and `runtime-directory` entries may omit `main_file`
 - `runtime-directory` entries may be `local` or `ignored`, but are not updater-managed today
 - `extra_labels` are normalized to GitHub's 50-character label limit; overlong labels are shortened deterministically with a hash suffix so workflow runs do not fail on long slugs
 

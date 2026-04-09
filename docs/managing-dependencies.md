@@ -88,7 +88,7 @@ Optional flags:
 - `--archive-subdir=plugin`
 - `--github-release-asset-pattern=*.zip`
 - `--private`
-- `--plan` or `--dry-run`
+- `--plan`, `--preview`, or `--dry-run`
 
 Use `--archive-subdir` only when the extracted payload is not resolved correctly by default. Standard WordPress.org plugin ZIPs should not need it.
 
@@ -153,13 +153,13 @@ Credentials JSON entry:
 
 ```json
 {
-  "plugin:premium:premium-plugin": {
+  "plugin:premium:example-vendor:premium-plugin": {
     "license_key": "provider-specific-secret"
   }
 }
 ```
 
-By default, the JSON object key is the dependency component key, for example `plugin:premium:premium-plugin`.
+By default, the JSON object key is the dependency component key, for example `plugin:premium:example-vendor:premium-plugin`.
 If the manifest uses `source_config.credential_key`, that override becomes the lookup key instead.
 
 Example shared-license pattern:
@@ -198,7 +198,7 @@ The provider class contract is documented in [adding-premium-provider.md](/Users
 Local shell example:
 
 ```bash
-export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:premium:premium-plugin":{"license_key":"provider-specific-secret"}}'
+export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:premium:example-vendor:premium-plugin":{"license_key":"provider-specific-secret"}}'
 ```
 
 GitHub Actions setup:

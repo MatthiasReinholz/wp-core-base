@@ -29,11 +29,62 @@ jobs:
       - name: Lint PHP sources
         run: find tools/wporg-updater -name '*.php' -print0 | xargs -0 -n1 php -l
 
+      - name: Verify workflow examples and permissions
+        run: php scripts/ci/check_workflow_examples_and_permissions.php
+
       - name: Run test suite
         run: php tools/wporg-updater/tests/run.php
 
       - name: Stage runtime payload
         run: php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 
-      - name: Verify release metadata
-        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.
+      - name: Build release verification fixture
+        run: |
+          mkdir -p dist/wp-core-base
+          rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.wp-core-base/build/' \
+            --exclude 'dist/' \
+            ./ dist/wp-core-base/
+          cd dist
+          zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
+          sha256sum wp-core-base-vendor-snapshot.zip > wp-core-base-vendor-snapshot.zip.sha256
+
+      - name: Sign release verification fixture
+        run: |
+          PRIVATE_KEY="$(cat tools/wporg-updater/tests/fixtures/release-signing/private.pem)"
+          WP_CORE_BASE_RELEASE_TEST_PRIVATE_KEY_PEM="$PRIVATE_KEY" \
+            php tools/wporg-updater/bin/wporg-updater.php release-sign \
+              --artifact=dist/wp-core-base-vendor-snapshot.zip \
+              --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256 \
+              --signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
+              --private-key-env=WP_CORE_BASE_RELEASE_TEST_PRIVATE_KEY_PEM
+
+      - name: Verify release metadata and artifact
+        run: |
+          php tools/wporg-updater/bin/wporg-updater.php release-verify \
+            --repo-root=. \
+            --artifact=dist/wp-core-base-vendor-snapshot.zip \
+            --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256 \
+            --signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
+            --public-key-file=tools/wporg-updater/tests/fixtures/release-signing/public.pem
+
+  downstream-fixtures:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile:
+          - full-core
+          - content-only
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Verify downstream fixture
+        run: php scripts/ci/verify_downstream_fixture.php --profile=${{ matrix.profile }}

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace WpOrgPluginUpdater;
 
+use Throwable;
 use RuntimeException;
 
 final class FrameworkInstaller
@@ -32,13 +33,21 @@ final class FrameworkInstaller
         $targetPath = $distributionPath === '.' ? $this->repoRoot : $this->repoRoot . '/' . $distributionPath;
         $stagingPath = $this->repoRoot . '/.wp-core-base/build/framework-install-' . bin2hex(random_bytes(4));
         $backupPath = $this->repoRoot . '/.wp-core-base/build/framework-install-backup-' . bin2hex(random_bytes(4));
+        $stateBackupRoot = $this->repoRoot . '/.wp-core-base/build/framework-install-state-' . bin2hex(random_bytes(4));
+        $pathSwapper = new PathSwapWithRollback($this->runtimeInspector);
+        $managedFileStates = [];
+        $frameworkState = null;
+        $governanceState = null;
+        $swappedIntoPlace = false;
 
         $this->runtimeInspector->clearPath($stagingPath);
         $this->runtimeInspector->clearPath($backupPath);
+        $this->runtimeInspector->clearPath($stateBackupRoot);
 
         try {
             $this->runtimeInspector->copyPath($payloadRoot, $stagingPath);
-            $this->swapPaths($targetPath, $stagingPath, $backupPath);
+            $pathSwapper->swap($targetPath, $stagingPath, $backupPath, $this->repoRoot);
+            $swappedIntoPlace = true;
             $downstreamConfig = Config::load($this->repoRoot);
             $renderedFiles = (new DownstreamScaffolder($targetPath, $this->repoRoot))->renderFrameworkManagedFiles($distributionPath, [], $downstreamConfig->paths);
             $managedFileChecksums = [];
@@ -66,9 +75,11 @@ final class FrameworkInstaller
                     throw new RuntimeException(sprintf('Unable to create framework-managed directory: %s', $directory));
                 }
 
-                if (file_put_contents($absolutePath, $contents) === false) {
-                    throw new RuntimeException(sprintf('Unable to write framework-managed file: %s', $absolutePath));
-                }
+                $managedFileStates[$relativePath] ??= $this->captureFileState(
+                    $absolutePath,
+                    $stateBackupRoot . '/managed/' . str_replace('/', '--', $relativePath)
+                );
+                (new AtomicFileWriter())->write($absolutePath, $contents);
 
                 $managedFileChecksums[$relativePath] = $this->contentsChecksum($contents);
                 $refreshedFiles[] = $relativePath;
@@ -82,10 +93,15 @@ final class FrameworkInstaller
                 managedFiles: $managedFileChecksums,
                 distributionPath: $distributionPath
             );
+            $frameworkState = $this->captureFileState($framework->path, $stateBackupRoot . '/framework.php');
             (new FrameworkWriter())->write($framework);
             $changedPaths[] = '.wp-core-base/framework.php';
+            $governancePath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($downstreamConfig);
+            $governanceState = $this->captureFileState($governancePath, $stateBackupRoot . '/admin-governance.php');
             (new AdminGovernanceExporter($this->runtimeInspector))->refresh($downstreamConfig);
             $changedPaths[] = FrameworkRuntimeFiles::governanceDataPath($downstreamConfig);
+            $pathSwapper->finalize($backupPath);
+            $swappedIntoPlace = false;
 
             return [
                 'changed_paths' => array_values(array_unique($changedPaths)),
@@ -95,43 +111,83 @@ final class FrameworkInstaller
                 'wordpress_core' => $framework->baseline['wordpress_core'],
                 'managed_components' => $framework->baseline['managed_components'],
             ];
+        } catch (Throwable $throwable) {
+            if ($governanceState !== null) {
+                $this->restoreFileState($governanceState);
+            }
+
+            if ($frameworkState !== null) {
+                $this->restoreFileState($frameworkState);
+            }
+
+            foreach ($managedFileStates as $state) {
+                $this->restoreFileState($state);
+            }
+
+            if ($swappedIntoPlace) {
+                $pathSwapper->rollback($targetPath, $backupPath);
+            }
+
+            throw $throwable;
         } finally {
             $this->runtimeInspector->clearPath($stagingPath);
             $this->runtimeInspector->clearPath($backupPath);
+            $this->runtimeInspector->clearPath($stateBackupRoot);
         }
-    }
-
-    private function swapPaths(string $targetPath, string $stagingPath, string $backupPath): void
-    {
-        if ($targetPath === $this->repoRoot) {
-            throw new RuntimeException('Framework self-update cannot replace the repository root in place.');
-        }
-
-        $parent = dirname($targetPath);
-
-        if (! is_dir($parent) && ! mkdir($parent, 0775, true) && ! is_dir($parent)) {
-            throw new RuntimeException(sprintf('Unable to create distribution parent directory: %s', $parent));
-        }
-
-        if (file_exists($targetPath) || is_link($targetPath)) {
-            if (! @rename($targetPath, $backupPath)) {
-                throw new RuntimeException(sprintf('Unable to move existing framework snapshot out of the way: %s', $targetPath));
-            }
-        }
-
-        if (! @rename($stagingPath, $targetPath)) {
-            if (file_exists($backupPath) || is_link($backupPath)) {
-                @rename($backupPath, $targetPath);
-            }
-
-            throw new RuntimeException(sprintf('Unable to install new framework snapshot at %s.', $targetPath));
-        }
-
-        $this->runtimeInspector->clearPath($backupPath);
     }
 
     private function contentsChecksum(string $contents): string
     {
         return 'sha256:' . hash('sha256', $contents);
+    }
+
+    /**
+     * @return array{path:string, existed:bool, backup_path:?string}
+     */
+    private function captureFileState(string $path, string $backupPath): array
+    {
+        if (! file_exists($path) && ! is_link($path)) {
+            return [
+                'path' => $path,
+                'existed' => false,
+                'backup_path' => null,
+            ];
+        }
+
+        $backupDirectory = dirname($backupPath);
+
+        if (! is_dir($backupDirectory) && ! mkdir($backupDirectory, 0775, true) && ! is_dir($backupDirectory)) {
+            throw new RuntimeException(sprintf('Unable to create backup directory: %s', $backupDirectory));
+        }
+
+        $this->runtimeInspector->copyPath($path, $backupPath);
+
+        return [
+            'path' => $path,
+            'existed' => true,
+            'backup_path' => $backupPath,
+        ];
+    }
+
+    /**
+     * @param array{path:string, existed:bool, backup_path:?string} $state
+     */
+    private function restoreFileState(array $state): void
+    {
+        $path = $state['path'];
+
+        $this->runtimeInspector->clearPath($path);
+
+        if (! $state['existed']) {
+            return;
+        }
+
+        $backupPath = $state['backup_path'];
+
+        if (! is_string($backupPath) || $backupPath === '' || (! file_exists($backupPath) && ! is_link($backupPath))) {
+            throw new RuntimeException(sprintf('Unable to restore backup for %s.', $path));
+        }
+
+        $this->runtimeInspector->copyPath($backupPath, $path);
     }
 }

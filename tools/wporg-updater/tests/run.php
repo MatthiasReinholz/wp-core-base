@@ -8,6 +8,7 @@ use WpOrgPluginUpdater\ConfigWriter;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\AbstractPremiumManagedSource;
 use WpOrgPluginUpdater\AdminGovernanceExporter;
+use WpOrgPluginUpdater\BranchRollbackGuard;
 use WpOrgPluginUpdater\DependencyAuthoringService;
 use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DependencyScanner;
@@ -17,25 +18,33 @@ use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
 use WpOrgPluginUpdater\FrameworkReleasePreparer;
+use WpOrgPluginUpdater\FrameworkReleaseSignature;
 use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkRuntimeFiles;
 use WpOrgPluginUpdater\FrameworkWriter;
+use WpOrgPluginUpdater\GitHubAutomationClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\GitHubReleaseManagedSource;
+use WpOrgPluginUpdater\GitHubPullRequestReader;
 use WpOrgPluginUpdater\GitHubReleaseSource;
+use WpOrgPluginUpdater\GitRunnerInterface;
 use WpOrgPluginUpdater\HttpStatusRuntimeException;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManagedDependencySource;
+use WpOrgPluginUpdater\ManagedPullRequestCanonicalizer;
 use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\LabelHelper;
+use WpOrgPluginUpdater\OutputRedactor;
 use WpOrgPluginUpdater\PremiumProviderRegistry;
 use WpOrgPluginUpdater\PremiumProviderScaffolder;
 use WpOrgPluginUpdater\PremiumCredentialsStore;
 use WpOrgPluginUpdater\PrBodyRenderer;
+use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
+use WpOrgPluginUpdater\ReleaseSignatureKeyStore;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
@@ -96,6 +105,276 @@ final class ExamplePremiumManagedSource extends AbstractPremiumManagedSource
     protected function requiredCredentialFields(): array
     {
         return ['license_key'];
+    }
+}
+
+final class FakeGitRunner implements GitRunnerInterface
+{
+    public ?string $currentBranch = 'main';
+    public string $currentRevision = 'main-sha';
+    public bool $clean = true;
+    public bool $failCommit = false;
+
+    /** @var array<string, string> */
+    public array $localBranches = ['main' => 'main-sha'];
+
+    /** @var array<string, string> */
+    public array $remoteBranches = ['main' => 'main-sha'];
+
+    /** @var list<string> */
+    public array $actions = [];
+
+    public function checkoutBranch(string $baseBranch, string $branch, bool $resetToBase = false): void
+    {
+        $baseRevision = $this->remoteBranches[$baseBranch] ?? ($this->localBranches[$baseBranch] ?? $this->currentRevision);
+        $startingRevision = ($resetToBase || ! isset($this->remoteBranches[$branch]))
+            ? $baseRevision
+            : $this->remoteBranches[$branch];
+
+        $this->localBranches[$branch] = $startingRevision;
+        $this->currentBranch = $branch;
+        $this->currentRevision = $startingRevision;
+        $this->clean = true;
+        $this->actions[] = sprintf('checkout:%s', $branch);
+    }
+
+    public function commitAndPush(string $branch, string $message, array $paths, bool $force = false): bool
+    {
+        $this->actions[] = sprintf('commit:%s', $branch);
+
+        if ($this->failCommit) {
+            throw new RuntimeException('Simulated commit failure.');
+        }
+
+        $revision = $branch . '-commit-' . (count($this->actions) + 1);
+        $this->localBranches[$branch] = $revision;
+        $this->remoteBranches[$branch] = $revision;
+        $this->currentBranch = $branch;
+        $this->currentRevision = $revision;
+        $this->clean = true;
+
+        return true;
+    }
+
+    public function remoteRevision(string $branch): string
+    {
+        return $this->remoteBranches[$branch] ?? throw new RuntimeException(sprintf('Unknown remote branch %s.', $branch));
+    }
+
+    public function currentBranch(): ?string
+    {
+        return $this->currentBranch;
+    }
+
+    public function currentRevision(): string
+    {
+        return $this->currentRevision;
+    }
+
+    public function localBranchRevision(string $branch): ?string
+    {
+        return $this->localBranches[$branch] ?? null;
+    }
+
+    public function remoteBranchRevision(string $branch): ?string
+    {
+        return $this->remoteBranches[$branch] ?? null;
+    }
+
+    public function checkoutRef(string $ref): void
+    {
+        $this->currentBranch = $ref;
+        $this->currentRevision = $this->localBranches[$ref] ?? $this->currentRevision;
+        $this->clean = true;
+        $this->actions[] = sprintf('checkout-ref:%s', $ref);
+    }
+
+    public function checkoutDetached(string $revision): void
+    {
+        $this->currentBranch = null;
+        $this->currentRevision = $revision;
+        $this->clean = true;
+        $this->actions[] = sprintf('detach:%s', $revision);
+    }
+
+    public function hardReset(string $revision): void
+    {
+        if ($this->currentBranch !== null) {
+            $this->localBranches[$this->currentBranch] = $revision;
+        }
+
+        $this->currentRevision = $revision;
+        $this->clean = true;
+        $this->actions[] = sprintf('reset:%s', $revision);
+    }
+
+    public function cleanUntracked(): void
+    {
+        $this->clean = true;
+        $this->actions[] = 'clean-untracked';
+    }
+
+    public function forceBranchToRevision(string $branch, string $revision): void
+    {
+        $this->localBranches[$branch] = $revision;
+        $this->actions[] = sprintf('force-branch:%s:%s', $branch, $revision);
+    }
+
+    public function deleteLocalBranch(string $branch): void
+    {
+        unset($this->localBranches[$branch]);
+        $this->actions[] = sprintf('delete-local:%s', $branch);
+    }
+
+    public function forcePushRevision(string $branch, string $revision): void
+    {
+        $this->remoteBranches[$branch] = $revision;
+        $this->actions[] = sprintf('push:%s:%s', $branch, $revision);
+    }
+
+    public function deleteRemoteBranch(string $branch): void
+    {
+        unset($this->remoteBranches[$branch]);
+        $this->actions[] = sprintf('delete-remote:%s', $branch);
+    }
+
+    public function assertCleanWorktree(): void
+    {
+        if (! $this->clean) {
+            throw new RuntimeException('Git worktree must be clean before running automation sync commands.');
+        }
+    }
+}
+
+final class FakePullRequestReader implements GitHubPullRequestReader
+{
+    /** @param list<array<string, mixed>> $openPullRequests */
+    public function __construct(
+        private readonly array $openPullRequests,
+        /** @var array<int, array<string, mixed>> */
+        private readonly array $pullRequestsByNumber = [],
+        private readonly ?RuntimeException $listFailure = null,
+        /** @var array<int, RuntimeException> */
+        private readonly array $pullRequestFailures = [],
+    ) {
+    }
+
+    public function listOpenPullRequests(): array
+    {
+        if ($this->listFailure !== null) {
+            throw $this->listFailure;
+        }
+
+        return $this->openPullRequests;
+    }
+
+    public function getPullRequest(int $number): array
+    {
+        if (isset($this->pullRequestFailures[$number])) {
+            throw $this->pullRequestFailures[$number];
+        }
+
+        return $this->pullRequestsByNumber[$number] ?? throw new RuntimeException(sprintf('Missing pull request #%d.', $number));
+    }
+}
+
+final class FakeGitHubAutomationClient implements GitHubAutomationClient
+{
+    /** @var list<array<string, mixed>> */
+    public array $openPullRequests = [];
+    /** @var array<int, array<string, mixed>> */
+    public array $pullRequestsByNumber = [];
+    /** @var list<array<string, mixed>> */
+    public array $openIssues = [];
+    /** @var list<array<string, mixed>> */
+    public array $createdIssues = [];
+    /** @var list<array<string, mixed>> */
+    public array $updatedIssues = [];
+    /** @var list<array<string, mixed>> */
+    public array $closedIssues = [];
+    /** @var list<array<string, mixed>> */
+    public array $createdPullRequests = [];
+    /** @var list<array<string, mixed>> */
+    public array $updatedPullRequests = [];
+    /** @var list<array<string, mixed>> */
+    public array $closedPullRequests = [];
+    /** @var list<array<string, mixed>> */
+    public array $labelUpdates = [];
+    public string $defaultBranch = 'main';
+
+    public function getDefaultBranch(): string
+    {
+        return $this->defaultBranch;
+    }
+
+    public function ensureLabels(array $definitions): void
+    {
+    }
+
+    public function listOpenPullRequests(): array
+    {
+        return $this->openPullRequests;
+    }
+
+    public function getPullRequest(int $number): array
+    {
+        return $this->pullRequestsByNumber[$number] ?? throw new RuntimeException(sprintf('Missing pull request #%d.', $number));
+    }
+
+    public function listOpenIssues(?string $label = null): array
+    {
+        return $this->openIssues;
+    }
+
+    public function createIssue(string $title, string $body, array $labels = []): array
+    {
+        $issue = ['number' => count($this->createdIssues) + 1, 'title' => $title, 'body' => $body, 'labels' => $labels];
+        $this->createdIssues[] = $issue;
+        return $issue;
+    }
+
+    public function updateIssue(int $number, string $title, string $body): array
+    {
+        $issue = ['number' => $number, 'title' => $title, 'body' => $body];
+        $this->updatedIssues[] = $issue;
+        return $issue;
+    }
+
+    public function closeIssue(int $number, ?string $comment = null): void
+    {
+        $this->closedIssues[] = ['number' => $number, 'comment' => $comment];
+    }
+
+    public function createPullRequest(string $title, string $head, string $base, string $body, bool $draft): array
+    {
+        $pullRequest = ['number' => count($this->createdPullRequests) + 1, 'title' => $title, 'head' => $head, 'base' => $base, 'body' => $body, 'draft' => $draft];
+        $this->createdPullRequests[] = $pullRequest;
+        return $pullRequest;
+    }
+
+    public function updatePullRequest(int $number, string $title, string $body): array
+    {
+        $pullRequest = ['number' => $number, 'title' => $title, 'body' => $body];
+        $this->updatedPullRequests[] = $pullRequest;
+        return $pullRequest;
+    }
+
+    public function closePullRequest(int $number, ?string $comment = null): void
+    {
+        $this->closedPullRequests[] = ['number' => $number, 'comment' => $comment];
+    }
+
+    public function setLabels(int $number, array $labels): void
+    {
+        $this->labelUpdates[] = ['number' => $number, 'labels' => $labels];
+    }
+
+    public function convertToDraft(string $nodeId): void
+    {
+    }
+
+    public function markReadyForReview(string $nodeId): void
+    {
     }
 }
 
@@ -332,6 +611,10 @@ $createPluginArchive = static function (string $archivePath, string $outerDirect
     $zip->close();
 };
 
+$normalizeWorkflowExample = static function (string $contents): string {
+    return ltrim((string) preg_replace('/^(?:#.*\R)+\R*/', '', $contents));
+};
+
 $assert($classifier->classifyScope('5.3.6', '5.3.7') === 'patch', 'Expected patch classification.');
 $assert($classifier->classifyScope('5.3.7', '5.4.0') === 'minor', 'Expected minor classification.');
 $assert($classifier->classifyScope('5.4.0', '6.0.0') === 'major', 'Expected major classification.');
@@ -426,12 +709,15 @@ $frameworkConfig = FrameworkConfig::load($repoRoot);
 $currentFrameworkVersion = $frameworkConfig->version;
 $assert(preg_match('/^\d+\.\d+\.\d+$/', $currentFrameworkVersion) === 1, 'Expected framework metadata to load a valid current framework version.');
 $assert($frameworkConfig->distributionPath() === '.', 'Expected upstream framework metadata to point at the repository root.');
+$assert($frameworkConfig->checksumSignatureAssetName() === 'wp-core-base-vendor-snapshot.zip.sha256.sig', 'Expected framework metadata to derive the checksum-signature asset name.');
+$assert(str_ends_with(ReleaseSignatureKeyStore::defaultPublicKeyPath($frameworkConfig), 'tools/wporg-updater/keys/framework-release-public.pem'), 'Expected the default release public key path to resolve inside the framework distribution.');
 $releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/' . $currentFrameworkVersion . '.md');
 $assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
 $assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v' . $currentFrameworkVersion, 'Expected framework release verification to succeed.');
 $upstreamUpdatesWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-updates.yml');
 $upstreamReconcileWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-updates-reconcile.yml');
+$upstreamValidateWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/wporg-validate-runtime.yml');
 $upstreamFinalizeWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/finalize-wp-core-base-release.yml');
 $upstreamRecoveryReleaseWorkflow = (string) file_get_contents($repoRoot . '/.github/workflows/release-wp-core-base.yml');
 $assert(str_contains($upstreamUpdatesWorkflow, $checkoutActionSha), 'Expected upstream updates workflow to pin actions/checkout by full commit SHA.');
@@ -442,9 +728,41 @@ $assert(str_contains($upstreamReconcileWorkflow, $setupPhpActionSha), 'Expected 
 $assert(str_contains($upstreamReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected upstream reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
 $assert(str_contains($upstreamReconcileWorkflow, "automation:framework-update"), 'Expected upstream reconciliation workflow to limit closed-PR reconciliation to framework automation PRs.');
 $assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected finalize release workflow to publish a SHA-256 checksum asset.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected finalize release workflow to publish a detached checksum signature asset.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'sha256sum wp-core-base-vendor-snapshot.zip > wp-core-base-vendor-snapshot.zip.sha256'), 'Expected finalize release workflow to bind the checksum sidecar to the artifact filename.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'release-sign'), 'Expected finalize release workflow to create a detached release signature.');
 $assert(str_contains($upstreamFinalizeWorkflow, "git push --delete origin"), 'Expected finalize release workflow to roll back the pushed tag when release publishing fails.');
 $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected manual release workflow to publish a SHA-256 checksum asset.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected manual release workflow to publish a detached checksum signature asset.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'sha256sum wp-core-base-vendor-snapshot.zip > wp-core-base-vendor-snapshot.zip.sha256'), 'Expected manual release workflow to bind the checksum sidecar to the artifact filename.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'release-sign'), 'Expected manual release workflow to create a detached release signature.');
 $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'GitHub Release ${{ steps.version.outputs.value }} already exists; nothing to publish.'), 'Expected manual recovery release workflow to exit cleanly when the GitHub Release already exists.');
+$assert(str_contains($upstreamValidateWorkflow, '--artifact=dist/wp-core-base-vendor-snapshot.zip'), 'Expected CI release verification to validate the built release artifact, not only release metadata.');
+$assert(str_contains($upstreamValidateWorkflow, '--checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256'), 'Expected CI release verification to validate the built checksum sidecar.');
+$assert(str_contains($upstreamValidateWorkflow, '--signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected CI release verification to validate the detached checksum signature.');
+$assert(str_contains($upstreamValidateWorkflow, 'verify_downstream_fixture.php --profile=${{ matrix.profile }}'), 'Expected CI to exercise both downstream fixture profiles.');
+
+$signatureFixtureRoot = sys_get_temp_dir() . '/wporg-release-signature-' . bin2hex(random_bytes(4));
+mkdir($signatureFixtureRoot, 0777, true);
+$checksumFixturePath = $signatureFixtureRoot . '/artifact.zip.sha256';
+$signatureFixturePath = $signatureFixtureRoot . '/artifact.zip.sha256.sig';
+file_put_contents($checksumFixturePath, str_repeat('a', 64) . "  artifact.zip\n");
+$privateFixtureKey = (string) file_get_contents($repoRoot . '/tools/wporg-updater/tests/fixtures/release-signing/private.pem');
+$publicFixtureKeyPath = $repoRoot . '/tools/wporg-updater/tests/fixtures/release-signing/public.pem';
+$signatureDocument = FrameworkReleaseSignature::signChecksumFile($checksumFixturePath, $signatureFixturePath, $privateFixtureKey);
+$assert($signatureDocument['signed_file'] === 'artifact.zip.sha256', 'Expected release signing to bind the checksum sidecar filename.');
+$verifiedSignatureDocument = FrameworkReleaseSignature::verifyChecksumFile($checksumFixturePath, $signatureFixturePath, $publicFixtureKeyPath);
+$assert($verifiedSignatureDocument['key_id'] === $signatureDocument['key_id'], 'Expected release signature verification to report the same key identifier.');
+$signatureTamperRejected = false;
+file_put_contents($checksumFixturePath, str_repeat('b', 64) . "  artifact.zip\n");
+
+try {
+    FrameworkReleaseSignature::verifyChecksumFile($checksumFixturePath, $signatureFixturePath, $publicFixtureKeyPath);
+} catch (RuntimeException $exception) {
+    $signatureTamperRejected = str_contains($exception->getMessage(), 'digest mismatch');
+}
+
+$assert($signatureTamperRejected, 'Expected release signature verification to reject tampered checksum sidecars.');
 
 $releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
 mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);
@@ -862,6 +1180,55 @@ $suggestions = (new ManifestSuggester($loadedRelaxedConfig))->render();
 $assert(str_contains($suggestions, 'cms/languages/de_DE'), 'Expected manifest suggestions to include undeclared runtime directories.');
 $assert(str_contains($suggestions, "'kind' => 'runtime-directory'"), 'Expected manifest suggestions to infer runtime-directory kinds.');
 
+$nestedOwnershipRoot = sys_get_temp_dir() . '/wporg-ownership-nested-' . bin2hex(random_bytes(4));
+mkdir($nestedOwnershipRoot . '/cms/runtime/container/config', 0777, true);
+mkdir($nestedOwnershipRoot . '/.wp-core-base', 0777, true);
+file_put_contents($nestedOwnershipRoot . '/cms/runtime/container/config/app.php', "<?php\n");
+$nestedOwnershipManifest = [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => [
+        'mode' => 'external',
+        'enabled' => false,
+    ],
+    'runtime' => array_merge($runtimeDefaults, [
+        'ownership_roots' => ['cms/runtime'],
+        'staged_kinds' => ['runtime-directory', 'runtime-file'],
+        'validated_kinds' => ['runtime-directory', 'runtime-file'],
+    ]),
+    'github' => ['api_base' => 'https://api.github.com'],
+    'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => []],
+    'dependencies' => [[
+        'name' => 'App Config',
+        'slug' => 'app-config',
+        'kind' => 'runtime-file',
+        'management' => 'local',
+        'source' => 'local',
+        'path' => 'cms/runtime/container/config/app.php',
+        'version' => null,
+        'checksum' => null,
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider' => null, 'provider_product_id' => null],
+        'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+    ]],
+];
+file_put_contents(
+    $nestedOwnershipRoot . '/.wp-core-base/manifest.php',
+    "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($nestedOwnershipManifest, true) . ";\n"
+);
+$nestedOwnershipConfig = Config::load($nestedOwnershipRoot);
+$nestedOwnershipUndeclared = (new RuntimeOwnershipInspector($nestedOwnershipConfig))->undeclaredRuntimePaths();
+$assert(
+    in_array('cms/runtime/container', array_column($nestedOwnershipUndeclared, 'path'), true),
+    'Expected undeclared parent runtime directories not to be hidden by declared child paths.'
+);
+
 $stagedCleanRoot = sys_get_temp_dir() . '/wporg-staged-clean-' . bin2hex(random_bytes(4));
 mkdir($stagedCleanRoot . '/cms/plugins/custom-plugin/tests', 0777, true);
 mkdir($stagedCleanRoot . '/.wp-core-base', 0777, true);
@@ -1032,6 +1399,119 @@ try {
 }
 $assert($invalidKindFailed, 'Expected invalid dependency kinds to be rejected.');
 
+$contentOnlyManagedCoreRejected = false;
+try {
+    Config::fromArray($repoRoot, [
+        'profile' => 'content-only',
+        'paths' => [
+            'content_root' => 'cms',
+            'plugins_root' => 'cms/plugins',
+            'themes_root' => 'cms/themes',
+            'mu_plugins_root' => 'cms/mu-plugins',
+        ],
+        'core' => ['mode' => 'managed', 'enabled' => true],
+        'runtime' => $runtimeDefaults,
+        'github' => ['api_base' => 'https://api.github.com'],
+        'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => ['plugin', 'theme']],
+        'dependencies' => [],
+    ]);
+} catch (RuntimeException $exception) {
+    $contentOnlyManagedCoreRejected = str_contains($exception->getMessage(), 'content-only profile may not manage WordPress core');
+}
+$assert($contentOnlyManagedCoreRejected, 'Expected content-only manifests with managed core to be rejected.');
+
+$dangerousStageDirRejected = false;
+try {
+    $dangerousRuntime = $runtimeDefaults;
+    $dangerousRuntime['stage_dir'] = 'cms/plugins/build/runtime';
+    Config::fromArray($repoRoot, [
+        'profile' => 'content-only',
+        'paths' => [
+            'content_root' => 'cms',
+            'plugins_root' => 'cms/plugins',
+            'themes_root' => 'cms/themes',
+            'mu_plugins_root' => 'cms/mu-plugins',
+        ],
+        'core' => ['mode' => 'external', 'enabled' => false],
+        'runtime' => $dangerousRuntime,
+        'github' => ['api_base' => 'https://api.github.com'],
+        'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => ['plugin', 'theme']],
+        'dependencies' => [],
+    ]);
+} catch (RuntimeException $exception) {
+    $dangerousStageDirRejected = str_contains($exception->getMessage(), 'runtime.stage_dir');
+}
+$assert($dangerousStageDirRejected, 'Expected runtime.stage_dir overlap with live runtime roots to be rejected.');
+
+$dangerousControlStageDirRejected = false;
+try {
+    $dangerousRuntime = $runtimeDefaults;
+    $dangerousRuntime['stage_dir'] = '.wp-core-base/runtime';
+    Config::fromArray($repoRoot, [
+        'profile' => 'content-only',
+        'paths' => [
+            'content_root' => 'cms',
+            'plugins_root' => 'cms/plugins',
+            'themes_root' => 'cms/themes',
+            'mu_plugins_root' => 'cms/mu-plugins',
+        ],
+        'core' => ['mode' => 'external', 'enabled' => false],
+        'runtime' => $dangerousRuntime,
+        'github' => ['api_base' => 'https://api.github.com'],
+        'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => ['plugin', 'theme']],
+        'dependencies' => [],
+    ]);
+} catch (RuntimeException $exception) {
+    $dangerousControlStageDirRejected = str_contains($exception->getMessage(), 'runtime.stage_dir');
+}
+$assert($dangerousControlStageDirRejected, 'Expected runtime.stage_dir overlap with framework control paths to be rejected.');
+
+$broadAllowRuntimePathRejected = false;
+try {
+    $dangerousRuntime = $runtimeDefaults;
+    $dangerousRuntime['allow_runtime_paths'] = ['cms/plugins'];
+    Config::fromArray($repoRoot, [
+        'profile' => 'content-only',
+        'paths' => [
+            'content_root' => 'cms',
+            'plugins_root' => 'cms/plugins',
+            'themes_root' => 'cms/themes',
+            'mu_plugins_root' => 'cms/mu-plugins',
+        ],
+        'core' => ['mode' => 'external', 'enabled' => false],
+        'runtime' => $dangerousRuntime,
+        'github' => ['api_base' => 'https://api.github.com'],
+        'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => ['plugin', 'theme']],
+        'dependencies' => [],
+    ]);
+} catch (RuntimeException $exception) {
+    $broadAllowRuntimePathRejected = str_contains($exception->getMessage(), 'runtime.allow_runtime_paths');
+}
+$assert($broadAllowRuntimePathRejected, 'Expected broad runtime.allow_runtime_paths entries to be rejected.');
+
+$outsideContentAllowRuntimePathRejected = false;
+try {
+    $dangerousRuntime = $runtimeDefaults;
+    $dangerousRuntime['allow_runtime_paths'] = ['.github'];
+    Config::fromArray($repoRoot, [
+        'profile' => 'content-only',
+        'paths' => [
+            'content_root' => 'cms',
+            'plugins_root' => 'cms/plugins',
+            'themes_root' => 'cms/themes',
+            'mu_plugins_root' => 'cms/mu-plugins',
+        ],
+        'core' => ['mode' => 'external', 'enabled' => false],
+        'runtime' => $dangerousRuntime,
+        'github' => ['api_base' => 'https://api.github.com'],
+        'automation' => ['base_branch' => null, 'dry_run' => false, 'managed_kinds' => ['plugin', 'theme']],
+        'dependencies' => [],
+    ]);
+} catch (RuntimeException $exception) {
+    $outsideContentAllowRuntimePathRejected = str_contains($exception->getMessage(), 'runtime.allow_runtime_paths');
+}
+$assert($outsideContentAllowRuntimePathRejected, 'Expected runtime.allow_runtime_paths outside content_root to be rejected.');
+
 $tempScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-' . bin2hex(random_bytes(4));
 mkdir($tempScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
@@ -1042,6 +1522,10 @@ $scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/w
 $scaffoldedReconcileWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $scaffoldedBlocker = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
 $scaffoldedValidate = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml');
+$documentedWorkflow = (string) file_get_contents($repoRoot . '/docs/examples/downstream-workflow.yml');
+$documentedReconcileWorkflow = (string) file_get_contents($repoRoot . '/docs/examples/downstream-updates-reconcile-workflow.yml');
+$documentedBlockerWorkflow = (string) file_get_contents($repoRoot . '/docs/examples/downstream-pr-blocker-workflow.yml');
+$documentedValidateWorkflow = (string) file_get_contents($repoRoot . '/docs/examples/downstream-validate-runtime-workflow.yml');
 $assert(str_contains($scaffoldedManifest, "'profile' => 'content-only'"), 'Expected scaffolded manifest to set the requested profile.');
 $assert(str_contains($scaffoldedManifest, "'content_root' => 'cms'"), 'Expected scaffolded manifest to set the requested content root.');
 $assert(str_contains($scaffoldedManifest, "'manifest_mode' => 'strict'"), 'Expected scaffolded manifest to include manifest mode.');
@@ -1069,12 +1553,95 @@ $assert(str_contains($scaffoldedBlocker, $checkoutActionSha), 'Expected scaffold
 $assert(str_contains($scaffoldedBlocker, $setupPhpActionSha), 'Expected scaffolded blocker workflow to pin setup-php by full commit SHA.');
 $assert(str_contains($scaffoldedValidate, $checkoutActionSha), 'Expected scaffolded validation workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($scaffoldedValidate, $setupPhpActionSha), 'Expected scaffolded validation workflow to pin setup-php by full commit SHA.');
+$assert($normalizeWorkflowExample($scaffoldedWorkflow) === $normalizeWorkflowExample($documentedWorkflow), 'Expected downstream updates example workflow to match scaffolded output.');
+$assert($normalizeWorkflowExample($scaffoldedReconcileWorkflow) === $normalizeWorkflowExample($documentedReconcileWorkflow), 'Expected downstream reconciliation example workflow to match scaffolded output.');
+$assert($normalizeWorkflowExample($scaffoldedBlocker) === $normalizeWorkflowExample($documentedBlockerWorkflow), 'Expected downstream blocker example workflow to match scaffolded output.');
+$assert($normalizeWorkflowExample($scaffoldedValidate) === $normalizeWorkflowExample($documentedValidateWorkflow), 'Expected downstream validation example workflow to match scaffolded output.');
 $scaffoldedFramework = FrameworkConfig::load($tempScaffoldRoot);
 $assert($scaffoldedFramework->distributionPath() === 'vendor/wp-core-base', 'Expected scaffolded framework metadata to point at the vendored framework path.');
 $scaffoldedFrameworkWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wp-core-base-self-update.yml');
+$documentedFrameworkWorkflow = (string) file_get_contents($repoRoot . '/docs/examples/downstream-framework-self-update-workflow.yml');
 $assert(str_contains($scaffoldedFrameworkWorkflow, 'framework-sync --repo-root=.'), 'Expected scaffolded self-update workflow to run framework-sync.');
 $assert(str_contains($scaffoldedFrameworkWorkflow, $checkoutActionSha), 'Expected scaffolded framework self-update workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($scaffoldedFrameworkWorkflow, $setupPhpActionSha), 'Expected scaffolded framework self-update workflow to pin setup-php by full commit SHA.');
+$assert($normalizeWorkflowExample($scaffoldedFrameworkWorkflow) === $normalizeWorkflowExample($documentedFrameworkWorkflow), 'Expected downstream framework self-update example workflow to match scaffolded output.');
+$renderedManagedFiles = (new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->renderFrameworkManagedFiles('vendor/wp-core-base');
+$workflowExampleMap = [
+    'docs/examples/downstream-workflow.yml' => '.github/workflows/wporg-updates.yml',
+    'docs/examples/downstream-updates-reconcile-workflow.yml' => '.github/workflows/wporg-updates-reconcile.yml',
+    'docs/examples/downstream-pr-blocker-workflow.yml' => '.github/workflows/wporg-update-pr-blocker.yml',
+    'docs/examples/downstream-validate-runtime-workflow.yml' => '.github/workflows/wporg-validate-runtime.yml',
+    'docs/examples/downstream-framework-self-update-workflow.yml' => '.github/workflows/wp-core-base-self-update.yml',
+];
+$extractWorkflowPermissions = static function (string $contents): string {
+    if (preg_match('/^permissions:\n(?:(?:  .*\n)+)/m', $contents, $matches) === 1) {
+        return trim($matches[0]);
+    }
+
+    throw new RuntimeException('Workflow did not contain a permissions block.');
+};
+$extractRunCommands = static function (string $contents): array {
+    preg_match_all('/^\s*run:\s*(.+)$/m', $contents, $matches);
+
+    return array_values(array_map(static fn (string $command): string => trim($command), $matches[1]));
+};
+
+foreach ($workflowExampleMap as $examplePath => $managedPath) {
+    $exampleContents = (string) file_get_contents($repoRoot . '/' . $examplePath);
+    $managedContents = (string) $renderedManagedFiles[$managedPath];
+    $assert(
+        $extractWorkflowPermissions($exampleContents) === $extractWorkflowPermissions($managedContents),
+        sprintf('Expected example workflow %s to keep permissions in parity with %s.', $examplePath, $managedPath)
+    );
+
+    foreach ($extractRunCommands($managedContents) as $command) {
+        $assert(
+            in_array($command, $extractRunCommands($exampleContents), true),
+            sprintf('Expected example workflow %s to retain command parity for `%s`.', $examplePath, $command)
+        );
+    }
+}
+
+$repoWorkflowExpectations = [
+    '.github/workflows/wporg-updates.yml' => ['contents: write', 'pull-requests: write', 'issues: write'],
+    '.github/workflows/wporg-updates-reconcile.yml' => ['contents: write', 'pull-requests: write', 'issues: write'],
+    '.github/workflows/wporg-update-pr-blocker.yml' => ['contents: read', 'pull-requests: read', 'issues: read'],
+    '.github/workflows/wporg-validate-runtime.yml' => ['contents: read'],
+];
+
+foreach ($repoWorkflowExpectations as $workflowPath => $snippets) {
+    $workflowContents = (string) file_get_contents($repoRoot . '/' . $workflowPath);
+
+    foreach ($snippets as $snippet) {
+        $assert(
+            str_contains($workflowContents, $snippet),
+            sprintf('Expected repository workflow %s to retain permission snippet `%s`.', $workflowPath, $snippet)
+        );
+    }
+}
+
+$conflictScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-conflict-' . bin2hex(random_bytes(4));
+mkdir($conflictScaffoldRoot . '/.github/workflows', 0777, true);
+file_put_contents($conflictScaffoldRoot . '/.github/workflows/wporg-updates.yml', "# local workflow customization\n");
+$conflictRejected = false;
+
+try {
+    (new DownstreamScaffolder(dirname(__DIR__, 3), $conflictScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', false);
+} catch (RuntimeException $exception) {
+    $conflictRejected = str_contains($exception->getMessage(), '--adopt-existing-managed-files');
+}
+
+$assert($conflictRejected, 'Expected scaffold-downstream to reject conflicting managed files unless force or adopt-existing-managed-files is used.');
+(new DownstreamScaffolder(dirname(__DIR__, 3), $conflictScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', false, true);
+$assert(
+    (string) file_get_contents($conflictScaffoldRoot . '/.github/workflows/wporg-updates.yml') === "# local workflow customization\n",
+    'Expected scaffold-downstream --adopt-existing-managed-files to preserve local managed-file contents.'
+);
+$adoptedFramework = FrameworkConfig::load($conflictScaffoldRoot);
+$assert(
+    $adoptedFramework->managedFiles()['.github/workflows/wporg-updates.yml'] === 'sha256:' . hash('sha256', "# local workflow customization\n"),
+    'Expected adopted framework-managed files to be recorded using the current local contents checksum.'
+);
 $premiumSourceDetailsWithoutNotes = [
     'version' => '6.3.0',
     'release_at' => gmdate(DATE_ATOM),
@@ -1140,13 +1707,13 @@ $assert(
 $partitionPullRequestsByTargetVersion = $updaterReflection->getMethod('partitionPullRequestsByTargetVersion');
 $partitionPullRequestsByTargetVersion->setAccessible(true);
 [$canonicalPrs, $duplicatePrs] = $partitionPullRequestsByTargetVersion->invoke($updaterWithoutConstructor, [
-    ['number' => 38, 'planned_target_version' => '0.1.0'],
-    ['number' => 37, 'planned_target_version' => '0.1.0'],
-    ['number' => 39, 'planned_target_version' => '0.2.0'],
+    ['number' => 38, 'planned_target_version' => '0.1.0', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-02T00:00:00+00:00', 'metadata' => ['branch' => 'codex/update-a'], 'head' => ['ref' => 'codex/update-a', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
+    ['number' => 37, 'planned_target_version' => '0.1.0', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-01T00:00:00+00:00', 'metadata' => ['branch' => 'codex/update-b'], 'head' => ['ref' => 'codex/update-b', 'repo' => ['full_name' => 'fork/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
+    ['number' => 39, 'planned_target_version' => '0.2.0', 'planned_release_at' => '2026-04-03T00:00:00+00:00', 'updated_at' => '2026-04-03T00:00:00+00:00', 'metadata' => ['branch' => 'codex/update-c'], 'head' => ['ref' => 'codex/update-c', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
 ]);
 $assert(count($canonicalPrs) === 2, 'Expected updater duplicate partitioning to keep one canonical PR per target version.');
-$assert((int) $canonicalPrs[0]['number'] === 37, 'Expected updater duplicate partitioning to keep the oldest PR for a duplicated target version.');
-$assert(count($duplicatePrs) === 1 && (int) $duplicatePrs[0]['number'] === 38, 'Expected updater duplicate partitioning to mark later PRs for the same target version as duplicates.');
+$assert((int) $canonicalPrs[0]['number'] === 38, 'Expected updater duplicate partitioning to prefer the healthiest duplicate candidate, not simply the oldest PR.');
+$assert(count($duplicatePrs) === 1 && (int) $duplicatePrs[0]['number'] === 37, 'Expected updater duplicate partitioning to quarantine the weaker duplicate candidate.');
 $pullRequestAlreadySatisfied = $updaterReflection->getMethod('pullRequestAlreadySatisfied');
 $pullRequestAlreadySatisfied->setAccessible(true);
 $assert(
@@ -1166,13 +1733,13 @@ $coreUpdaterWithoutConstructor = $coreUpdaterReflection->newInstanceWithoutConst
 $corePartition = $coreUpdaterReflection->getMethod('partitionPullRequestsByTargetVersion');
 $corePartition->setAccessible(true);
 [$coreCanonical, $coreDuplicates] = $corePartition->invoke($coreUpdaterWithoutConstructor, [
-    ['number' => 11, 'planned_target_version' => '6.9.4'],
-    ['number' => 12, 'planned_target_version' => '6.9.4'],
-    ['number' => 13, 'planned_target_version' => '7.0.0'],
+    ['number' => 11, 'planned_target_version' => '6.9.4', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-01T00:00:00+00:00', 'metadata' => ['branch' => 'codex/core-a'], 'head' => ['ref' => 'codex/core-a', 'repo' => ['full_name' => 'fork/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
+    ['number' => 12, 'planned_target_version' => '6.9.4', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-02T00:00:00+00:00', 'metadata' => ['branch' => 'codex/core-b'], 'head' => ['ref' => 'codex/core-b', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
+    ['number' => 13, 'planned_target_version' => '7.0.0', 'planned_release_at' => '2026-04-03T00:00:00+00:00', 'updated_at' => '2026-04-03T00:00:00+00:00', 'metadata' => ['branch' => 'codex/core-c'], 'head' => ['ref' => 'codex/core-c', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
 ]);
 $assert(count($coreCanonical) === 2, 'Expected core updater duplicate partitioning to keep one canonical PR per target version.');
-$assert((int) $coreCanonical[0]['number'] === 11, 'Expected core updater duplicate partitioning to keep the oldest PR for a duplicated target version.');
-$assert(count($coreDuplicates) === 1 && (int) $coreDuplicates[0]['number'] === 12, 'Expected core updater duplicate partitioning to mark later PRs for the same target version as duplicates.');
+$assert((int) $coreCanonical[0]['number'] === 12, 'Expected core updater duplicate partitioning to prefer the healthiest duplicate candidate.');
+$assert(count($coreDuplicates) === 1 && (int) $coreDuplicates[0]['number'] === 11, 'Expected core updater duplicate partitioning to mark the weaker duplicate candidate.');
 $coreSatisfied = $coreUpdaterReflection->getMethod('pullRequestAlreadySatisfied');
 $coreSatisfied->setAccessible(true);
 $assert(
@@ -1188,13 +1755,13 @@ $frameworkSyncerWithoutConstructor = $frameworkSyncerReflection->newInstanceWith
 $frameworkPartition = $frameworkSyncerReflection->getMethod('partitionPullRequestsByTargetVersion');
 $frameworkPartition->setAccessible(true);
 [$frameworkCanonical, $frameworkDuplicates] = $frameworkPartition->invoke($frameworkSyncerWithoutConstructor, [
-    ['number' => 21, 'planned_target_version' => '1.3.1'],
-    ['number' => 22, 'planned_target_version' => '1.3.1'],
-    ['number' => 23, 'planned_target_version' => '1.4.0'],
+    ['number' => 21, 'planned_target_version' => '1.3.1', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-01T00:00:00+00:00', 'metadata' => ['branch' => 'codex/framework-a'], 'head' => ['ref' => 'codex/framework-a', 'repo' => ['full_name' => 'fork/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
+    ['number' => 22, 'planned_target_version' => '1.3.1', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-02T00:00:00+00:00', 'metadata' => ['branch' => 'codex/framework-b'], 'head' => ['ref' => 'codex/framework-b', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
+    ['number' => 23, 'planned_target_version' => '1.4.0', 'planned_release_at' => '2026-04-03T00:00:00+00:00', 'updated_at' => '2026-04-03T00:00:00+00:00', 'metadata' => ['branch' => 'codex/framework-c'], 'head' => ['ref' => 'codex/framework-c', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
 ]);
 $assert(count($frameworkCanonical) === 2, 'Expected framework sync duplicate partitioning to keep one canonical PR per target version.');
-$assert((int) $frameworkCanonical[0]['number'] === 21, 'Expected framework sync duplicate partitioning to keep the oldest PR for a duplicated target version.');
-$assert(count($frameworkDuplicates) === 1 && (int) $frameworkDuplicates[0]['number'] === 22, 'Expected framework sync duplicate partitioning to mark later PRs for the same target version as duplicates.');
+$assert((int) $frameworkCanonical[0]['number'] === 22, 'Expected framework sync duplicate partitioning to prefer the healthiest duplicate candidate.');
+$assert(count($frameworkDuplicates) === 1 && (int) $frameworkDuplicates[0]['number'] === 21, 'Expected framework sync duplicate partitioning to mark the weaker duplicate candidate.');
 $frameworkSatisfied = $frameworkSyncerReflection->getMethod('pullRequestAlreadySatisfied');
 $frameworkSatisfied->setAccessible(true);
 $assert(
@@ -1214,7 +1781,7 @@ $assert(str_contains($scaffoldedUpdatesWorkflow, 'render-sync-report'), 'Expecte
 $assert(str_contains($scaffoldedUpdatesWorkflow, 'sync-report-issue'), 'Expected scaffolded updates workflow to synchronize the dependency source-failure issue.');
 $assert(str_contains($scaffoldedReconcileWorkflow, '--report-json=.wp-core-base/build/sync-report.json --fail-on-source-errors'), 'Expected scaffolded reconcile workflow to fail after the run when dependency-source warnings were recorded.');
 $assert(str_contains($scaffoldedReconcileWorkflow, 'sync-report-issue'), 'Expected scaffolded reconcile workflow to synchronize the dependency source-failure issue.');
-$syncReport = SyncReport::build([], ['plugin:premium:private-plugin: Invalid access credentials.']);
+$syncReport = SyncReport::build([], ['plugin:premium:example-vendor:private-plugin: Invalid access credentials.']);
 $assert($syncReport['status'] === SyncReport::STATUS_WARNING, 'Expected sync report builder to mark dependency-source warnings as warning status.');
 $assert(SyncReport::renderSummary($syncReport) !== '', 'Expected sync report renderer to produce summary markdown.');
 $syncReportPath = sys_get_temp_dir() . '/wporg-sync-report-' . bin2hex(random_bytes(4)) . '.json';
@@ -1222,10 +1789,197 @@ SyncReport::write($syncReport, $syncReportPath);
 $assert(SyncReport::exists($syncReportPath), 'Expected sync report writer to create the requested report file.');
 $reloadedSyncReport = SyncReport::read($syncReportPath);
 $assert(($reloadedSyncReport['warning_count'] ?? null) === 1, 'Expected sync report reader to reload the written warning count.');
+$fakeIssueClient = new FakeGitHubAutomationClient();
+$fakeIssueClient->openIssues = [
+    ['number' => 8, 'title' => 'wp-core-base dependency source failures'],
+    ['number' => 9, 'title' => 'wp-core-base dependency source failures'],
+];
+SyncReport::syncIssue($fakeIssueClient, $syncReport, 'https://example.com/run');
+$assert(count($fakeIssueClient->updatedIssues) === 1, 'Expected sync-report issue sync to update the canonical open issue when warnings exist.');
+$assert(count($fakeIssueClient->closedIssues) === 1 && (int) $fakeIssueClient->closedIssues[0]['number'] === 9, 'Expected sync-report issue sync to close duplicate open issues.');
+$clearIssueClient = new FakeGitHubAutomationClient();
+$clearIssueClient->openIssues = [['number' => 10, 'title' => 'wp-core-base dependency source failures']];
+SyncReport::syncIssue($clearIssueClient, SyncReport::build([], []), null);
+$assert(count($clearIssueClient->closedIssues) === 1 && (int) $clearIssueClient->closedIssues[0]['number'] === 10, 'Expected sync-report issue sync to close stale failure issues after recovery.');
+
+$branchGuardRoot = sys_get_temp_dir() . '/wporg-branch-guard-' . bin2hex(random_bytes(4));
+mkdir($branchGuardRoot . '/.wp-core-base/build/leftover', 0777, true);
+file_put_contents($branchGuardRoot . '/.wp-core-base/build/leftover/temp.txt', "leftover\n");
+$fakeGitRunner = new FakeGitRunner();
+$fakeGitRunner->localBranches['codex/test-update'] = 'old-local-sha';
+$fakeGitRunner->remoteBranches['codex/test-update'] = 'old-remote-sha';
+$guard = new BranchRollbackGuard($branchGuardRoot, $fakeGitRunner);
+$guard->begin();
+$guard->trackBranch('codex/test-update');
+$guard->trackCleanupPath($branchGuardRoot . '/.wp-core-base/build/leftover');
+$fakeGitRunner->currentBranch = 'codex/test-update';
+$fakeGitRunner->currentRevision = 'new-sha';
+$fakeGitRunner->localBranches['codex/test-update'] = 'new-sha';
+$fakeGitRunner->remoteBranches['codex/test-update'] = 'new-sha';
+$fakeGitRunner->clean = false;
+$rollbackRaised = false;
+
+try {
+    $guard->rollback(new RuntimeException('Simulated failure after branch mutation.'));
+} catch (RuntimeException $exception) {
+    $rollbackRaised = str_contains($exception->getMessage(), 'Simulated failure');
+}
+
+$assert($rollbackRaised, 'Expected branch rollback guard to rethrow the original failure after restoring branch state.');
+$assert($fakeGitRunner->currentBranch === 'main', 'Expected branch rollback guard to restore the original checked-out branch.');
+$assert(($fakeGitRunner->localBranches['codex/test-update'] ?? null) === 'old-local-sha', 'Expected branch rollback guard to restore the local automation branch revision.');
+$assert(($fakeGitRunner->remoteBranches['codex/test-update'] ?? null) === 'old-remote-sha', 'Expected branch rollback guard to restore the remote automation branch revision.');
+$assert(! file_exists($branchGuardRoot . '/.wp-core-base/build/leftover/temp.txt'), 'Expected branch rollback guard to clean tool-created untracked residue.');
+$assert(in_array('clean-untracked', $fakeGitRunner->actions, true), 'Expected branch rollback guard to clean untracked repository files during rollback.');
+
+$metadataComment = '<!-- wporg-update-metadata: {"component_key":"plugin:premium:example-vendor:demo-plugin","target_version":"2.0.0","blocked_by":[5]} -->';
+$eventPath = sys_get_temp_dir() . '/wporg-pr-blocker-' . bin2hex(random_bytes(4)) . '.json';
+file_put_contents($eventPath, json_encode([
+    'pull_request' => [
+        'number' => 9,
+        'body' => $metadataComment,
+    ],
+], JSON_THROW_ON_ERROR));
+putenv('GITHUB_EVENT_PATH=' . $eventPath);
+$blockedReader = new FakePullRequestReader(
+    openPullRequests: [
+        [
+            'number' => 7,
+            'body' => '<!-- wporg-update-metadata: {"component_key":"plugin:premium:example-vendor:demo-plugin","target_version":"1.9.0"} -->',
+        ],
+    ],
+    pullRequestsByNumber: [
+        5 => ['number' => 5, 'state' => 'open', 'merged_at' => null],
+    ]
+);
+$blockedStatus = (new PullRequestBlocker($blockedReader))->evaluateCurrentPullRequestStatus();
+$assert($blockedStatus['status'] === PullRequestBlocker::STATUS_BLOCKED, 'Expected pr-blocker to report a blocked state when a predecessor PR is still open.');
+$assert($blockedStatus['exit_code'] === 1, 'Expected pr-blocker blocked status to keep exit code 1.');
+$closedPredecessorReader = new FakePullRequestReader(
+    openPullRequests: [],
+    pullRequestsByNumber: [
+        5 => ['number' => 5, 'state' => 'closed', 'merged_at' => null],
+    ]
+);
+$closedPredecessorStatus = (new PullRequestBlocker($closedPredecessorReader))->evaluateCurrentPullRequestStatus();
+$assert($closedPredecessorStatus['status'] !== PullRequestBlocker::STATUS_BLOCKED, 'Expected pr-blocker to ignore closed predecessors that were not merged.');
+$degradedReader = new FakePullRequestReader(
+    openPullRequests: [],
+    listFailure: new RuntimeException('GitHub API unavailable.')
+);
+$degradedStatus = (new PullRequestBlocker($degradedReader))->evaluateCurrentPullRequestStatus();
+$assert($degradedStatus['status'] === PullRequestBlocker::STATUS_DEGRADED, 'Expected pr-blocker to report degraded status when GitHub verification fails.');
+$assert($degradedStatus['exit_code'] === 0, 'Expected degraded pr-blocker status to preserve the current fail-open exit code.');
+
+$premiumSingleConfig = Config::fromArray($repoRoot, [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => ['enabled' => false, 'mode' => 'external'],
+    'dependencies' => [
+        [
+            'name' => 'Premium Plugin',
+            'slug' => 'premium-plugin',
+            'kind' => 'plugin',
+            'management' => 'managed',
+            'source' => 'premium',
+            'path' => 'cms/plugins/premium-plugin',
+            'main_file' => 'premium-plugin.php',
+            'version' => '1.0.0',
+            'checksum' => 'sha256:test',
+            'source_config' => ['provider' => 'example-vendor'],
+            'policy' => ['class' => 'managed-premium', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+        ],
+    ],
+]);
+$assert($premiumSingleConfig->dependencyByKey('plugin:premium:example-vendor:premium-plugin')['source_config']['provider'] === 'example-vendor', 'Expected provider-aware premium component keys to resolve directly.');
+$assert($premiumSingleConfig->dependencyByKey('plugin:premium:premium-plugin')['source_config']['provider'] === 'example-vendor', 'Expected legacy premium component keys to remain readable during migration.');
+$premiumAmbiguousConfig = Config::fromArray($repoRoot, [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => ['enabled' => false, 'mode' => 'external'],
+    'dependencies' => [
+        [
+            'name' => 'Premium Plugin A',
+            'slug' => 'shared-plugin',
+            'kind' => 'plugin',
+            'management' => 'managed',
+            'source' => 'premium',
+            'path' => 'cms/plugins/shared-plugin-a',
+            'main_file' => 'shared-plugin.php',
+            'version' => '1.0.0',
+            'checksum' => 'sha256:test-a',
+            'source_config' => ['provider' => 'vendor-a'],
+            'policy' => ['class' => 'managed-premium', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+        ],
+        [
+            'name' => 'Premium Plugin B',
+            'slug' => 'shared-plugin',
+            'kind' => 'plugin',
+            'management' => 'managed',
+            'source' => 'premium',
+            'path' => 'cms/plugins/shared-plugin-b',
+            'main_file' => 'shared-plugin.php',
+            'version' => '1.0.0',
+            'checksum' => 'sha256:test-b',
+            'source_config' => ['provider' => 'vendor-b'],
+            'policy' => ['class' => 'managed-premium', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+        ],
+    ],
+]);
+$ambiguousLegacyPremiumKey = false;
+
+try {
+    $premiumAmbiguousConfig->dependencyByKey('plugin:premium:shared-plugin');
+} catch (RuntimeException $exception) {
+    $ambiguousLegacyPremiumKey = str_contains($exception->getMessage(), 'ambiguous');
+}
+
+$assert($ambiguousLegacyPremiumKey, 'Expected legacy premium component keys to become ambiguous once multiple providers share the same slug.');
+$credentialsStore = new PremiumCredentialsStore(json_encode([
+    'plugin:premium:premium-plugin' => ['license_key' => 'legacy-secret'],
+], JSON_THROW_ON_ERROR));
+$resolvedCredentials = $credentialsStore->credentialsFor([
+    'component_key' => 'plugin:premium:example-vendor:premium-plugin',
+    'kind' => 'plugin',
+    'source' => 'premium',
+    'slug' => 'premium-plugin',
+    'source_config' => ['provider' => 'example-vendor'],
+]);
+$assert(($resolvedCredentials['license_key'] ?? null) === 'legacy-secret', 'Expected premium credentials lookup to fall back to legacy premium keys during migration.');
+$redacted = OutputRedactor::redact('Authorization: Bearer very-secret-token https://user:pass@example.com/path');
+$assert(! str_contains($redacted, 'very-secret-token'), 'Expected output redaction to scrub bearer tokens.');
+$assert(! str_contains($redacted, 'user:pass'), 'Expected output redaction to scrub basic-auth URL credentials.');
+$benignUrlRedaction = OutputRedactor::redact('See https://wordpress.org/plugins/example-plugin/ for details.');
+$assert(str_contains($benignUrlRedaction, 'https://wordpress.org/plugins/example-plugin/'), 'Expected benign HTTPS URLs to remain visible in diagnostics.');
+
+$verifierReflection = new ReflectionClass(FrameworkReleaseVerifier::class);
+$extractChecksum = $verifierReflection->getMethod('extractChecksum');
+$extractChecksum->setAccessible(true);
+$checksumRejected = false;
+
+try {
+    $extractChecksum->invoke(new FrameworkReleaseVerifier($repoRoot), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  wrong-file.zip\n", 'wp-core-base-vendor-snapshot.zip');
+} catch (RuntimeException $exception) {
+    $checksumRejected = str_contains($exception->getMessage(), 'expected');
+}
+
+$assert($checksumRejected, 'Expected framework release verification to reject checksum lines bound to the wrong artifact name.');
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);
-(new RuntimeInspector($config->runtime))->copyPath($repoRoot, $payloadRoot);
+$repoRuntimeInspector = new RuntimeInspector($config->runtime);
+$repoRuntimeInspector->clearPath($repoRoot . '/.wp-core-base/build');
+$repoRuntimeInspector->copyPath($repoRoot, $payloadRoot);
 (new RuntimeInspector($config->runtime))->clearPath($payloadRoot . '/.git');
 $payloadFramework = FrameworkConfig::load($payloadRoot)->withInstalledRelease(
     version: '1.0.1',
@@ -1562,7 +2316,7 @@ $premiumConfig = Config::fromArray($managedPlanRoot, [
         ],
     ]],
 ], $managedPlanRoot . '/.wp-core-base/manifest.php');
-$premiumDependency = $premiumConfig->dependencyByKey('plugin:premium:example-premium-plugin');
+$premiumDependency = $premiumConfig->dependencyByKey('plugin:premium:example-vendor:example-premium-plugin');
 $assert($premiumDependency['source_config']['provider'] === 'example-vendor', 'Expected generic premium dependencies to retain provider metadata.');
 $assert(
     $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader)->for($premiumDependency)->key() === 'example-vendor',
@@ -1582,6 +2336,18 @@ $assert(
     ((array) $premiumSourceDetails['source_details'])[0]['value'] === '`premium` provider `example-vendor`',
     'Expected generic premium release details to describe the registered premium provider contract.'
 );
+$assert(
+    count((new ExamplePremiumManagedSource(new HttpClient(), new PremiumCredentialsStore('{}')))->hostPolicyWarnings()) === 2,
+    'Expected premium provider host-policy diagnostics to warn when API and download allowlists are not declared.'
+);
+
+$supportListingRejected = false;
+try {
+    $supportClient->parseSupportListing('<html><body><a class="bbp-topic-permalink" href="https://example.com/offsite-topic">Bad Topic</a></body></html>');
+} catch (RuntimeException $exception) {
+    $supportListingRejected = str_contains($exception->getMessage(), 'wordpress.org/support');
+}
+$assert($supportListingRejected, 'Expected support topic parsing to reject offsite topic URLs.');
 
 $premiumDuplicateRoot = sys_get_temp_dir() . '/wporg-premium-duplicate-' . bin2hex(random_bytes(4));
 mkdir($premiumDuplicateRoot . '/cms/plugins/example-premium-plugin', 0777, true);
@@ -1635,10 +2401,26 @@ try {
         'slug' => 'example-premium-plugin',
     ]);
 } catch (RuntimeException $exception) {
-    $duplicateBlocked = str_contains($exception->getMessage(), 'Dependency already exists: plugin:premium:example-premium-plugin');
+    $duplicateBlocked = str_contains($exception->getMessage(), 'Dependency already exists: plugin:premium:example-vendor:example-premium-plugin');
 }
 
 $assert($duplicateBlocked, 'Expected premium authoring to reject duplicate provider/slug combinations.');
+
+$dependencyAuthoringReflection = new ReflectionClass(\WpOrgPluginUpdater\DependencyAuthoringService::class);
+$matchesIdentity = $dependencyAuthoringReflection->getMethod('dependencyMatchesIdentity');
+$matchesIdentity->setAccessible(true);
+$assert(
+    $matchesIdentity->invoke($premiumDuplicateService, $premiumDuplicateConfig->dependencies()[0], 'plugin', 'premium', 'example-premium-plugin', 'other-vendor') === false,
+    'Expected premium dependency identity matching to distinguish providers for the same slug.'
+);
+
+$removedLegacy = $premiumDuplicateService->removeDependency([
+    'component-key' => 'plugin:premium:example-premium-plugin',
+]);
+$assert(
+    ($removedLegacy['removed']['component_key'] ?? null) === 'plugin:premium:example-vendor:example-premium-plugin',
+    'Expected remove-dependency to honor legacy premium component keys during migration.'
+);
 
 $adoptRoot = sys_get_temp_dir() . '/wporg-authoring-adopt-' . bin2hex(random_bytes(4));
 mkdir($adoptRoot . '/cms/plugins/adopt-me', 0777, true);
@@ -1756,10 +2538,16 @@ $writeManifest($rollbackRoot, [[
     'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider' => null, 'provider_product_id' => null],
     'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
 ]]);
+$rollbackGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector(Config::load($rollbackRoot)->runtime));
+$rollbackGovernanceExporter->refresh(Config::load($rollbackRoot));
+$rollbackManifestBefore = (string) file_get_contents($rollbackRoot . '/.wp-core-base/manifest.php');
+$rollbackGovernancePath = $rollbackRoot . '/' . FrameworkRuntimeFiles::governanceDataPath(Config::load($rollbackRoot));
+$rollbackGovernanceBefore = (string) file_get_contents($rollbackGovernancePath);
 $failingWriter = new class implements ConfigWriter
 {
     public function write(Config $config): void
     {
+        (new ManifestWriter())->write($config);
         throw new RuntimeException('Synthetic manifest write failure.');
     }
 };
@@ -1770,7 +2558,7 @@ $rollbackService = new DependencyAuthoringService(
     runtimeInspector: new RuntimeInspector($rollbackConfig->runtime),
     manifestWriter: $failingWriter,
     managedSourceRegistry: $makeManagedSourceRegistry($rollbackWpSource, $fakeGitHubReleaseSource, $rollbackDownloader),
-    adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($rollbackConfig->runtime)),
+    adminGovernanceExporter: $rollbackGovernanceExporter,
 );
 $rollbackTriggered = false;
 
@@ -1791,6 +2579,14 @@ $restoredPlugin = (string) file_get_contents($rollbackRoot . '/cms/plugins/rollb
 $assert(str_contains($restoredPlugin, 'Version: 1.0.0'), 'Expected adopt-dependency to restore the original runtime tree when manifest writing fails.');
 $rollbackConfigAfter = Config::load($rollbackRoot);
 $assert($rollbackConfigAfter->dependencyByKey('plugin:local:rollback-plugin')['version'] === '1.0.0', 'Expected rollback to leave the original local manifest entry intact.');
+$assert(
+    (string) file_get_contents($rollbackConfigAfter->manifestPath) === $rollbackManifestBefore,
+    'Expected adopt-dependency rollback to restore the previous manifest contents after a post-write failure.'
+);
+$assert(
+    (string) file_get_contents($rollbackGovernancePath) === $rollbackGovernanceBefore,
+    'Expected adopt-dependency rollback to preserve the previous admin governance file when manifest persistence fails after writing.'
+);
 $rollbackManagedMissing = true;
 foreach ($rollbackConfigAfter->dependencies() as $dependency) {
     if ($dependency['component_key'] === 'plugin:wordpress.org:rollback-plugin') {
@@ -1947,6 +2743,24 @@ try {
 }
 
 $assert($zipTraversalRejected, 'Expected ZipExtractor to reject path traversal entries.');
+
+$zipBombPath = sys_get_temp_dir() . '/wporg-zip-bomb-' . bin2hex(random_bytes(4)) . '.zip';
+$zipBomb = new ZipArchive();
+$assert($zipBomb->open($zipBombPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true, 'Expected to create ZIP bomb fixture.');
+$zipBomb->addFromString('bomb.txt', str_repeat('A', 1024 * 1024));
+$zipBomb->close();
+$zipBombRejected = false;
+$zipBombReader = new ZipArchive();
+$assert($zipBombReader->open($zipBombPath) === true, 'Expected to reopen ZIP bomb fixture.');
+
+try {
+    ZipExtractor::extractValidated($zipBombReader, sys_get_temp_dir() . '/wporg-zip-bomb-extract-' . bin2hex(random_bytes(4)));
+} catch (RuntimeException $exception) {
+    $zipBombRejected = str_contains($exception->getMessage(), 'compression ratio');
+}
+
+$zipBombReader->close();
+$assert($zipBombRejected, 'Expected ZipExtractor to reject suspicious compression ratios.');
 
 $tempCoreRoot = sys_get_temp_dir() . '/wporg-core-scanner-' . bin2hex(random_bytes(4));
 mkdir($tempCoreRoot . '/wp-includes', 0777, true);

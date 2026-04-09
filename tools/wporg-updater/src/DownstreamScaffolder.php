@@ -14,7 +14,13 @@ final class DownstreamScaffolder
     ) {
     }
 
-    public function scaffold(string $toolPath, string $profile = 'content-only-default', ?string $contentRoot = null, bool $force = false): int
+    public function scaffold(
+        string $toolPath,
+        string $profile = 'content-only-default',
+        ?string $contentRoot = null,
+        bool $force = false,
+        bool $adoptExistingManagedFiles = false
+    ): int
     {
         if (! is_dir($this->repoRoot)) {
             throw new RuntimeException(sprintf('Repository root does not exist: %s', $this->repoRoot));
@@ -88,12 +94,19 @@ final class DownstreamScaffolder
                 'rendered' => $rendered,
                 'target' => $this->repoRoot . '/' . $relativePath,
                 'replacements' => [],
+                'managed' => true,
             ];
         }
 
         foreach ($writes as $write) {
             if (isset($write['rendered'])) {
-                $this->writeRenderedFile((string) $write['rendered'], $write['target'], $force);
+                $this->writeRenderedFile(
+                    (string) $write['rendered'],
+                    $write['target'],
+                    $force,
+                    (bool) ($write['managed'] ?? false),
+                    $adoptExistingManagedFiles
+                );
             } else {
                 $this->writeFile(
                     $write['source'],
@@ -130,7 +143,8 @@ final class DownstreamScaffolder
         fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Review the local usage guidance at %s/.wp-core-base/USAGE.md and %s/AGENTS.md.\n", $this->repoRoot, $this->repoRoot));
         fwrite(STDOUT, sprintf("[next] Register custom premium providers in %s/.wp-core-base/premium-providers.php if your project needs premium workflow sources.\n", $this->repoRoot));
-        fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $doctorCommand));
+        fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $this->updaterCommand($toolPath, 'doctor --repo-root=.')));
+        fwrite(STDOUT, sprintf("[next] Run `%s` before enabling scheduled automation.\n", $doctorCommand));
         fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 
         if (str_starts_with(trim($toolPath, '/'), 'vendor/')) {
@@ -225,7 +239,13 @@ final class DownstreamScaffolder
         $this->writeRenderedFile($rendered, $target, $force);
     }
 
-    private function writeRenderedFile(string $rendered, string $target, bool $force): void
+    private function writeRenderedFile(
+        string $rendered,
+        string $target,
+        bool $force,
+        bool $managed = false,
+        bool $adoptExistingManagedFiles = false
+    ): void
     {
         $targetDir = dirname($target);
 
@@ -241,7 +261,19 @@ final class DownstreamScaffolder
                 return;
             }
 
+            if ($managed && $adoptExistingManagedFiles) {
+                fwrite(STDOUT, sprintf("[ok] Adopted existing framework-managed file without overwrite: %s\n", $target));
+                return;
+            }
+
             if (! $force) {
+                if ($managed) {
+                    throw new RuntimeException(sprintf(
+                        'Refusing to overwrite existing framework-managed file without --force or --adopt-existing-managed-files: %s',
+                        $target
+                    ));
+                }
+
                 fwrite(STDOUT, sprintf("[warn] Skipped existing file without --force: %s\n", $target));
                 return;
             }

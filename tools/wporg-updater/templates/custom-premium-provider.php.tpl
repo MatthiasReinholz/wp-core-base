@@ -17,6 +17,20 @@ final class __CLASS_NAME__ extends AbstractPremiumManagedSource
         return [];
     }
 
+    protected function allowedApiHosts(): array
+    {
+        return [
+            // 'api.example-vendor.com',
+        ];
+    }
+
+    protected function allowedDownloadHosts(): array
+    {
+        return [
+            // 'downloads.example-vendor.com',
+        ];
+    }
+
     public function fetchCatalog(array $dependency): array
     {
         // Return at least:

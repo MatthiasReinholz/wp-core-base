@@ -186,7 +186,7 @@ vendor/wp-core-base/bin/wp-core-base scaffold-premium-provider \
 3. Export credentials locally:
 
 ```bash
-export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:premium:premium-plugin":{"license_key":"provider-specific-secret"}}'
+export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:premium:example-vendor:premium-plugin":{"license_key":"provider-specific-secret"}}'
 ```
 
 4. Verify the repo configuration:
@@ -237,7 +237,7 @@ Premium provider credentials always come from:
 
 Lookup rules:
 
-- by default, credentials are looked up by the dependency component key, for example `plugin:premium:premium-plugin`
+- by default, credentials are looked up by the dependency component key, for example `plugin:premium:example-vendor:premium-plugin`
 - if the manifest sets `source_config.credential_key`, that override is used instead
 
 The manifest stores only:
@@ -275,7 +275,7 @@ Minimal credentials JSON example:
 
 ```json
 {
-  "plugin:premium:premium-plugin": {
+  "plugin:premium:example-vendor:premium-plugin": {
     "license_key": "provider-specific-secret"
   }
 }

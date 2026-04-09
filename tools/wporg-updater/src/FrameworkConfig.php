@@ -70,6 +70,16 @@ final class FrameworkConfig
         return $this->distribution['asset_name'];
     }
 
+    public function checksumAssetName(): string
+    {
+        return $this->assetName() . '.sha256';
+    }
+
+    public function checksumSignatureAssetName(): string
+    {
+        return $this->checksumAssetName() . '.sig';
+    }
+
     /**
      * @return array<string, string>
      */

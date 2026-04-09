@@ -59,6 +59,7 @@ final class EnvironmentDoctor
 
         if ($config !== null) {
             $this->inspectConfiguredStructure($config);
+            $this->inspectMigrationWarnings($config);
             $this->inspectDependencies($config);
             $this->inspectRuntimeOwnership($config);
             $this->inspectAdminGovernance($config);
@@ -94,6 +95,7 @@ final class EnvironmentDoctor
             implode(', ', $config->validatedKinds())
         ));
         $this->ok(sprintf('Ownership roots: %s.', implode(', ', $config->ownershipRoots())));
+        $this->inspectRuntimeAllowPaths($config);
 
         if ($config->profile === 'content-only') {
             $this->okIf(
@@ -217,6 +219,48 @@ final class EnvironmentDoctor
         }
     }
 
+    private function inspectMigrationWarnings(Config $config): void
+    {
+        $pathsByDependency = [];
+
+        foreach ($config->dependencies() as $dependency) {
+            $path = (string) $dependency['path'];
+            $pathsByDependency[$path][] = (string) $dependency['component_key'];
+        }
+
+        foreach ($pathsByDependency as $path => $componentKeys) {
+            if (count($componentKeys) > 1) {
+                $this->warn(sprintf(
+                    'Multiple dependencies declare the same runtime path %s: %s. Consolidate these entries before stricter path validation is enforced.',
+                    $path,
+                    implode(', ', $componentKeys)
+                ));
+            }
+        }
+
+        $dependencyPaths = array_map(static fn (array $dependency): string => (string) $dependency['path'], $config->dependencies());
+        sort($dependencyPaths);
+
+        for ($index = 0, $count = count($dependencyPaths); $index < $count; $index++) {
+            for ($cursor = $index + 1; $cursor < $count; $cursor++) {
+                $left = $dependencyPaths[$index];
+                $right = $dependencyPaths[$cursor];
+
+                if (! $this->pathsOverlap($left, $right)) {
+                    continue;
+                }
+
+                $this->warn(sprintf(
+                    'Dependency runtime paths overlap (%s, %s). Collapse nested ownership before stricter path normalization is enforced.',
+                    $left,
+                    $right
+                ));
+            }
+        }
+
+        $this->inspectRuntimeAllowPaths($config);
+    }
+
     private function inspectRuntimeOwnership(Config $config): void
     {
         $ownershipInspector = new RuntimeOwnershipInspector($config);
@@ -321,8 +365,25 @@ final class EnvironmentDoctor
                     $premiumRegistry->path(),
                     count($premiumSources)
                 ));
+
+                foreach ($premiumSources as $provider => $premiumSource) {
+                    if (! $premiumSource instanceof AbstractPremiumManagedSource) {
+                        $this->warn(sprintf(
+                            'Premium provider `%s` does not extend AbstractPremiumManagedSource, so doctor cannot verify its host allowlists.',
+                            $provider
+                        ));
+                        continue;
+                    }
+
+                    foreach ($premiumSource->hostPolicyWarnings() as $warning) {
+                        $this->warn($warning);
+                    }
+                }
             }
         } catch (RuntimeException $exception) {
+            $premiumRegistry = null;
+            $premiumSources = [];
+
             if ($requireGitHub) {
                 $this->error($exception->getMessage());
             } else {
@@ -339,6 +400,14 @@ final class EnvironmentDoctor
                         if ($premiumRegistry === null || ! $premiumRegistry->hasProvider((string) $provider)) {
                             throw new RuntimeException(sprintf(
                                 'Premium provider `%s` is not registered for %s. Add it to .wp-core-base/premium-providers.php.',
+                                (string) $provider,
+                                $dependency['component_key']
+                            ));
+                        }
+
+                        if (! isset($premiumSources[(string) $provider])) {
+                            throw new RuntimeException(sprintf(
+                                'Premium provider `%s` could not be instantiated for %s. Fix .wp-core-base/premium-providers.php and rerun doctor.',
                                 (string) $provider,
                                 $dependency['component_key']
                             ));
@@ -461,6 +530,7 @@ final class EnvironmentDoctor
         $this->okIf($hasBlockerWorkflow, 'Found a GitHub workflow that runs blocker mode.', 'No GitHub workflow found that runs `wporg-updater.php pr-blocker`.');
         $this->okIf($hasValidationWorkflow, 'Found a GitHub workflow that stages runtime output.', 'No GitHub workflow found that runs `wporg-updater.php stage-runtime`.');
         $this->okIf($hasFrameworkSyncWorkflow, 'Found a GitHub workflow that runs framework-sync mode.', 'No GitHub workflow found that runs `wporg-updater.php framework-sync`.');
+        $this->inspectWorkflowPermissions($workflowDir);
     }
 
     private function inspectFrameworkDistributionPath(FrameworkConfig $framework, bool $requireGitHub): void
@@ -666,6 +736,269 @@ final class EnvironmentDoctor
     private function isSafeRelativePath(string $path): bool
     {
         return $path !== '' && ! str_starts_with($path, '/') && ! str_contains($path, '../');
+    }
+
+    private function inspectRuntimeAllowPaths(Config $config): void
+    {
+        $broadPaths = array_values(array_unique(array_merge(
+            [$config->paths['content_root'], $config->paths['plugins_root'], $config->paths['themes_root'], $config->paths['mu_plugins_root']],
+            $config->ownershipRoots()
+        )));
+
+        foreach ((array) $config->runtime['allow_runtime_paths'] as $allowPath) {
+            if (! $this->pathStartsWith((string) $allowPath, $config->paths['content_root'])) {
+                $this->warn(sprintf(
+                    'runtime.allow_runtime_paths entry %s lives outside paths.content_root. Treat it as legacy compatibility and move it under the content root when possible.',
+                    (string) $allowPath
+                ));
+                continue;
+            }
+
+            if (in_array((string) $allowPath, $broadPaths, true)) {
+                $this->warn(sprintf(
+                    'runtime.allow_runtime_paths entry %s broadly suppresses undeclared-path detection. Prefer declaring specific child paths instead.',
+                    (string) $allowPath
+                ));
+            }
+        }
+    }
+
+    private function inspectWorkflowPermissions(string $workflowDir): void
+    {
+        $expectedPermissions = [
+            'wporg-updates.yml' => [
+                'contents' => 'write',
+                'pull-requests' => 'write',
+                'issues' => 'write',
+            ],
+            'wporg-updates-reconcile.yml' => [
+                'contents' => 'write',
+                'pull-requests' => 'write',
+                'issues' => 'write',
+            ],
+            'wporg-update-pr-blocker.yml' => [
+                'contents' => 'read',
+                'pull-requests' => 'read',
+                'issues' => 'read',
+            ],
+            'wporg-validate-runtime.yml' => [
+                'contents' => 'read',
+            ],
+            'wp-core-base-self-update.yml' => [
+                'contents' => 'write',
+                'pull-requests' => 'write',
+                'issues' => 'write',
+            ],
+        ];
+
+        foreach ($expectedPermissions as $fileName => $expected) {
+            $path = $workflowDir . '/' . $fileName;
+
+            if (! is_file($path)) {
+                continue;
+            }
+
+            $contents = file_get_contents($path);
+
+            if ($contents === false) {
+                $this->warn(sprintf('Unable to read workflow permissions for %s.', $fileName));
+                continue;
+            }
+
+            $blocks = $this->parsePermissionsBlocks($contents);
+            $topLevel = $blocks['top-level'] ?? null;
+
+            if ($topLevel === null) {
+                $this->warn(sprintf('Workflow %s does not have a parseable top-level permissions block.', $fileName));
+                continue;
+            }
+
+            if ($topLevel !== $expected) {
+                $this->warn(sprintf(
+                    'Workflow %s permissions differ from the scaffolded baseline. Expected %s but found %s.',
+                    $fileName,
+                    $this->formatPermissions($expected),
+                    $this->formatPermissions($topLevel)
+                ));
+                continue;
+            }
+
+            foreach ($blocks as $blockName => $permissions) {
+                if ($blockName === 'top-level') {
+                    continue;
+                }
+
+                if (! $this->permissionsWithinBaseline($permissions, $expected)) {
+                    $this->warn(sprintf(
+                        'Workflow %s permission override %s exceeds the scaffolded baseline. Expected at most %s but found %s.',
+                        $fileName,
+                        $blockName,
+                        $this->formatPermissions($expected),
+                        $this->formatPermissions($permissions)
+                    ));
+                    continue 2;
+                }
+            }
+
+            $this->ok(sprintf('Workflow permissions match the scaffolded baseline for %s.', $fileName));
+        }
+    }
+
+    /**
+     * @return array<string, array<string, string>>
+     */
+    private function parsePermissionsBlocks(string $contents): array
+    {
+        $lines = preg_split("/\r\n|\n|\r/", $contents) ?: [];
+        $blocks = [];
+
+        foreach ($lines as $index => $line) {
+            if (! preg_match('/^(\s*)permissions:\s*(.*)$/', $line, $permissionMatches)) {
+                continue;
+            }
+
+            $indent = strlen($permissionMatches[1]);
+            $permissions = $this->parseInlinePermissions(trim($permissionMatches[2]));
+            $blockName = $indent === 0 ? 'top-level' : sprintf('line-%d', $index + 1);
+
+            if ($indent === 4) {
+                for ($cursor = $index - 1; $cursor >= 0; $cursor--) {
+                    if (preg_match('/^\s{2}([A-Za-z0-9_-]+):\s*$/', $lines[$cursor], $jobMatches)) {
+                        $blockName = 'job:' . $jobMatches[1];
+                        break;
+                    }
+
+                    if (trim($lines[$cursor]) !== '') {
+                        break;
+                    }
+                }
+            }
+
+            if ($permissions === []) {
+                for ($cursor = $index + 1, $count = count($lines); $cursor < $count; $cursor++) {
+                    $candidate = $lines[$cursor];
+
+                    if (trim($candidate) === '') {
+                        continue;
+                    }
+
+                    if (! preg_match('/^(\s+)([A-Za-z-]+):\s*([A-Za-z-]+)\s*$/', $candidate, $matches)) {
+                        break;
+                    }
+
+                    $candidateIndent = strlen($matches[1]);
+
+                    if ($candidateIndent <= $indent) {
+                        break;
+                    }
+
+                    $permissions[$matches[2]] = $matches[3];
+                }
+            }
+
+            if ($permissions !== []) {
+                $blocks[$blockName] = $permissions;
+            }
+        }
+
+        return $blocks;
+    }
+
+    /**
+     * @param array<string, string> $permissions
+     */
+    private function formatPermissions(array $permissions): string
+    {
+        $pairs = [];
+
+        foreach ($permissions as $scope => $level) {
+            $pairs[] = sprintf('%s=%s', $scope, $level);
+        }
+
+        return implode(', ', $pairs);
+    }
+
+    /**
+     * @param array<string, string> $actual
+     * @param array<string, string> $expected
+     */
+    private function permissionsWithinBaseline(array $actual, array $expected): bool
+    {
+        $levels = ['none' => 0, 'read' => 1, 'write' => 2];
+
+        if (($actual['*'] ?? null) === 'write-all') {
+            return false;
+        }
+
+        if (($actual['*'] ?? null) === 'read-all') {
+            foreach ($expected as $level) {
+                if (($levels[$level] ?? 0) > $levels['read']) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        if (isset($actual['*'])) {
+            return false;
+        }
+
+        foreach ($actual as $scope => $level) {
+            if (! isset($expected[$scope], $levels[$level], $levels[$expected[$scope]])) {
+                return false;
+            }
+
+            if ($levels[$level] > $levels[$expected[$scope]]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function pathsOverlap(string $left, string $right): bool
+    {
+        return $this->pathStartsWith($left, $right) || $this->pathStartsWith($right, $left);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function parseInlinePermissions(string $value): array
+    {
+        if ($value === '') {
+            return [];
+        }
+
+        if ($value === 'read-all' || $value === 'write-all') {
+            return ['*' => $value];
+        }
+
+        if (preg_match('/^\{(.*)\}$/', $value, $matches) !== 1) {
+            return ['*' => $value];
+        }
+
+        $pairs = [];
+
+        foreach (explode(',', $matches[1]) as $pair) {
+            [$scope, $level] = array_pad(explode(':', $pair, 2), 2, null);
+            $scope = is_string($scope) ? trim($scope) : '';
+            $level = is_string($level) ? trim($level) : '';
+
+            if ($scope === '' || $level === '') {
+                return ['*' => $value];
+            }
+
+            $pairs[$scope] = $level;
+        }
+
+        return $pairs;
+    }
+
+    private function pathStartsWith(string $path, string $prefix): bool
+    {
+        return $path === $prefix || str_starts_with($path, $prefix . '/');
     }
 
     private function printHeading(string $heading): void

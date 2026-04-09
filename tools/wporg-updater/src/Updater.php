@@ -19,8 +19,8 @@ final class Updater
         private readonly SupportForumClient $supportForumClient,
         private readonly ReleaseClassifier $releaseClassifier,
         private readonly PrBodyRenderer $prBodyRenderer,
-        private readonly GitHubClient $gitHubClient,
-        private readonly GitCommandRunner $gitRunner,
+        private readonly GitHubAutomationClient $gitHubClient,
+        private readonly GitRunnerInterface $gitRunner,
         private readonly RuntimeInspector $runtimeInspector,
         private readonly ManifestWriter $manifestWriter,
         private readonly HttpClient $httpClient,
@@ -33,6 +33,7 @@ final class Updater
      */
     public function sync(): array
     {
+        $this->gitRunner->assertCleanWorktree();
         $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
         $this->gitHubClient->ensureLabels($this->labelDefinitionsForRun());
@@ -43,7 +44,7 @@ final class Updater
             try {
                 $this->syncDependency($dependency, $openPrs[$dependency['component_key']] ?? [], $defaultBranch, $baseRevision);
             } catch (\Throwable $throwable) {
-                $errors[] = sprintf('%s: %s', $dependency['component_key'], $throwable->getMessage());
+                $errors[] = OutputRedactor::redact(sprintf('%s: %s', $dependency['component_key'], $throwable->getMessage()));
                 fwrite(STDERR, sprintf("[warn] %s\n", end($errors)));
             }
         }
@@ -100,7 +101,16 @@ final class Updater
         $plannedPrs = [];
 
         foreach ($existingPrs as $pr) {
-            $plannedPrs[] = $this->planExistingPullRequest($pr, $dependencyState['version'], $latestVersion, $latestReleaseAt, $baseRevision);
+            try {
+                $plannedPrs[] = $this->planExistingPullRequest($pr, $dependencyState['version'], $latestVersion, $latestReleaseAt, $baseRevision);
+            } catch (\Throwable $throwable) {
+                fwrite(STDERR, sprintf(
+                    "[warn] Ignoring malformed automation PR #%d for %s: %s\n",
+                    (int) ($pr['number'] ?? 0),
+                    $dependency['component_key'],
+                    OutputRedactor::redact($throwable->getMessage())
+                ));
+            }
         }
 
         [$plannedPrs, $duplicatePrs] = $this->partitionPullRequestsByTargetVersion($plannedPrs);
@@ -236,6 +246,8 @@ final class Updater
             throw new RuntimeException(sprintf('Managed pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
+        $this->assertRefreshableAutomationPullRequest($plannedPr, $branch, $defaultBranch);
+
         if ($this->pullRequestAlreadySatisfied($dependencyState['version'], $targetVersion)) {
             $this->closeSupersededPullRequest(
                 (int) $plannedPr['number'],
@@ -249,71 +261,96 @@ final class Updater
         }
 
         $releaseData = $this->releaseDataForVersion($dependency, $catalog, $targetVersion, $releaseAt);
+        $forceSupportTopicResync = (string) ($metadata['target_version'] ?? '') !== $targetVersion
+            || (string) ($metadata['release_at'] ?? '') !== $releaseAt;
+        $branchGuard = (bool) $plannedPr['requires_branch_refresh'] ? $this->beginBranchRollbackGuard($branch) : null;
 
-        if ((bool) $plannedPr['requires_branch_refresh']) {
-            $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData, true);
-            $dependency = $updatedDependency;
-            $changed = $this->gitRunner->commitAndPush(
-                $branch,
-                sprintf('Update %s to %s', $dependency['slug'], $targetVersion),
-                $this->commitPathsForDependency($dependency),
-                true
+        try {
+            if ((bool) $plannedPr['requires_branch_refresh']) {
+                $updatedDependency = $dependency;
+                $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData, true);
+                $dependency = $updatedDependency;
+                $changed = $this->gitRunner->commitAndPush(
+                    $branch,
+                    sprintf('Update %s to %s', $dependency['slug'], $targetVersion),
+                    $this->commitPathsForDependency($dependency),
+                    true
+                );
+                $dependency = $updatedDependency;
+
+                if (! $changed) {
+                    $this->closeSupersededPullRequest(
+                        (int) $plannedPr['number'],
+                        sprintf(
+                            'Refreshing this automation PR from the latest base branch produced no remaining file changes for `%s` at `%s`. The PR has been closed as a no-op.',
+                            $dependency['component_key'],
+                            $targetVersion
+                        )
+                    );
+
+                    if ($branchGuard !== null) {
+                        $branchGuard->complete();
+                    }
+
+                    return false;
+                }
+            }
+
+            $supportTopics = $this->supportTopicsForExistingPullRequest(
+                dependency: $dependency,
+                releaseAt: new DateTimeImmutable($releaseAt),
+                pullRequest: $plannedPr,
+                metadata: $metadata,
+                forceFullWindow: $forceSupportTopicResync,
             );
 
-            if (! $changed) {
-                $this->closeSupersededPullRequest(
-                    (int) $plannedPr['number'],
-                    sprintf(
-                        'Refreshing this automation PR from the latest base branch produced no remaining file changes for `%s` at `%s`. The PR has been closed as a no-op.',
-                        $dependency['component_key'],
-                        $targetVersion
-                    )
-                );
-                return false;
+            $releaseData = $this->normalizedReleaseData($releaseData, $targetVersion);
+            $labels = $this->deriveDependencyLabels($dependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
+
+            $metadata['base_branch'] = $defaultBranch;
+            $metadata['base_version'] = $dependencyState['version'];
+            $metadata['base_revision'] = $baseRevision;
+            $metadata['target_version'] = $targetVersion;
+            $metadata['release_at'] = $releaseAt;
+            $metadata['scope'] = $scope;
+            $metadata['kind'] = $dependency['kind'];
+            $metadata['source'] = $dependency['source'];
+            $metadata['provider'] = PremiumSourceResolver::providerForDependency($dependency);
+            $metadata['component_key'] = $dependency['component_key'];
+            $metadata['blocked_by'] = $blockedBy;
+            $metadata['support_synced_at'] = gmdate(DATE_ATOM);
+            $metadata['updated_at'] = gmdate(DATE_ATOM);
+
+            $title = $this->titleForPullRequest($dependencyState['name'], (string) $metadata['base_version'], $targetVersion);
+            $body = $this->renderDependencyPullRequest(
+                dependency: $dependency,
+                dependencyState: $dependencyState,
+                currentVersion: (string) $metadata['base_version'],
+                targetVersion: $targetVersion,
+                scope: $scope,
+                releaseAt: $releaseAt,
+                labels: $labels,
+                releaseData: $releaseData,
+                supportTopics: $supportTopics,
+                metadata: $metadata,
+            );
+
+            $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
+            $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
+            $this->syncDraftState($plannedPr, $blockedBy);
+
+            if ($branchGuard !== null) {
+                $branchGuard->complete();
             }
+
+            return true;
+        } catch (\Throwable $throwable) {
+            if ($branchGuard !== null) {
+                $branchGuard->rollback($throwable);
+            }
+
+            throw $throwable;
         }
-
-        $supportTopics = $this->supportTopicsForExistingPullRequest(
-            dependency: $dependency,
-            releaseAt: new DateTimeImmutable($releaseAt),
-            pullRequest: $plannedPr,
-            metadata: $metadata,
-        );
-
-        $releaseData = $this->normalizedReleaseData($releaseData, $targetVersion);
-        $labels = $this->deriveDependencyLabels($dependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
-
-        $metadata['base_branch'] = $defaultBranch;
-        $metadata['base_version'] = $dependencyState['version'];
-        $metadata['base_revision'] = $baseRevision;
-        $metadata['target_version'] = $targetVersion;
-        $metadata['release_at'] = $releaseAt;
-        $metadata['scope'] = $scope;
-        $metadata['kind'] = $dependency['kind'];
-        $metadata['source'] = $dependency['source'];
-        $metadata['component_key'] = $dependency['component_key'];
-        $metadata['blocked_by'] = $blockedBy;
-        $metadata['support_synced_at'] = gmdate(DATE_ATOM);
-        $metadata['updated_at'] = gmdate(DATE_ATOM);
-
-        $title = $this->titleForPullRequest($dependencyState['name'], (string) $metadata['base_version'], $targetVersion);
-        $body = $this->renderDependencyPullRequest(
-            dependency: $dependency,
-            dependencyState: $dependencyState,
-            currentVersion: (string) $metadata['base_version'],
-            targetVersion: $targetVersion,
-            scope: $scope,
-            releaseAt: $releaseAt,
-            labels: $labels,
-            releaseData: $releaseData,
-            supportTopics: $supportTopics,
-            metadata: $metadata,
-        );
-
-        $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
-        $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
-        $this->syncDraftState($plannedPr, $blockedBy);
-        return true;
     }
 
     /**
@@ -350,58 +387,67 @@ final class Updater
             $this->releaseDataForVersion($dependency, $catalog, $latestVersion, $latestReleaseAt),
             $latestVersion
         );
-        $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData);
-        $changed = $this->gitRunner->commitAndPush(
-            $branch,
-            sprintf('Update %s to %s', $dependency['slug'], $latestVersion),
-            $this->commitPathsForDependency($dependency)
-        );
+        $branchGuard = $this->beginBranchRollbackGuard($branch);
 
-        if (! $changed) {
-            fwrite(STDOUT, sprintf(
-                "Skipping PR creation for %s because updating to %s produced no file changes.\n",
-                $dependency['slug'],
-                $latestVersion
-            ));
-            return;
+        try {
+            $updatedDependency = $this->checkoutAndApplyDependencyVersion($defaultBranch, $branch, $dependency, $releaseData);
+            $changed = $this->gitRunner->commitAndPush(
+                $branch,
+                sprintf('Update %s to %s', $dependency['slug'], $latestVersion),
+                $this->commitPathsForDependency($dependency)
+            );
+
+            if (! $changed) {
+                fwrite(STDOUT, sprintf(
+                    "Skipping PR creation for %s because updating to %s produced no file changes.\n",
+                    $dependency['slug'],
+                    $latestVersion
+                ));
+                $branchGuard->complete();
+                return;
+            }
+
+            $supportTopics = $this->supportTopicsForNewPullRequest($updatedDependency, new DateTimeImmutable($latestReleaseAt));
+            $labels = $this->deriveDependencyLabels($updatedDependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
+            $metadata = [
+                'kind' => $updatedDependency['kind'],
+                'source' => $updatedDependency['source'],
+                'provider' => PremiumSourceResolver::providerForDependency($updatedDependency),
+                'slug' => (string) $updatedDependency['slug'],
+                'component_key' => $updatedDependency['component_key'],
+                'dependency_path' => $dependencyState['path'],
+                'branch' => $branch,
+                'base_branch' => $defaultBranch,
+                'base_version' => $dependencyState['version'],
+                'base_revision' => $baseRevision,
+                'target_version' => $latestVersion,
+                'scope' => $scope,
+                'release_at' => $latestReleaseAt,
+                'blocked_by' => $blockedBy,
+                'support_synced_at' => gmdate(DATE_ATOM),
+                'updated_at' => gmdate(DATE_ATOM),
+            ];
+
+            $title = $this->titleForPullRequest($dependencyState['name'], $dependencyState['version'], $latestVersion);
+            $body = $this->renderDependencyPullRequest(
+                dependency: $updatedDependency,
+                dependencyState: $dependencyState,
+                currentVersion: $dependencyState['version'],
+                targetVersion: $latestVersion,
+                scope: $scope,
+                releaseAt: $latestReleaseAt,
+                labels: $labels,
+                releaseData: $releaseData,
+                supportTopics: $supportTopics,
+                metadata: $metadata,
+            );
+
+            $pullRequest = $this->gitHubClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
+            $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
+            $branchGuard->complete();
+        } catch (\Throwable $throwable) {
+            $branchGuard->rollback($throwable);
         }
-
-        $supportTopics = $this->supportTopicsForNewPullRequest($updatedDependency, new DateTimeImmutable($latestReleaseAt));
-        $labels = $this->deriveDependencyLabels($updatedDependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
-        $metadata = [
-            'kind' => $updatedDependency['kind'],
-            'source' => $updatedDependency['source'],
-            'slug' => (string) $updatedDependency['slug'],
-            'component_key' => $updatedDependency['component_key'],
-            'dependency_path' => $dependencyState['path'],
-            'branch' => $branch,
-            'base_branch' => $defaultBranch,
-            'base_version' => $dependencyState['version'],
-            'base_revision' => $baseRevision,
-            'target_version' => $latestVersion,
-            'scope' => $scope,
-            'release_at' => $latestReleaseAt,
-            'blocked_by' => $blockedBy,
-            'support_synced_at' => gmdate(DATE_ATOM),
-            'updated_at' => gmdate(DATE_ATOM),
-        ];
-
-        $title = $this->titleForPullRequest($dependencyState['name'], $dependencyState['version'], $latestVersion);
-        $body = $this->renderDependencyPullRequest(
-            dependency: $updatedDependency,
-            dependencyState: $dependencyState,
-            currentVersion: $dependencyState['version'],
-            targetVersion: $latestVersion,
-            scope: $scope,
-            releaseAt: $latestReleaseAt,
-            labels: $labels,
-            releaseData: $releaseData,
-            supportTopics: $supportTopics,
-            metadata: $metadata,
-        );
-
-        $pullRequest = $this->gitHubClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
-        $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
     }
 
     /**
@@ -597,13 +643,16 @@ final class Updater
         DateTimeImmutable $releaseAt,
         array $pullRequest,
         array $metadata,
+        bool $forceFullWindow = false,
     ): array {
         if (! $this->supportsForumSync($dependency)) {
             return [];
         }
 
         $existingTopics = PrBodyRenderer::extractSupportTopics((string) ($pullRequest['body'] ?? ''));
-        $lastSyncAt = $metadata['support_synced_at'] ?? $metadata['updated_at'] ?? $metadata['release_at'] ?? null;
+        $lastSyncAt = $forceFullWindow
+            ? null
+            : ($metadata['support_synced_at'] ?? $metadata['updated_at'] ?? $metadata['release_at'] ?? null);
         $incrementalWindow = is_string($lastSyncAt) && $lastSyncAt !== '' ? new DateTimeImmutable($lastSyncAt) : null;
         $newTopics = $this->supportForumClient->fetchTopicsOpenedAfter(
             (string) $dependency['slug'],
@@ -697,14 +746,38 @@ final class Updater
                 continue;
             }
 
-            $componentKey = $metadata['component_key'] ?? null;
+            $matches = [];
 
-            if (! is_string($componentKey) || $componentKey === '') {
+            foreach ($this->config->managedDependencies() as $dependency) {
+                if ($this->metadataMatchesDependency($metadata, $dependency)) {
+                    $matches[] = $dependency['component_key'];
+                }
+            }
+
+            $matches = array_values(array_unique($matches));
+
+            if ($matches === []) {
                 continue;
             }
 
-            $indexed[$componentKey] ??= [];
-            $indexed[$componentKey][] = $pullRequest;
+            if (count($matches) > 1) {
+                fwrite(STDERR, sprintf(
+                    "[warn] Ignoring automation PR #%d because its metadata matches multiple managed dependencies after premium-key migration.\n",
+                    (int) ($pullRequest['number'] ?? 0)
+                ));
+                continue;
+            }
+
+            if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
+                fwrite(STDERR, sprintf(
+                    "[warn] Ignoring automation PR #%d because it does not use a same-repository automation branch.\n",
+                    (int) ($pullRequest['number'] ?? 0)
+                ));
+                continue;
+            }
+
+            $indexed[$matches[0]] ??= [];
+            $indexed[$matches[0]][] = $pullRequest;
         }
 
         return $indexed;
@@ -716,31 +789,7 @@ final class Updater
      */
     private function partitionPullRequestsByTargetVersion(array $plannedPrs): array
     {
-        usort(
-            $plannedPrs,
-            static fn (array $left, array $right): int => ((int) $left['number'] <=> (int) $right['number'])
-        );
-
-        $canonicalByTarget = [];
-        $duplicates = [];
-
-        foreach ($plannedPrs as $plannedPr) {
-            $targetVersion = (string) ($plannedPr['planned_target_version'] ?? '');
-
-            if ($targetVersion === '') {
-                $duplicates[] = $plannedPr;
-                continue;
-            }
-
-            if (! isset($canonicalByTarget[$targetVersion])) {
-                $canonicalByTarget[$targetVersion] = $plannedPr;
-                continue;
-            }
-
-            $duplicates[] = $plannedPr;
-        }
-
-        return [array_values($canonicalByTarget), $duplicates];
+        return ManagedPullRequestCanonicalizer::partitionByTargetVersion($plannedPrs);
     }
 
     /**
@@ -851,6 +900,8 @@ final class Updater
      */
     private function findOpenPullRequestForTarget(string $componentKey, string $targetVersion): ?array
     {
+        $matching = [];
+
         foreach ($this->gitHubClient->listOpenPullRequests() as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
@@ -858,7 +909,11 @@ final class Updater
                 continue;
             }
 
-            if (($metadata['component_key'] ?? null) !== $componentKey) {
+            if (! $this->metadataMatchesComponentKey($metadata, $componentKey)) {
+                continue;
+            }
+
+            if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
                 continue;
             }
 
@@ -866,10 +921,111 @@ final class Updater
                 continue;
             }
 
-            return $pullRequest;
+            $pullRequest['metadata'] = $metadata;
+            $pullRequest['planned_target_version'] = (string) ($metadata['target_version'] ?? '');
+            $pullRequest['planned_release_at'] = (string) ($metadata['release_at'] ?? '');
+            $matching[] = $pullRequest;
         }
 
-        return null;
+        return ManagedPullRequestCanonicalizer::selectCanonical($matching);
+    }
+
+    private function beginBranchRollbackGuard(string $branch): BranchRollbackGuard
+    {
+        $guard = new BranchRollbackGuard($this->config->repoRoot, $this->gitRunner);
+        $guard->begin();
+        $guard->trackBranch($branch);
+        return $guard;
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function assertRefreshableAutomationPullRequest(array $pullRequest, string $branch, string $defaultBranch): void
+    {
+        $baseRef = (string) ($pullRequest['base']['ref'] ?? '');
+
+        if ($branch === $defaultBranch || ($baseRef !== '' && $branch === $baseRef)) {
+            throw new RuntimeException(sprintf(
+                'Automation PR #%d resolved to protected branch %s and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0),
+                $branch
+            ));
+        }
+
+        if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
+            throw new RuntimeException(sprintf(
+                'Automation PR #%d does not use a same-repository automation branch and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0)
+            ));
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function isManagedRepositoryPullRequest(array $pullRequest): bool
+    {
+        $head = is_array($pullRequest['head'] ?? null) ? $pullRequest['head'] : [];
+        $base = is_array($pullRequest['base'] ?? null) ? $pullRequest['base'] : [];
+        $headRef = (string) ($head['ref'] ?? '');
+        $headRepo = is_array($head['repo'] ?? null) ? $head['repo'] : [];
+        $baseRepo = is_array($base['repo'] ?? null) ? $base['repo'] : [];
+        $headFullName = strtolower((string) ($headRepo['full_name'] ?? ''));
+        $baseFullName = strtolower((string) ($baseRepo['full_name'] ?? ''));
+
+        return $headRef !== '' && $headFullName !== '' && $headFullName === $baseFullName;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     * @param array<string, mixed> $dependency
+     */
+    private function metadataMatchesDependency(array $metadata, array $dependency): bool
+    {
+        $componentKey = $metadata['component_key'] ?? null;
+
+        if (is_string($componentKey) && $componentKey !== '' && PremiumSourceResolver::matchesComponentKey($dependency, $componentKey)) {
+            return true;
+        }
+
+        if (
+            (string) ($metadata['kind'] ?? '') !== (string) $dependency['kind']
+            || (string) ($metadata['source'] ?? '') !== (string) $dependency['source']
+            || (string) ($metadata['slug'] ?? '') !== (string) $dependency['slug']
+        ) {
+            return false;
+        }
+
+        if (! PremiumSourceResolver::isPremiumSource((string) $dependency['source'])) {
+            return true;
+        }
+
+        $metadataPath = (string) ($metadata['dependency_path'] ?? '');
+
+        if ($metadataPath !== '' && $metadataPath === (string) $dependency['path']) {
+            return true;
+        }
+
+        $metadataProvider = $metadata['provider'] ?? null;
+
+        return is_string($metadataProvider)
+            && $metadataProvider !== ''
+            && PremiumSourceResolver::providerForDependency($dependency) === $metadataProvider;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function metadataMatchesComponentKey(array $metadata, string $componentKey): bool
+    {
+        try {
+            $dependency = $this->config->dependencyByKey($componentKey);
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $this->metadataMatchesDependency($metadata, $dependency);
     }
 
     private function supportsForumSync(array $dependency): bool
@@ -995,8 +1151,9 @@ final class Updater
             try {
                 $pullRequest = $this->gitHubClient->getPullRequest($pullRequestNumber);
                 $mergedAt = $pullRequest['merged_at'] ?? null;
+                $state = (string) ($pullRequest['state'] ?? '');
 
-                if (! is_string($mergedAt) || $mergedAt === '') {
+                if ($state === 'open' && (! is_string($mergedAt) || $mergedAt === '')) {
                     $unresolved[] = $pullRequestNumber;
                 }
             } catch (\Throwable) {

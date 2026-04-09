@@ -69,6 +69,7 @@ final class RuntimeOwnershipInspector
     public function suggestedManifestEntry(array $entry): array
     {
         $basename = basename($entry['path']);
+        $mainFile = $this->suggestedMainFile($entry);
 
         return [
             'name' => $this->displayNameFromPath($basename),
@@ -77,7 +78,7 @@ final class RuntimeOwnershipInspector
             'management' => 'local',
             'source' => 'local',
             'path' => $entry['path'],
-            'main_file' => $this->suggestedMainFile($entry),
+            'main_file' => $mainFile,
             'version' => null,
             'checksum' => null,
             'archive_subdir' => '',
@@ -155,11 +156,20 @@ final class RuntimeOwnershipInspector
     private function suggestedMainFile(array $entry): ?string
     {
         return match ($entry['kind']) {
-            'plugin', 'theme', 'mu-plugin-package' => null,
+            'plugin', 'theme', 'mu-plugin-package' => $this->inferDirectoryMainFile($entry['absolute_path'], $entry['kind']),
             'mu-plugin-file', 'runtime-file' => null,
             'runtime-directory' => null,
             default => null,
         };
+    }
+
+    private function inferDirectoryMainFile(string $absolutePath, string $kind): ?string
+    {
+        try {
+            return (new DependencyMetadataResolver())->resolveMainFile($absolutePath, $kind);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function displayNameFromPath(string $basename): string
@@ -176,7 +186,7 @@ final class RuntimeOwnershipInspector
     private function isCovered(string $path, array $coveredPaths): bool
     {
         foreach ($coveredPaths as $coveredPath) {
-            if ($path === $coveredPath || str_starts_with($path, $coveredPath . '/') || str_starts_with($coveredPath, $path . '/')) {
+            if ($path === $coveredPath || str_starts_with($path, $coveredPath . '/')) {
                 return true;
             }
         }

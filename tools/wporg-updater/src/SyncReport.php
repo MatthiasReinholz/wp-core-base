@@ -24,6 +24,8 @@ final class SyncReport
      */
     public static function build(array $fatalErrors, array $dependencyWarnings): array
     {
+        $fatalErrors = OutputRedactor::redactAll($fatalErrors);
+        $dependencyWarnings = OutputRedactor::redactAll($dependencyWarnings);
         $status = self::STATUS_SUCCESS;
 
         if ($fatalErrors !== []) {
@@ -47,17 +49,8 @@ final class SyncReport
      */
     public static function write(array $report, string $path): void
     {
-        $directory = dirname($path);
-
-        if (! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) {
-            throw new RuntimeException(sprintf('Unable to create sync report directory: %s', $directory));
-        }
-
         $encoded = json_encode($report, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
-
-        if (file_put_contents($path, $encoded) === false) {
-            throw new RuntimeException(sprintf('Unable to write sync report: %s', $path));
-        }
+        (new AtomicFileWriter())->write($path, $encoded);
     }
 
     /**
@@ -150,13 +143,14 @@ final class SyncReport
     /**
      * @param array<string, mixed> $report
      */
-    public static function syncIssue(GitHubClient $gitHubClient, array $report, ?string $runUrl = null): void
+    public static function syncIssue(GitHubAutomationClient $gitHubClient, array $report, ?string $runUrl = null): void
     {
         $warnings = self::stringList($report['dependency_warnings'] ?? []);
+        $fatalErrors = self::stringList($report['fatal_errors'] ?? []);
         $status = (string) ($report['status'] ?? self::STATUS_FAILURE);
         $openIssues = self::matchingOpenIssues($gitHubClient);
 
-        if ($warnings === []) {
+        if ($warnings === [] && $fatalErrors === []) {
             if ($status !== self::STATUS_SUCCESS) {
                 return;
             }
@@ -197,15 +191,17 @@ final class SyncReport
     private static function renderIssueBody(array $report, ?string $runUrl = null): string
     {
         $warnings = self::stringList($report['dependency_warnings'] ?? []);
+        $fatalErrors = self::stringList($report['fatal_errors'] ?? []);
         $generatedAt = (string) ($report['generated_at'] ?? '');
         $lines = [
             '## Summary',
             '',
-            'One or more managed dependency sources failed during the latest `wp-core-base` sync run.',
-            'Healthy dependencies may still have been updated successfully.',
+            'One or more wp-core-base sync failures occurred during the latest run.',
+            'Healthy components may still have been updated successfully.',
             '',
             sprintf('- Generated at: `%s`', $generatedAt === '' ? 'unknown' : $generatedAt),
             sprintf('- Warning count: `%d`', count($warnings)),
+            sprintf('- Fatal error count: `%d`', count($fatalErrors)),
         ];
 
         if (is_string($runUrl) && $runUrl !== '') {
@@ -213,11 +209,27 @@ final class SyncReport
         }
 
         $lines[] = '';
-        $lines[] = '## Failing Sources';
+        $lines[] = '## Dependency Source Warnings';
         $lines[] = '';
 
-        foreach ($warnings as $warning) {
-            $lines[] = '- ' . $warning;
+        if ($warnings === []) {
+            $lines[] = '- None';
+        } else {
+            foreach ($warnings as $warning) {
+                $lines[] = '- ' . $warning;
+            }
+        }
+
+        $lines[] = '';
+        $lines[] = '## Fatal Errors';
+        $lines[] = '';
+
+        if ($fatalErrors === []) {
+            $lines[] = '- None';
+        } else {
+            foreach ($fatalErrors as $error) {
+                $lines[] = '- ' . $error;
+            }
         }
 
         $lines[] = '';
@@ -232,7 +244,7 @@ final class SyncReport
     /**
      * @return list<array<string, mixed>>
      */
-    private static function matchingOpenIssues(GitHubClient $gitHubClient): array
+    private static function matchingOpenIssues(GitHubAutomationClient $gitHubClient): array
     {
         $issues = [];
 

@@ -8,11 +8,23 @@ use RuntimeException;
 
 final class PullRequestBlocker
 {
-    public function __construct(private readonly GitHubClient $gitHubClient)
+    public const STATUS_CLEAR = 'clear';
+    public const STATUS_BLOCKED = 'blocked';
+    public const STATUS_DEGRADED = 'degraded';
+
+    public function __construct(private readonly GitHubPullRequestReader $gitHubClient)
     {
     }
 
     public function evaluateCurrentPullRequest(): int
+    {
+        return (int) $this->evaluateCurrentPullRequestStatus()['exit_code'];
+    }
+
+    /**
+     * @return array{status:string, exit_code:int, blockers:list<string>, warnings:list<string>}
+     */
+    public function evaluateCurrentPullRequestStatus(): array
     {
         $eventPath = getenv('GITHUB_EVENT_PATH');
 
@@ -31,7 +43,12 @@ final class PullRequestBlocker
 
         if ($metadata === null) {
             fwrite(STDOUT, "No updater metadata found on this pull request. Passing.\n");
-            return 0;
+            return [
+                'status' => self::STATUS_CLEAR,
+                'exit_code' => 0,
+                'blockers' => [],
+                'warnings' => [],
+            ];
         }
 
         $identity = $this->identityForMetadata($metadata);
@@ -44,6 +61,7 @@ final class PullRequestBlocker
 
         $olderOpenPrs = [];
         $unmergedPredecessors = [];
+        $verificationWarnings = [];
 
         foreach ((array) ($metadata['blocked_by'] ?? []) as $blocker) {
             if (! is_int($blocker) && ! ctype_digit((string) $blocker)) {
@@ -59,16 +77,38 @@ final class PullRequestBlocker
             try {
                 $pullRequest = $this->gitHubClient->getPullRequest($blockerNumber);
                 $mergedAt = $pullRequest['merged_at'] ?? null;
+                $state = (string) ($pullRequest['state'] ?? '');
 
-                if (! is_string($mergedAt) || $mergedAt === '') {
+                if ($state === 'open' && (! is_string($mergedAt) || $mergedAt === '')) {
                     $unmergedPredecessors[] = sprintf('#%d', $blockerNumber);
                 }
-            } catch (\Throwable) {
-                $unmergedPredecessors[] = sprintf('#%d', $blockerNumber);
+            } catch (\Throwable $throwable) {
+                $verificationWarnings[] = sprintf(
+                    'Could not verify predecessor PR #%d and ignored it to avoid a false blocker result: %s',
+                    $blockerNumber,
+                    OutputRedactor::redact($throwable->getMessage())
+                );
             }
         }
 
-        foreach ($this->gitHubClient->listOpenPullRequests() as $candidate) {
+        try {
+            $openPullRequests = $this->gitHubClient->listOpenPullRequests();
+        } catch (\Throwable $throwable) {
+            $verificationWarnings[] = sprintf(
+                'Could not list open pull requests for blocker evaluation and passed to avoid a false blocker result: %s',
+                OutputRedactor::redact($throwable->getMessage())
+            );
+            $this->emitWarnings($verificationWarnings);
+            fwrite(STDOUT, "Blocker evaluation is degraded by GitHub/API failures. Passing.\n");
+            return [
+                'status' => self::STATUS_DEGRADED,
+                'exit_code' => 0,
+                'blockers' => [],
+                'warnings' => $verificationWarnings,
+            ];
+        }
+
+        foreach ($openPullRequests as $candidate) {
             $candidateNumber = (int) ($candidate['number'] ?? 0);
 
             if ($candidateNumber === $currentNumber) {
@@ -77,7 +117,7 @@ final class PullRequestBlocker
 
             $candidateMetadata = PrBodyRenderer::extractMetadata((string) ($candidate['body'] ?? ''));
 
-            if ($candidateMetadata === null || $this->identityForMetadata($candidateMetadata) !== $identity) {
+            if ($candidateMetadata === null || ! $this->metadataMatchesIdentity($candidateMetadata, $metadata)) {
                 continue;
             }
 
@@ -89,14 +129,27 @@ final class PullRequestBlocker
         }
 
         $blockers = array_values(array_unique(array_merge($unmergedPredecessors, $olderOpenPrs)));
+        $this->emitWarnings($verificationWarnings);
 
         if ($blockers !== []) {
             fwrite(STDERR, "Blocked by predecessor update PRs: " . implode(', ', $blockers) . "\n");
-            return 1;
+            return [
+                'status' => self::STATUS_BLOCKED,
+                'exit_code' => 1,
+                'blockers' => $blockers,
+                'warnings' => $verificationWarnings,
+            ];
         }
 
-        fwrite(STDOUT, "No older open update PRs found. Passing.\n");
-        return 0;
+        fwrite(STDOUT, $verificationWarnings === []
+            ? "No older open update PRs found. Passing.\n"
+            : "No confirmed older open update PRs found. Passing with warnings.\n");
+        return [
+            'status' => $verificationWarnings === [] ? self::STATUS_CLEAR : self::STATUS_DEGRADED,
+            'exit_code' => 0,
+            'blockers' => [],
+            'warnings' => $verificationWarnings,
+        ];
     }
 
     /**
@@ -113,5 +166,41 @@ final class PullRequestBlocker
         $slug = $metadata['slug'] ?? null;
 
         return is_string($slug) ? $slug : '';
+    }
+
+    /**
+     * @param array<string, mixed> $candidate
+     * @param array<string, mixed> $reference
+     */
+    private function metadataMatchesIdentity(array $candidate, array $reference): bool
+    {
+        if ($this->identityForMetadata($candidate) === $this->identityForMetadata($reference)) {
+            return true;
+        }
+
+        if (
+            (string) ($candidate['kind'] ?? '') !== (string) ($reference['kind'] ?? '')
+            || (string) ($candidate['source'] ?? '') !== (string) ($reference['source'] ?? '')
+            || (string) ($candidate['slug'] ?? '') !== (string) ($reference['slug'] ?? '')
+        ) {
+            return false;
+        }
+
+        if ((string) ($candidate['dependency_path'] ?? '') !== '' && ($candidate['dependency_path'] ?? null) === ($reference['dependency_path'] ?? null)) {
+            return true;
+        }
+
+        return (string) ($candidate['provider'] ?? '') !== ''
+            && (string) ($candidate['provider'] ?? '') === (string) ($reference['provider'] ?? '');
+    }
+
+    /**
+     * @param list<string> $warnings
+     */
+    private function emitWarnings(array $warnings): void
+    {
+        foreach ($warnings as $warning) {
+            fwrite(STDERR, sprintf("[warn] %s\n", $warning));
+        }
     }
 }

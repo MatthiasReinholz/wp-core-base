@@ -25,7 +25,14 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
      */
     protected function requestJson(string $method, string $url, array $headers = [], ?array $json = null, ?string $body = null): array
     {
-        $response = $this->httpClient->request($method, $url, $headers, $json, $body);
+        $options = ['max_body_bytes' => 5 * 1024 * 1024];
+        $allowedHosts = $this->allowedApiHosts();
+
+        if ($allowedHosts !== []) {
+            $options['allowed_redirect_hosts'] = $allowedHosts;
+        }
+
+        $response = $this->httpClient->requestWithOptions($method, $url, $headers, $json, $body, false, $options);
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
             throw new RuntimeException(sprintf(
@@ -49,20 +56,17 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
      */
     protected function downloadBinary(string $url, string $destination, array $headers = []): void
     {
-        if ($headers === []) {
-            $this->httpClient->downloadToFile($url, $destination);
-            return;
+        $options = [
+            'max_download_bytes' => 512 * 1024 * 1024,
+            'strip_auth_on_cross_origin_redirect' => true,
+        ];
+        $allowedHosts = $this->allowedDownloadHosts();
+
+        if ($allowedHosts !== []) {
+            $options['allowed_redirect_hosts'] = $allowedHosts;
         }
 
-        $response = $this->httpClient->request('GET', $url, $headers);
-
-        if ($response['status'] < 200 || $response['status'] >= 300) {
-            throw new RuntimeException(sprintf('Premium archive download failed for %s with status %d.', $url, $response['status']));
-        }
-
-        if (file_put_contents($destination, $response['body']) === false) {
-            throw new RuntimeException(sprintf('Unable to write premium archive to %s.', $destination));
-        }
+        $this->httpClient->downloadToFileWithOptions($url, $destination, $headers, $options);
     }
 
     /**
@@ -99,6 +103,48 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
     protected function requiredCredentialFields(): array
     {
         return [];
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function allowedApiHosts(): array
+    {
+        return [];
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function allowedDownloadHosts(): array
+    {
+        return $this->allowedApiHosts();
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function hostPolicyWarnings(): array
+    {
+        $warnings = [];
+        $apiHosts = array_values(array_filter(array_map('trim', $this->allowedApiHosts()), static fn (string $host): bool => $host !== ''));
+        $downloadHosts = array_values(array_filter(array_map('trim', $this->allowedDownloadHosts()), static fn (string $host): bool => $host !== ''));
+
+        if ($apiHosts === []) {
+            $warnings[] = sprintf(
+                'Premium provider `%s` does not declare allowed API hosts. Add an explicit allowlist before stricter provider-host enforcement is enabled.',
+                $this->key()
+            );
+        }
+
+        if ($downloadHosts === []) {
+            $warnings[] = sprintf(
+                'Premium provider `%s` does not declare allowed download hosts. Add an explicit allowlist before stricter provider-host enforcement is enabled.',
+                $this->key()
+            );
+        }
+
+        return $warnings;
     }
 
     /**

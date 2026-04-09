@@ -16,6 +16,7 @@ use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseClient;
 use WpOrgPluginUpdater\FrameworkReleasePreparer;
+use WpOrgPluginUpdater\FrameworkReleaseSignature;
 use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkSyncer;
 use WpOrgPluginUpdater\GitCommandRunner;
@@ -26,6 +27,8 @@ use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\ManagedSourceRegistry;
+use WpOrgPluginUpdater\MutationLock;
+use WpOrgPluginUpdater\OutputRedactor;
 use WpOrgPluginUpdater\PremiumProviderRegistry;
 use WpOrgPluginUpdater\PremiumProviderScaffolder;
 use WpOrgPluginUpdater\PremiumSourceResolver;
@@ -33,6 +36,7 @@ use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\PremiumCredentialsStore;
 use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
+use WpOrgPluginUpdater\ReleaseSignatureKeyStore;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeStager;
 use WpOrgPluginUpdater\SyncReport;
@@ -81,6 +85,7 @@ $commandPrefix = $toolPath === '.'
 $phpCommandPrefix = $toolPath === '.'
     ? 'php tools/wporg-updater/bin/wporg-updater.php'
     : sprintf('php %s/tools/wporg-updater/bin/wporg-updater.php', trim((string) $toolPath, '/'));
+$mutationLock = new MutationLock();
 
 $maybePromptForMissing = static function (array &$options, InteractivePrompter $prompter, array $premiumProviders): void {
     $source = isset($options['source']) && is_string($options['source']) ? $options['source'] : null;
@@ -226,8 +231,45 @@ try {
 
     if ($mode === 'release-verify') {
         $tag = isset($options['tag']) && is_string($options['tag']) ? $options['tag'] : null;
-        $resolvedTag = (new FrameworkReleaseVerifier($repoRoot))->verify($tag);
+        $artifact = isset($options['artifact']) && is_string($options['artifact']) ? $options['artifact'] : null;
+        $checksumFile = isset($options['checksum-file']) && is_string($options['checksum-file']) ? $options['checksum-file'] : null;
+        $signatureFile = isset($options['signature-file']) && is_string($options['signature-file']) ? $options['signature-file'] : null;
+        $publicKeyFile = isset($options['public-key-file']) && is_string($options['public-key-file']) ? $options['public-key-file'] : null;
+        $resolvedTag = (new FrameworkReleaseVerifier($repoRoot))->verify($tag, $artifact, $checksumFile, $signatureFile, $publicKeyFile);
         fwrite(STDOUT, sprintf("Release verification passed for %s\n", $resolvedTag));
+        exit(0);
+    }
+
+    if ($mode === 'release-sign') {
+        $artifact = isset($options['artifact']) && is_string($options['artifact']) ? $options['artifact'] : null;
+        $checksumFile = isset($options['checksum-file']) && is_string($options['checksum-file']) ? $options['checksum-file'] : null;
+        $signatureFile = isset($options['signature-file']) && is_string($options['signature-file']) ? $options['signature-file'] : null;
+        $privateKeyEnv = isset($options['private-key-env']) && is_string($options['private-key-env']) ? $options['private-key-env'] : null;
+        $passphraseEnv = isset($options['passphrase-env']) && is_string($options['passphrase-env']) ? $options['passphrase-env'] : null;
+
+        if ($artifact === null || trim($artifact) === '' || ! is_file($artifact)) {
+            throw new RuntimeException('release-sign requires --artifact=/path/to/release.zip.');
+        }
+
+        if ($checksumFile === null || trim($checksumFile) === '' || ! is_file($checksumFile)) {
+            throw new RuntimeException('release-sign requires --checksum-file=/path/to/release.zip.sha256.');
+        }
+
+        if ($signatureFile === null || trim($signatureFile) === '') {
+            throw new RuntimeException('release-sign requires --signature-file=/path/to/release.zip.sha256.sig.');
+        }
+
+        if ($privateKeyEnv === null || trim($privateKeyEnv) === '') {
+            throw new RuntimeException('release-sign requires --private-key-env=ENV_VAR.');
+        }
+
+        $privateKeyPem = ReleaseSignatureKeyStore::privateKeyFromEnvironment($privateKeyEnv);
+        $passphrase = ReleaseSignatureKeyStore::optionalEnvironmentValue($passphraseEnv);
+        $document = FrameworkReleaseSignature::signChecksumFile($checksumFile, $signatureFile, $privateKeyPem, $passphrase);
+
+        fwrite(STDOUT, sprintf("Release signature written for %s\n", basename($artifact)));
+        fwrite(STDOUT, sprintf("Signed checksum: %s\n", $document['signed_file']));
+        fwrite(STDOUT, sprintf("Key ID: %s\n", $document['key_id']));
         exit(0);
     }
 
@@ -259,7 +301,18 @@ try {
         $profile = $options['profile'] ?? 'content-only-default';
         $contentRoot = $options['content-root'] ?? null;
         $scaffolder = new DownstreamScaffolder($frameworkRoot, $repoRoot);
-        exit($scaffolder->scaffold((string) $toolPath, (string) $profile, is_string($contentRoot) ? $contentRoot : null, $force));
+        $adoptExistingManagedFiles = isset($options['adopt-existing-managed-files']);
+        exit($mutationLock->synchronized(
+            $repoRoot,
+            static fn (): int => $scaffolder->scaffold(
+                (string) $toolPath,
+                (string) $profile,
+                is_string($contentRoot) ? $contentRoot : null,
+                $force,
+                $adoptExistingManagedFiles
+            ),
+            'scaffold-downstream'
+        ));
     }
 
     if ($mode === 'scaffold-premium-provider') {
@@ -294,9 +347,13 @@ try {
 
         $config = Config::load($repoRoot);
         $runtimeInspector = new RuntimeInspector($config->runtime);
-        $result = (new FrameworkInstaller($repoRoot, $runtimeInspector))->apply(
-            $payloadRoot,
-            is_string($distributionPath) ? $distributionPath : 'vendor/wp-core-base'
+        $result = $mutationLock->synchronized(
+            $repoRoot,
+            static fn (): array => (new FrameworkInstaller($repoRoot, $runtimeInspector))->apply(
+                $payloadRoot,
+                is_string($distributionPath) ? $distributionPath : 'vendor/wp-core-base'
+            ),
+            'framework-apply'
         );
 
         if (file_put_contents($resultPath, json_encode($result, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT)) === false) {
@@ -333,7 +390,11 @@ try {
     }
 
     if ($mode === 'refresh-admin-governance') {
-        $adminGovernanceExporter->refresh($config);
+        $mutationLock->synchronized(
+            $repoRoot,
+            static fn (): null => ($adminGovernanceExporter->refresh($config) ?: null),
+            'refresh-admin-governance'
+        );
         fwrite(STDOUT, "Refreshed admin governance runtime data\n");
         exit(0);
     }
@@ -344,7 +405,11 @@ try {
     }
 
     if ($mode === 'format-manifest') {
-        (new ManifestWriter())->write($config);
+        $mutationLock->synchronized(
+            $repoRoot,
+            static fn (): null => ((new ManifestWriter())->write($config) ?: null),
+            'format-manifest'
+        );
         fwrite(STDOUT, sprintf("Formatted manifest: %s\n", $config->manifestPath));
         exit(0);
     }
@@ -384,7 +449,7 @@ try {
         );
 
         if ($mode === 'add-dependency') {
-            if (isset($options['plan']) || isset($options['dry-run'])) {
+            if (isset($options['plan']) || isset($options['dry-run']) || isset($options['preview'])) {
                 $result = $authoringService->planAddDependency($options);
                 fwrite(STDOUT, "Planned dependency addition\n");
                 fwrite(STDOUT, sprintf("Component: %s\n", $result['component_key']));
@@ -415,7 +480,11 @@ try {
                 exit(0);
             }
 
-            $result = $authoringService->addDependency($options);
+            $result = $mutationLock->synchronized(
+                $repoRoot,
+                static fn (): array => $authoringService->addDependency($options),
+                'add-dependency'
+            );
             fwrite(STDOUT, sprintf("Added dependency %s (%s)\n", $result['component_key'], $result['path']));
 
             if (($result['version'] ?? null) !== null) {
@@ -434,7 +503,7 @@ try {
         }
 
         if ($mode === 'adopt-dependency') {
-            if (isset($options['plan']) || isset($options['dry-run'])) {
+            if (isset($options['plan']) || isset($options['dry-run']) || isset($options['preview'])) {
                 $result = $authoringService->planAdoptDependency($options);
                 fwrite(STDOUT, "Planned dependency adoption\n");
                 fwrite(STDOUT, sprintf("Adopt from: %s\n", $result['adopted_from']));
@@ -457,7 +526,11 @@ try {
                 exit(0);
             }
 
-            $result = $authoringService->adoptDependency($options);
+            $result = $mutationLock->synchronized(
+                $repoRoot,
+                static fn (): array => $authoringService->adoptDependency($options),
+                'adopt-dependency'
+            );
             fwrite(STDOUT, sprintf(
                 "Adopted dependency %s from %s\n",
                 $result['component_key'],
@@ -480,7 +553,11 @@ try {
         }
 
         if ($mode === 'remove-dependency') {
-            $result = $authoringService->removeDependency($options);
+            $result = $mutationLock->synchronized(
+                $repoRoot,
+                static fn (): array => $authoringService->removeDependency($options),
+                'remove-dependency'
+            );
             fwrite(STDOUT, sprintf(
                 "Removed dependency %s%s\n",
                 $result['removed']['component_key'],
@@ -526,18 +603,25 @@ try {
         $reportPath = isset($options['report-json']) && is_string($options['report-json']) ? $options['report-json'] : null;
         $failOnSourceErrors = isset($options['fail-on-source-errors']);
 
-        foreach ([
-            'core' => static fn () => $coreUpdater->sync(),
-            'dependencies' => static function () use ($dependencyUpdater, &$dependencyWarnings): void {
-                $dependencyWarnings = $dependencyUpdater->sync();
-            },
-        ] as $name => $syncPass) {
-            try {
-                $syncPass();
-            } catch (Throwable $throwable) {
-                $errors[] = sprintf('%s: %s', $name, $throwable->getMessage());
+        $mutationLock->synchronized($repoRoot, static function () use (
+            $coreUpdater,
+            $dependencyUpdater,
+            &$dependencyWarnings,
+            &$errors
+        ): void {
+            foreach ([
+                'core' => static fn () => $coreUpdater->sync(),
+                'dependencies' => static function () use ($dependencyUpdater, &$dependencyWarnings): void {
+                    $dependencyWarnings = $dependencyUpdater->sync();
+                },
+            ] as $name => $syncPass) {
+                try {
+                    $syncPass();
+                } catch (Throwable $throwable) {
+                    $errors[] = OutputRedactor::redact(sprintf('%s: %s', $name, $throwable->getMessage()));
+                }
             }
-        }
+        }, 'sync');
 
         if ($reportPath !== null && trim($reportPath) !== '') {
             SyncReport::write(SyncReport::build($errors, $dependencyWarnings), $reportPath);
@@ -581,7 +665,15 @@ try {
             gitRunner: new GitCommandRunner($repoRoot, $config->dryRun()),
             runtimeInspector: new RuntimeInspector($config->runtime),
         );
-        $frameworkSyncer->sync($checkOnly);
+        if ($checkOnly) {
+            $frameworkSyncer->sync(true);
+        } else {
+            $mutationLock->synchronized(
+                $repoRoot,
+                static fn (): null => ($frameworkSyncer->sync(false) ?: null),
+                'framework-sync'
+            );
+        }
         exit(0);
     }
 
@@ -595,6 +687,6 @@ try {
     fwrite(STDERR, "Run with `help` to see the available modes.\n");
     exit(2);
 } catch (Throwable $throwable) {
-    fwrite(STDERR, $throwable->getMessage() . "\n");
+    fwrite(STDERR, OutputRedactor::redact($throwable->getMessage()) . "\n");
     exit(1);
 }
