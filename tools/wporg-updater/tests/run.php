@@ -550,7 +550,7 @@ $runtimeDefaults = [
     'managed_sanitize_paths' => ['cms/plugins/docs', 'cms/plugins/tests', 'cms/themes/docs', 'cms/themes/tests', 'cms/mu-plugins/docs', 'cms/mu-plugins/tests'],
     'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
 ];
-$checkoutActionSha = 'actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683';
+$checkoutActionSha = 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd';
 $setupPhpActionSha = 'shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f';
 $legacyRuntimeDefaults = $runtimeDefaults;
 unset(
