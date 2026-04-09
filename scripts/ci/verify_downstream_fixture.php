@@ -37,7 +37,7 @@ try {
         '--force',
     ]);
 
-    copyPath($frameworkRoot, $frameworkVendorRoot, ['.git', 'dist', '.wp-core-base/build']);
+    (new \WpOrgPluginUpdater\FrameworkReleaseArtifactBuilder($frameworkRoot))->copySnapshotTo($frameworkVendorRoot);
     seedFixtureRepository($repoRoot, $profile, $contentRoot);
 
     $pluginPath = $contentRoot . '/plugins/example-plugin';
@@ -176,49 +176,6 @@ function runCommand(string $cwd, array $command): void
             is_string($stdout) ? $stdout : '',
             is_string($stderr) ? $stderr : ''
         ));
-    }
-}
-
-/**
- * @param list<string> $excludeRelativePaths
- */
-function copyPath(string $source, string $destination, array $excludeRelativePaths = [], string $relativePath = ''): void
-{
-    $trimmedRelative = trim(str_replace('\\', '/', $relativePath), '/');
-
-    if ($trimmedRelative !== '' && in_array($trimmedRelative, $excludeRelativePaths, true)) {
-        return;
-    }
-
-    if (is_link($source) || is_file($source)) {
-        $destinationDir = dirname($destination);
-
-        if (! is_dir($destinationDir) && ! mkdir($destinationDir, 0777, true) && ! is_dir($destinationDir)) {
-            throw new RuntimeException(sprintf('Unable to create directory: %s', $destinationDir));
-        }
-
-        if (! copy($source, $destination)) {
-            throw new RuntimeException(sprintf('Unable to copy %s to %s', $source, $destination));
-        }
-
-        return;
-    }
-
-    if (! is_dir($source)) {
-        return;
-    }
-
-    if (! is_dir($destination) && ! mkdir($destination, 0777, true) && ! is_dir($destination)) {
-        throw new RuntimeException(sprintf('Unable to create directory: %s', $destination));
-    }
-
-    foreach (scandir($source) ?: [] as $entry) {
-        if ($entry === '.' || $entry === '..') {
-            continue;
-        }
-
-        $childRelative = $trimmedRelative === '' ? $entry : $trimmedRelative . '/' . $entry;
-        copyPath($source . '/' . $entry, $destination . '/' . $entry, $excludeRelativePaths, $childRelative);
     }
 }
 

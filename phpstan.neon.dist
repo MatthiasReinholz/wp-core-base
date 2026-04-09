@@ -1,0 +1,9 @@
+parameters:
+    level: 0
+    paths:
+        - tools/wporg-updater/src
+        - tools/wporg-updater/bin/wporg-updater.php
+        - scripts/ci
+    bootstrapFiles:
+        - tools/wporg-updater/src/Autoload.php
+    tmpDir: .phpstan

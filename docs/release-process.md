@@ -59,6 +59,7 @@ php scripts/ci/verify_downstream_fixture.php --profile=content-only
 - the matching `docs/releases/<version>.md` file exists
 - required release-note sections are present
 - the bundled WordPress baseline is mentioned in the release notes
+- the public contract is coherent across README, framework metadata, manifest-managed dependency versions, and the current release notes
 - when `--artifact` and `--checksum-file` are provided, the built vendored snapshot checksum matches and the artifact installs into a temporary downstream copy
 - when `--signature-file` is also provided, the checksum sidecar signature verifies against the framework release public key before the artifact checksum is trusted
 
@@ -67,11 +68,13 @@ php scripts/ci/verify_downstream_fixture.php --profile=content-only
 The release flow is intentionally staged:
 
 - `prepare-wp-core-base-release` derives the version bump, refreshes an existing release branch when appropriate, updates `.wp-core-base/framework.php`, scaffolds `docs/releases/<version>.md` when needed, and opens `release/vX.Y.Z`
-- `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, creates the annotated tag from the merge commit, publishes the vendorable snapshot asset `wp-core-base-vendor-snapshot.zip`, and publishes its SHA-256 checksum file
+- `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, creates the annotated tag from the merge commit, builds the vendorable snapshot through `build-release-artifact`, and publishes `wp-core-base-vendor-snapshot.zip` plus its SHA-256 checksum file
 - `finalize-wp-core-base-release` also signs the checksum sidecar and publishes the detached signature `wp-core-base-vendor-snapshot.zip.sha256.sig`
 - `release-wp-core-base` is the manual recovery workflow for publishing a GitHub Release from an already existing tag after a failed finalize run, including checksum-sidecar signing
 
 This keeps release intent reviewable in a PR instead of bundling version bumps, tagging, and publishing into one manual step.
+
+The artifact builder applies explicit exclusions for non-release material such as temp paths, CI-only scripts, and framework tests so the vendored snapshot boundary stays predictable.
 
 ## Release Signing
 

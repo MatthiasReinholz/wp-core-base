@@ -83,6 +83,7 @@ final class Config
         $dependencies = self::normalizeDependencies($data['dependencies'] ?? [], $paths);
         self::assertProfileCoreCompatibility($profile, $core);
         self::assertSafeStageDirectory($runtime['stage_dir'], $paths, $runtime['ownership_roots']);
+        self::assertDependencyPathConsistency($dependencies, $runtime['manifest_mode']);
 
         return new self(
             repoRoot: $repoRoot,
@@ -968,6 +969,56 @@ final class Config
         }
 
         return $dependencies;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $dependencies
+     */
+    private static function assertDependencyPathConsistency(array $dependencies, string $manifestMode): void
+    {
+        if ($manifestMode !== 'strict') {
+            return;
+        }
+
+        $pathsByDependency = [];
+
+        foreach ($dependencies as $dependency) {
+            $path = (string) $dependency['path'];
+            $pathsByDependency[$path][] = (string) $dependency['component_key'];
+        }
+
+        foreach ($pathsByDependency as $path => $componentKeys) {
+            if (count($componentKeys) > 1) {
+                throw new RuntimeException(sprintf(
+                    'Strict manifest mode does not allow multiple dependency entries for the same runtime path %s: %s.',
+                    $path,
+                    implode(', ', $componentKeys)
+                ));
+            }
+        }
+
+        $dependencyPaths = array_values(array_map(
+            static fn (array $dependency): string => (string) $dependency['path'],
+            $dependencies
+        ));
+        sort($dependencyPaths);
+
+        for ($index = 0, $count = count($dependencyPaths); $index < $count; $index++) {
+            for ($cursor = $index + 1; $cursor < $count; $cursor++) {
+                $left = $dependencyPaths[$index];
+                $right = $dependencyPaths[$cursor];
+
+                if (! self::pathStartsWith($left, $right) && ! self::pathStartsWith($right, $left)) {
+                    continue;
+                }
+
+                throw new RuntimeException(sprintf(
+                    'Strict manifest mode does not allow overlapping dependency runtime paths: %s and %s.',
+                    $left,
+                    $right
+                ));
+            }
+        }
     }
 
     private static function rootForKindFromPaths(string $kind, array $paths): string

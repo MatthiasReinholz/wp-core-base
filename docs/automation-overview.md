@@ -131,6 +131,8 @@ Core and framework automation now follow the same stale/no-op rules as dependenc
 - duplicate PRs for the same target version are collapsed to one canonical PR
 - if reconciliation discovers that the base branch already contains the target version, the stale PR is closed automatically
 
+Framework release artifacts are now also built through one explicit builder path instead of repeated workflow-local shell snippets. That keeps artifact exclusion rules and release hygiene consistent across CI, finalize, and manual recovery workflows.
+
 ## Scaffolding
 
 `scaffold-downstream` renders:

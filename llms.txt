@@ -21,8 +21,10 @@ Core implementation docs:
 
 Framework maintenance docs:
 - docs/contributing.md
+- docs/architecture.md
 - docs/automation-overview.md
 - docs/release-process.md
+- docs/security-model.md
 
 Key framework facts:
 - Supports `full-core` and `content-only` downstreams.

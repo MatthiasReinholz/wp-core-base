@@ -28,14 +28,15 @@ Usage:
   {$phpCommandPrefix} sync
   {$phpCommandPrefix} render-sync-report --report-json=.wp-core-base/build/sync-report.json [--summary-path=/tmp/summary.md]
   {$phpCommandPrefix} sync-report-issue --report-json=.wp-core-base/build/sync-report.json
-  {$phpCommandPrefix} doctor [--repo-root=/path] [--github]
-  {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
+  {$phpCommandPrefix} doctor [--repo-root=/path] [--github] [--json]
+  {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime] [--json]
   {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
   {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force] [--adopt-existing-managed-files]
   {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only]
   {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
+  {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--json]
   {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
-  {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0]
+  {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0] [--json]
   {$phpCommandPrefix} suggest-manifest [--repo-root=/path]
   {$phpCommandPrefix} format-manifest [--repo-root=/path]
   {$phpCommandPrefix} add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
@@ -93,6 +94,7 @@ Notes:
   - `--source=premium` requires `--provider=KEY` where `KEY` is registered in `.wp-core-base/premium-providers.php`.
   - premium sources use the fixed JSON secret/env contract: `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`.
   - --plan, --preview, and --dry-run are preview aliases; they do not mutate the repo.
+  - add `--json` to preview flows when a machine-readable plan is preferred.
 
 Examples:
   {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce
@@ -148,6 +150,7 @@ Notes:
   - --preserve-version keeps the currently installed local version instead of jumping to latest upstream.
   - the operation is atomic for a single dependency: if adoption fails, the existing runtime tree is restored.
   - multi-command migration batches are still not atomic across separate invocations.
+  - add `--json` to preview flows when a machine-readable plan is preferred.
 
 Examples:
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=woocommerce --source=wordpress.org --preserve-version

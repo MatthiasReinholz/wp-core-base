@@ -43,8 +43,10 @@ If you are implementing in a downstream repo:
 If you are changing the framework itself:
 
 1. [docs/contributing.md](/Users/matthias/DEV/wp-core-base/docs/contributing.md)
-2. [docs/automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md)
-3. [docs/release-process.md](/Users/matthias/DEV/wp-core-base/docs/release-process.md)
+2. [docs/architecture.md](/Users/matthias/DEV/wp-core-base/docs/architecture.md)
+3. [docs/security-model.md](/Users/matthias/DEV/wp-core-base/docs/security-model.md)
+4. [docs/automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md)
+5. [docs/release-process.md](/Users/matthias/DEV/wp-core-base/docs/release-process.md)
 
 ## Core Mental Model
 
@@ -54,6 +56,13 @@ Treat `add-dependency`, `remove-dependency`, and `list-dependencies` as the pref
 Treat `refresh-admin-governance` as the command that reprojects manifest ownership into the runtime admin-governance data file.
 
 Treat `.wp-core-base/framework.php` as the installed framework lock file.
+
+For machine-readable automation around the CLI, prefer:
+
+- `doctor --json`
+- `stage-runtime --json`
+- dependency preview flows with `--plan --json`
+- `release-verify --json`
 
 Every runtime path should be understood as one of:
 

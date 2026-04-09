@@ -101,10 +101,10 @@ The framework is intentionally selective: it can manage chosen dependencies for 
 
 This repository currently ships:
 
-- framework release `1.2.3`
+- framework release `1.3.2`
 - WordPress core `6.9.4`
 - Akismet `5.6`
-- WooCommerce `10.6.1`
+- WooCommerce `10.6.2`
 - Jetpack `15.6`
 - Contact Form 7 `6.1.5`
 - Redirection `5.7.5`
@@ -133,7 +133,9 @@ These versions describe the code committed in this repository, not a floating la
 - example downstream manifest and workflows: [docs/examples/](docs/examples/)
 - maintainer release flow: [docs/release-process.md](docs/release-process.md)
 - contributor guide: [docs/contributing.md](docs/contributing.md)
+- maintainer architecture: [docs/architecture.md](docs/architecture.md)
 - automation internals: [docs/automation-overview.md](docs/automation-overview.md)
+- security model: [docs/security-model.md](docs/security-model.md)
 
 ## Contributing
 
