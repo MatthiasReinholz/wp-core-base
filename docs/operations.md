@@ -104,3 +104,16 @@ The framework leaves that file untouched on purpose. Review the new version in t
 ### GitHub env missing
 
 That is expected outside GitHub unless you are explicitly validating the GitHub workflow contract locally.
+
+## Deferred Scalability Work
+
+The following items are intentionally deferred unless scale or incident data justifies extra complexity:
+
+- proactive per-host request pacing for WordPress.org calls
+- cross-run support-topic caching for older open PR investigation
+
+Trigger conditions for implementation:
+
+1. routine sync workload exceeds 100 managed dependencies, or
+2. repeated 429/timeout incidents persist after existing `Retry-After` handling, or
+3. support-topic crawling becomes a material share of end-to-end sync time.

@@ -16,34 +16,41 @@ final class GitCommandRunner implements GitRunnerInterface
 
     public function checkoutBranch(string $baseBranch, string $branch, bool $resetToBase = false): void
     {
-        $this->run(sprintf('git fetch origin %s', escapeshellarg($baseBranch)));
+        $this->run(['git', 'fetch', 'origin', $baseBranch]);
 
         if (! $resetToBase && $this->remoteBranchExists($branch)) {
-            $this->run(sprintf('git fetch origin %s', escapeshellarg($branch)));
-            $this->run(sprintf('git checkout -B %1$s origin/%1$s', escapeshellarg($branch)));
+            $this->run(['git', 'fetch', 'origin', $branch]);
+            $this->run(['git', 'checkout', '-B', $branch, 'origin/' . $branch]);
             return;
         }
 
-        $this->run(sprintf('git checkout -B %s origin/%s', escapeshellarg($branch), escapeshellarg($baseBranch)));
+        $this->run(['git', 'checkout', '-B', $branch, 'origin/' . $baseBranch]);
     }
 
     public function commitAndPush(string $branch, string $message, array $paths, bool $force = false): bool
     {
-        $pathArgs = implode(' ', array_map(static fn (string $path): string => escapeshellarg($path), $paths));
-        $this->run(sprintf('git add --all -- %s', $pathArgs));
+        $this->run(array_merge(['git', 'add', '--all', '--'], $paths));
 
         if (! $this->hasStagedChanges()) {
             return false;
         }
 
-        $baselineRevision = trim($this->run('git rev-parse HEAD'));
-        $this->run(sprintf('git commit -m %s', escapeshellarg($message)));
+        $baselineRevision = trim($this->run(['git', 'rev-parse', 'HEAD']));
+        $this->run(['git', 'commit', '-m', $message]);
 
         try {
-            $this->run(sprintf('git push %s-u origin %s', $force ? '--force ' : '', escapeshellarg($branch)));
+            $pushCommand = ['git', 'push'];
+            if ($force) {
+                $pushCommand[] = '--force';
+            }
+            $pushCommand[] = '-u';
+            $pushCommand[] = 'origin';
+            $pushCommand[] = $branch;
+
+            $this->run($pushCommand);
         } catch (RuntimeException $exception) {
             try {
-                $this->run(sprintf('git reset --hard %s', escapeshellarg($baselineRevision)));
+                $this->run(['git', 'reset', '--hard', $baselineRevision]);
             } catch (RuntimeException $rollbackException) {
                 throw new RuntimeException(sprintf(
                     "Push failed after creating a local commit and rollback failed.\nPush error: %s\nRollback error: %s",
@@ -64,14 +71,14 @@ final class GitCommandRunner implements GitRunnerInterface
 
     public function remoteRevision(string $branch): string
     {
-        $this->run(sprintf('git fetch origin %s', escapeshellarg($branch)));
+        $this->run(['git', 'fetch', 'origin', $branch]);
 
-        return trim($this->run(sprintf('git rev-parse origin/%s', escapeshellarg($branch))));
+        return trim($this->run(['git', 'rev-parse', 'origin/' . $branch]));
     }
 
     public function currentBranch(): ?string
     {
-        [$status, $output] = $this->runWithStatus('git symbolic-ref --quiet --short HEAD', true);
+        [$status, $output] = $this->runWithStatus(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'], true);
 
         if ($status !== 0) {
             return null;
@@ -83,12 +90,12 @@ final class GitCommandRunner implements GitRunnerInterface
 
     public function currentRevision(): string
     {
-        return trim($this->run('git rev-parse HEAD'));
+        return trim($this->run(['git', 'rev-parse', 'HEAD']));
     }
 
     public function localBranchRevision(string $branch): ?string
     {
-        [$status, $output] = $this->runWithStatus(sprintf('git rev-parse --verify --quiet refs/heads/%s', escapeshellarg($branch)), true);
+        [$status, $output] = $this->runWithStatus(['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/' . $branch], true);
 
         if ($status !== 0) {
             return null;
@@ -109,27 +116,27 @@ final class GitCommandRunner implements GitRunnerInterface
 
     public function checkoutRef(string $ref): void
     {
-        $this->run(sprintf('git checkout %s', escapeshellarg($ref)));
+        $this->run(['git', 'checkout', $ref]);
     }
 
     public function checkoutDetached(string $revision): void
     {
-        $this->run(sprintf('git checkout --detach %s', escapeshellarg($revision)));
+        $this->run(['git', 'checkout', '--detach', $revision]);
     }
 
     public function hardReset(string $revision): void
     {
-        $this->run(sprintf('git reset --hard %s', escapeshellarg($revision)));
+        $this->run(['git', 'reset', '--hard', $revision]);
     }
 
     public function cleanUntracked(): void
     {
-        $this->run('git clean -fd');
+        $this->run(['git', 'clean', '-fd']);
     }
 
     public function forceBranchToRevision(string $branch, string $revision): void
     {
-        $this->run(sprintf('git branch -f %s %s', escapeshellarg($branch), escapeshellarg($revision)));
+        $this->run(['git', 'branch', '-f', $branch, $revision]);
     }
 
     public function deleteLocalBranch(string $branch): void
@@ -138,12 +145,12 @@ final class GitCommandRunner implements GitRunnerInterface
             return;
         }
 
-        $this->run(sprintf('git branch -D %s', escapeshellarg($branch)));
+        $this->run(['git', 'branch', '-D', $branch]);
     }
 
     public function forcePushRevision(string $branch, string $revision): void
     {
-        $this->run(sprintf('git push --force origin %s:%s', escapeshellarg($revision), escapeshellarg($branch)));
+        $this->run(['git', 'push', '--force', 'origin', $revision . ':' . $branch]);
     }
 
     public function deleteRemoteBranch(string $branch): void
@@ -152,12 +159,12 @@ final class GitCommandRunner implements GitRunnerInterface
             return;
         }
 
-        $this->run(sprintf('git push origin --delete %s', escapeshellarg($branch)));
+        $this->run(['git', 'push', 'origin', '--delete', $branch]);
     }
 
     public function assertCleanWorktree(): void
     {
-        [$status, $output] = $this->runWithStatus('git status --porcelain', true);
+        [$status, $output] = $this->runWithStatus(['git', 'status', '--porcelain'], true);
 
         if ($status !== 0) {
             throw new RuntimeException(sprintf('Unable to inspect Git worktree state.%s', $output === '' ? '' : "\n" . $output));
@@ -170,34 +177,40 @@ final class GitCommandRunner implements GitRunnerInterface
 
     private function hasStagedChanges(): bool
     {
-        [$status] = $this->runWithStatus('git diff --cached --quiet', true);
+        [$status] = $this->runWithStatus(['git', 'diff', '--cached', '--quiet'], true);
         return $status !== 0;
     }
 
     private function remoteBranchExists(string $branch): bool
     {
-        [$status] = $this->runWithStatus(sprintf('git ls-remote --exit-code --heads origin %s', escapeshellarg($branch)), true);
+        [$status] = $this->runWithStatus(['git', 'ls-remote', '--exit-code', '--heads', 'origin', $branch], true);
         return $status === 0;
     }
 
-    private function run(string $command): string
+    /**
+     * @param list<string> $command
+     */
+    private function run(array $command): string
     {
         [$status, $output] = $this->runWithStatus($command, false);
 
         if ($status !== 0) {
-            throw new RuntimeException(sprintf("Command failed: %s\n%s", $command, $output));
+            throw new RuntimeException(sprintf("Command failed: %s\n%s", $this->formatCommand($command), $output));
         }
 
         return $output;
     }
 
     /**
+     * @param list<string> $command
      * @return array{int, string}
      */
-    private function runWithStatus(string $command, bool $allowFailure): array
+    private function runWithStatus(array $command, bool $allowFailure): array
     {
+        $displayCommand = $this->formatCommand($command);
+
         if ($this->dryRun) {
-            fwrite(STDOUT, sprintf("[dry-run] %s\n", $command));
+            fwrite(STDOUT, sprintf("[dry-run] %s\n", $displayCommand));
             return [0, ''];
         }
 
@@ -206,10 +219,10 @@ final class GitCommandRunner implements GitRunnerInterface
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $this->repoRoot);
+        $process = proc_open($command, $descriptorSpec, $pipes, $this->repoRoot);
 
         if (! is_resource($process)) {
-            throw new RuntimeException(sprintf('Failed to start command: %s', $command));
+            throw new RuntimeException(sprintf('Failed to start command: %s', $displayCommand));
         }
 
         $stdout = stream_get_contents($pipes[1]);
@@ -222,9 +235,17 @@ final class GitCommandRunner implements GitRunnerInterface
         $output = trim((string) $stdout . "\n" . (string) $stderr);
 
         if (! $allowFailure && $status !== 0) {
-            throw new RuntimeException(sprintf("Command failed: %s\n%s", $command, $output));
+            throw new RuntimeException(sprintf("Command failed: %s\n%s", $displayCommand, $output));
         }
 
         return [$status, $output];
+    }
+
+    /**
+     * @param list<string> $command
+     */
+    private function formatCommand(array $command): string
+    {
+        return implode(' ', array_map(static fn (string $part): string => escapeshellarg($part), $command));
     }
 }
