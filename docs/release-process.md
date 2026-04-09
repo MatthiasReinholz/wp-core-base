@@ -60,8 +60,8 @@ php scripts/ci/verify_downstream_fixture.php --profile=content-only
 - required release-note sections are present
 - the bundled WordPress baseline is mentioned in the release notes
 - the public contract is coherent across README, framework metadata, manifest-managed dependency versions, and the current release notes
-- when `--artifact` and `--checksum-file` are provided, the built vendored snapshot checksum matches and the artifact installs into a temporary downstream copy
-- when `--signature-file` is also provided, the checksum sidecar signature verifies against the framework release public key before the artifact checksum is trusted
+- when `--artifact`, `--checksum-file`, and `--signature-file` are provided, the checksum sidecar signature verifies against the framework release public key before the artifact checksum is trusted
+- the built vendored snapshot checksum matches and the artifact installs into a temporary downstream copy
 
 ## GitHub Flow
 

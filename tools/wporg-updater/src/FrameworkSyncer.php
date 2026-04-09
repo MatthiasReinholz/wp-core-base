@@ -15,6 +15,7 @@ final class FrameworkSyncer
     public function __construct(
         private FrameworkConfig $framework,
         private readonly string $repoRoot,
+        private readonly ?Config $config,
         private readonly FrameworkReleaseSource $frameworkReleaseClient,
         private readonly ReleaseClassifier $releaseClassifier,
         private readonly PrBodyRenderer $prBodyRenderer,
@@ -54,7 +55,7 @@ final class FrameworkSyncer
         }
 
         $this->gitRunner->assertCleanWorktree();
-        $defaultBranch = $this->gitHubClient->getDefaultBranch();
+        $defaultBranch = $this->config?->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
         $this->gitHubClient->ensureLabels(self::labelDefinitions());
         $openPrs = $this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests());

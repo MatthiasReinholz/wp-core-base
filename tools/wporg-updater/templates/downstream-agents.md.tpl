@@ -126,6 +126,7 @@ If a workflow or coding agent needs stable machine-readable output, prefer:
 
 ```bash
 __WPORG_PHP_PATH__ doctor --repo-root=. --json
+__WPORG_PHP_PATH__ doctor --repo-root=. --github --json
 __WPORG_PHP_PATH__ stage-runtime --repo-root=. --output=.wp-core-base/build/runtime --json
 __WPORG_WRAPPER_PATH__ add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=example-plugin --plan --json
 __WPORG_PHP_PATH__ release-verify --repo-root=. --json

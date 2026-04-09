@@ -29,7 +29,7 @@ Framework maintenance docs:
 Key framework facts:
 - Supports `full-core` and `content-only` downstreams.
 - GitHub is required only for automated PR workflows, not for using the base itself.
-- Managed dependency sources supported today: `WordPress.org` and `github-release`.
+- Managed dependency sources supported today: `WordPress.org`, `github-release`, and downstream-registered `premium` providers.
 - The installed framework version is pinned in `.wp-core-base/framework.php`.
 - Local project-owned code is first-class and must not be overwritten by updater automation.
 - Runtime staging is a first-class deployment contract.

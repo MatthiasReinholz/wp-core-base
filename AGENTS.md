@@ -52,7 +52,7 @@ If you are changing the framework itself:
 
 Treat the manifest at `.wp-core-base/manifest.php` as the downstream source of truth.
 
-Treat `add-dependency`, `remove-dependency`, and `list-dependencies` as the preferred day-to-day authoring surface for routine changes. Manual manifest editing is still valid, but it is the advanced path.
+Treat `add-dependency`, `adopt-dependency`, `remove-dependency`, and `list-dependencies` as the preferred day-to-day authoring surface for routine changes. Manual manifest editing is still valid, but it is the advanced path.
 Treat `refresh-admin-governance` as the command that reprojects manifest ownership into the runtime admin-governance data file.
 
 Treat `.wp-core-base/framework.php` as the installed framework lock file.
@@ -60,6 +60,7 @@ Treat `.wp-core-base/framework.php` as the installed framework lock file.
 For machine-readable automation around the CLI, prefer:
 
 - `doctor --json`
+- `doctor --github --json` when validating the GitHub automation contract
 - `stage-runtime --json`
 - dependency preview flows with `--plan --json`
 - `release-verify --json`

@@ -36,7 +36,7 @@ Usage:
   {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
   {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--json]
   {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
-  {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0] [--json]
+  {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0] [--artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig [--public-key-file=/path/to/framework-release-public.pem]] [--json]
   {$phpCommandPrefix} suggest-manifest [--repo-root=/path]
   {$phpCommandPrefix} format-manifest [--repo-root=/path]
   {$phpCommandPrefix} add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
@@ -98,7 +98,7 @@ Notes:
 
 Examples:
   {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce
-  {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce --version=10.6.1 --replace
+  {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce --version=10.6.2 --replace
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --private
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --archive-subdir=private-plugin
@@ -154,7 +154,7 @@ Notes:
 
 Examples:
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=woocommerce --source=wordpress.org --preserve-version
-  {$commandPrefix} adopt-dependency --repo-root=. --component-key=plugin:local:woocommerce --source=wordpress.org --version=10.6.1
+  {$commandPrefix} adopt-dependency --repo-root=. --component-key=plugin:local:woocommerce --source=wordpress.org --version=10.6.2
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=private-plugin --source=github-release --github-repository=owner/private-plugin --preserve-version
   {$commandPrefix} scaffold-premium-provider --repo-root=. --provider=example-vendor
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=premium-plugin --source=premium --provider=example-vendor --preserve-version

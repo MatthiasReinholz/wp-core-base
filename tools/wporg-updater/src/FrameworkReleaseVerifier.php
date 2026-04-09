@@ -87,14 +87,18 @@ final class FrameworkReleaseVerifier
 
         if ($artifactPath !== null || $checksumPath !== null || $signaturePath !== null || $publicKeyPath !== null) {
             if (! is_string($artifactPath) || trim($artifactPath) === '' || ! is_string($checksumPath) || trim($checksumPath) === '') {
-                throw new RuntimeException('Artifact verification requires both --artifact and --checksum-file.');
+                throw new RuntimeException('Artifact verification requires --artifact, --checksum-file, and --signature-file.');
+            }
+
+            if (! is_string($signaturePath) || trim($signaturePath) === '') {
+                throw new RuntimeException('Artifact verification requires --signature-file so unsigned checksum sidecars are never trusted.');
             }
 
             $this->verifyArtifact(
                 $framework,
                 $artifactPath,
                 $checksumPath,
-                is_string($signaturePath) && trim($signaturePath) !== '' ? $signaturePath : null,
+                $signaturePath,
                 is_string($publicKeyPath) && trim($publicKeyPath) !== '' ? $publicKeyPath : null
             );
             $artifactVerified = true;
@@ -114,7 +118,7 @@ final class FrameworkReleaseVerifier
         FrameworkConfig $framework,
         string $artifactPath,
         string $checksumPath,
-        ?string $signaturePath,
+        string $signaturePath,
         ?string $publicKeyPath,
     ): void
     {
@@ -126,13 +130,15 @@ final class FrameworkReleaseVerifier
             throw new RuntimeException(sprintf('Release checksum file not found: %s', $checksumPath));
         }
 
-        if ($signaturePath !== null) {
-            FrameworkReleaseSignature::verifyChecksumFile(
-                $checksumPath,
-                $signaturePath,
-                $publicKeyPath ?? ReleaseSignatureKeyStore::defaultPublicKeyPath($framework)
-            );
+        if (! is_file($signaturePath)) {
+            throw new RuntimeException(sprintf('Release signature file not found: %s', $signaturePath));
         }
+
+        FrameworkReleaseSignature::verifyChecksumFile(
+            $checksumPath,
+            $signaturePath,
+            $publicKeyPath ?? ReleaseSignatureKeyStore::defaultPublicKeyPath($framework)
+        );
 
         $checksumContents = file_get_contents($checksumPath);
 

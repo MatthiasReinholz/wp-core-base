@@ -722,6 +722,7 @@ try {
         $frameworkSyncer = new FrameworkSyncer(
             framework: $framework,
             repoRoot: $repoRoot,
+            config: $config,
             frameworkReleaseClient: new FrameworkReleaseClient(
                 new GitHubReleaseClient($httpClient, $config->githubApiBase())
             ),
@@ -749,16 +750,24 @@ try {
         exit($blocker->evaluateCurrentPullRequest());
     }
 
+    $unknownModeMessage = sprintf('Unknown mode: %s. Run with `help` to see the available modes.', $mode);
+
+    if ($jsonOutput) {
+        $emitJson([
+            'status' => 'failure',
+            'error' => $unknownModeMessage,
+        ], 2);
+    }
+
     fwrite(STDERR, sprintf("Unknown mode: %s\n", $mode));
     fwrite(STDERR, "Run with `help` to see the available modes.\n");
     exit(2);
 } catch (Throwable $throwable) {
     if ($jsonOutput) {
-        fwrite(STDOUT, json_encode([
+        $emitJson([
             'status' => 'failure',
             'error' => OutputRedactor::redact($throwable->getMessage()),
-        ], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT) . "\n");
-        exit(1);
+        ], 1);
     }
 
     fwrite(STDERR, OutputRedactor::redact($throwable->getMessage()) . "\n");
