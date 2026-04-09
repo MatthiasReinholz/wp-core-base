@@ -92,6 +92,20 @@ Optional flags:
 
 Use `--archive-subdir` only when the extracted payload is not resolved correctly by default. Standard WordPress.org plugin ZIPs should not need it.
 
+If the upstream project also publishes a checksum sidecar for the ZIP, add the matching manifest fields after creation:
+
+- `source_config.checksum_asset_pattern`
+- `source_config.verification_mode`
+- optionally `source_config.min_release_age_hours`
+
+Recommended hardened setup:
+
+- `github_release_asset_pattern`: the real ZIP asset
+- `checksum_asset_pattern`: the matching `.sha256` asset
+- `verification_mode: checksum-sidecar-required`
+
+That makes `sync` verify the downloaded archive before extraction. If you prefer a repo-wide default, set `security.github_release_verification` and `security.managed_release_min_age_hours` in the manifest instead.
+
 ## Add A Premium Plugin
 
 Premium workflow updates use a downstream-registered provider adapter.

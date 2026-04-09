@@ -115,19 +115,7 @@ final class FrameworkReleaseVerifier
         }
 
         $expectedChecksum = $this->extractChecksum($checksumContents, basename($artifactPath));
-        $actualChecksum = hash_file('sha256', $artifactPath);
-
-        if (! is_string($actualChecksum) || $actualChecksum === '') {
-            throw new RuntimeException(sprintf('Unable to hash release artifact: %s', $artifactPath));
-        }
-
-        if (! hash_equals($expectedChecksum, strtolower($actualChecksum))) {
-            throw new RuntimeException(sprintf(
-                'Release artifact checksum mismatch. Expected %s but found %s.',
-                $expectedChecksum,
-                strtolower($actualChecksum)
-            ));
-        }
+        FileChecksum::assertSha256Matches($artifactPath, $expectedChecksum, 'Release artifact');
 
         $tempRoot = sys_get_temp_dir() . '/wp-core-base-release-verify-' . bin2hex(random_bytes(6));
         $extractPath = $tempRoot . '/extract';
@@ -216,48 +204,6 @@ final class FrameworkReleaseVerifier
 
     private function extractChecksum(string $contents, string $assetName): string
     {
-        $lines = preg_split("/\r\n|\n|\r/", trim($contents)) ?: [];
-
-        foreach ($lines as $line) {
-            $parsed = $this->parseChecksumLine($line, $assetName);
-
-            if ($parsed !== null) {
-                return $parsed;
-            }
-        }
-
-        throw new RuntimeException(sprintf('Checksum file for %s did not contain a matching SHA-256 digest.', $assetName));
-    }
-
-    private function parseChecksumLine(string $line, string $assetName): ?string
-    {
-        $line = trim($line);
-
-        if ($line === '') {
-            return null;
-        }
-
-        $parts = preg_split('/\s+/', $line, 2);
-        $checksum = strtolower((string) ($parts[0] ?? ''));
-
-        if (preg_match('/^[a-f0-9]{64}$/', $checksum) !== 1) {
-            return null;
-        }
-
-        $filename = trim((string) ($parts[1] ?? ''), " *\t");
-
-        if ($filename === '') {
-            return null;
-        }
-
-        if ($filename !== $assetName) {
-            throw new RuntimeException(sprintf(
-                'Checksum file entry bound digest to %s, expected %s.',
-                $filename,
-                $assetName
-            ));
-        }
-
-        return $checksum;
+        return FileChecksum::extractSha256ForAsset($contents, $assetName);
     }
 }

@@ -172,6 +172,22 @@ final class GitHubReleaseClient implements GitHubReleaseSource
     }
 
     /**
+     * @param array<string, mixed> $release
+     * @param array<string, mixed> $dependency
+     */
+    public function checksumSha256ForAssetPattern(array $release, array $dependency, string $checksumAssetPattern, string $expectedAssetName): ?string
+    {
+        $checksumAsset = $this->findReleaseAsset($release, $checksumAssetPattern);
+
+        if ($checksumAsset === null) {
+            return null;
+        }
+
+        $checksumContents = $this->downloadAssetContents($checksumAsset, $dependency);
+        return FileChecksum::extractSha256ForAsset($checksumContents, $expectedAssetName);
+    }
+
+    /**
      * @param array<string, mixed> $dependency
      */
     public function archiveSubdir(array $dependency): string
@@ -271,13 +287,33 @@ final class GitHubReleaseClient implements GitHubReleaseSource
             return null;
         }
 
+        $asset = $this->findReleaseAsset($release, $assetPattern);
+
+        if ($asset !== null) {
+            return $asset;
+        }
+
+        throw new RuntimeException(sprintf(
+            'No GitHub release asset matching "%s" was found for %s.',
+            $assetPattern,
+            $this->repository($dependency)
+        ));
+    }
+
+    /**
+     * @param array<string, mixed> $release
+     * @return array<string, mixed>|null
+     */
+    private function findReleaseAsset(array $release, string $assetPattern): ?array
+    {
+        if ($assetPattern === '') {
+            return null;
+        }
+
         $assets = $release['assets'] ?? null;
 
         if (! is_array($assets)) {
-            throw new RuntimeException(sprintf(
-                'GitHub release for %s did not include an assets list.',
-                $this->repository($dependency)
-            ));
+            return null;
         }
 
         foreach ($assets as $asset) {
@@ -292,11 +328,7 @@ final class GitHubReleaseClient implements GitHubReleaseSource
             }
         }
 
-        throw new RuntimeException(sprintf(
-            'No GitHub release asset matching "%s" was found for %s.',
-            $assetPattern,
-            $this->repository($dependency)
-        ));
+        return null;
     }
 
     /**
@@ -311,6 +343,31 @@ final class GitHubReleaseClient implements GitHubReleaseSource
             'allowed_redirect_hosts' => $this->allowedDownloadHosts(),
             'strip_auth_on_cross_origin_redirect' => true,
             'max_download_bytes' => 512 * 1024 * 1024,
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $asset
+     * @param array<string, mixed> $dependency
+     */
+    private function downloadAssetContents(array $asset, array $dependency): string
+    {
+        $apiUrl = $asset['url'] ?? null;
+
+        if (! is_string($apiUrl) || $apiUrl === '') {
+            throw new RuntimeException(sprintf(
+                'GitHub release asset metadata for %s is missing the API URL.',
+                $this->repository($dependency)
+            ));
+        }
+
+        $headers = $this->headers($dependency);
+        $headers['Accept'] = 'application/octet-stream';
+
+        return $this->httpClient->getWithOptions($apiUrl, $headers, [
+            'allowed_redirect_hosts' => $this->allowedDownloadHosts(),
+            'strip_auth_on_cross_origin_redirect' => true,
+            'max_body_bytes' => 1024 * 1024,
         ]);
     }
 
