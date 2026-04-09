@@ -14,6 +14,7 @@ use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\EnvironmentDoctor;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
+use WpOrgPluginUpdater\FrameworkReleaseArtifactBuilder;
 use WpOrgPluginUpdater\FrameworkReleaseClient;
 use WpOrgPluginUpdater\FrameworkReleasePreparer;
 use WpOrgPluginUpdater\FrameworkReleaseSignature;
@@ -741,7 +742,9 @@ try {
         } else {
             $mutationLock->synchronized(
                 $repoRoot,
-                static fn (): null => ($frameworkSyncer->sync(false) ?: null),
+                static function () use ($frameworkSyncer): void {
+                    $frameworkSyncer->sync(false);
+                },
                 'framework-sync'
             );
         }
