@@ -66,7 +66,25 @@ case "$url" in
     body_file="${FAKE_PULLS_FIXTURE:?}"
     ;;
   */actions/workflows/*/runs\?head_sha=*)
-    body_file="${FAKE_RUNS_FIXTURE:?}"
+    if [ -n "${FAKE_RUNS_FIXTURE_SEQUENCE:-}" ]; then
+      sequence_index_file="${FAKE_RUNS_SEQUENCE_INDEX_FILE:?}"
+      sequence_index=0
+
+      if [ -f "${sequence_index_file}" ]; then
+        sequence_index="$(cat "${sequence_index_file}")"
+      fi
+
+      IFS=':' read -r -a run_fixtures <<< "${FAKE_RUNS_FIXTURE_SEQUENCE}"
+
+      if [ "${sequence_index}" -ge "${#run_fixtures[@]}" ]; then
+        sequence_index=$((${#run_fixtures[@]} - 1))
+      fi
+
+      body_file="${run_fixtures[${sequence_index}]}"
+      printf '%s' "$((sequence_index + 1))" > "${sequence_index_file}"
+    else
+      body_file="${FAKE_RUNS_FIXTURE:?}"
+    fi
     ;;
   */releases/tags/*)
     status="${FAKE_RELEASE_STATUS:-200}"
@@ -124,17 +142,28 @@ export FAKE_REMOTE_CHECKSUM_FILE="${REMOTE_DIR}/checksum-current"
 export FAKE_REMOTE_SIGNATURE_FILE="${REMOTE_DIR}/signature-current"
 
 CI_SUCCESS_OUTPUT="${TMP_DIR}/ci-success.out"
+unset FAKE_RUNS_FIXTURE_SEQUENCE
 export FAKE_RUNS_FIXTURE="${FIXTURE_ROOT}/runs-push-success.json"
 bash "${REPO_ROOT}/scripts/ci/check_framework_release_ci.sh" example/repo v1.3.2 merge-commit-sha > "${CI_SUCCESS_OUTPUT}"
 assert_contains "${CI_SUCCESS_OUTPUT}" "successful wporg-validate-runtime.yml push run on merged commit merge-commit-sha"
 
+CI_DELAYED_SUCCESS_OUTPUT="${TMP_DIR}/ci-delayed-success.out"
+export FAKE_RUNS_FIXTURE_SEQUENCE="${FIXTURE_ROOT}/runs-push-pending.json:${FIXTURE_ROOT}/runs-push-success.json"
+export FAKE_RUNS_SEQUENCE_INDEX_FILE="${TMP_DIR}/runs-sequence-index"
+rm -f "${FAKE_RUNS_SEQUENCE_INDEX_FILE}"
+RELEASE_CI_MAX_ATTEMPTS=2 RELEASE_CI_POLL_INTERVAL_SECONDS=0 \
+  bash "${REPO_ROOT}/scripts/ci/check_framework_release_ci.sh" example/repo v1.3.2 merge-commit-sha > "${CI_DELAYED_SUCCESS_OUTPUT}"
+assert_contains "${CI_DELAYED_SUCCESS_OUTPUT}" "successful wporg-validate-runtime.yml push run on merged commit merge-commit-sha"
+
 CI_FAILURE_OUTPUT="${TMP_DIR}/ci-failure.out"
+unset FAKE_RUNS_FIXTURE_SEQUENCE
 export FAKE_RUNS_FIXTURE="${FIXTURE_ROOT}/runs-no-push-success.json"
-if bash "${REPO_ROOT}/scripts/ci/check_framework_release_ci.sh" example/repo v1.3.2 merge-commit-sha > "${CI_FAILURE_OUTPUT}" 2>&1; then
+if RELEASE_CI_MAX_ATTEMPTS=1 RELEASE_CI_POLL_INTERVAL_SECONDS=0 \
+  bash "${REPO_ROOT}/scripts/ci/check_framework_release_ci.sh" example/repo v1.3.2 merge-commit-sha > "${CI_FAILURE_OUTPUT}" 2>&1; then
   echo "Expected release CI helper to reject commits without a successful push run." >&2
   exit 1
 fi
-assert_contains "${CI_FAILURE_OUTPUT}" "no successful wporg-validate-runtime.yml push run on merged commit merge-commit-sha"
+assert_contains "${CI_FAILURE_OUTPUT}" "no successful wporg-validate-runtime.yml push run on merged commit merge-commit-sha after 1 check(s)"
 
 ASSET_CURRENT_OUTPUT="${TMP_DIR}/assets-current.out"
 ASSET_CURRENT_GITHUB_OUTPUT="${TMP_DIR}/assets-current.github-output"
