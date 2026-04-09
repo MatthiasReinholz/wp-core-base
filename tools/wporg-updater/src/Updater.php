@@ -41,7 +41,7 @@ final class Updater
         $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
         $this->gitHubClient->ensureLabels($this->labelDefinitionsForRun());
-        $openPrs = $this->indexManagedPullRequests($this->gitHubClient->listOpenPullRequests());
+        $openPrs = $this->indexManagedPullRequests($this->gitHubClient->listOpenPullRequests('automation:dependency-update'));
         $errors = [];
 
         foreach ($this->config->managedDependencies() as $dependency) {
@@ -1106,7 +1106,7 @@ final class Updater
     {
         $matching = [];
 
-        foreach ($this->gitHubClient->listOpenPullRequests() as $pullRequest) {
+        foreach ($this->gitHubClient->listOpenPullRequests('automation:dependency-update') as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
             if ($metadata === null) {

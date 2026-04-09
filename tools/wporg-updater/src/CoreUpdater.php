@@ -110,7 +110,7 @@ final class CoreUpdater
     {
         $prs = [];
 
-        foreach ($this->gitHubClient->listOpenPullRequests() as $pullRequest) {
+        foreach ($this->gitHubClient->listOpenPullRequests('automation:dependency-update') as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
             if (($metadata['kind'] ?? null) === 'core' && $this->isManagedRepositoryPullRequest($pullRequest)) {

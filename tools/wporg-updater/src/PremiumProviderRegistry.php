@@ -242,10 +242,6 @@ final class PremiumProviderRegistry
         PremiumCredentialsStore $credentialsStore,
         array $dependencies,
     ): PremiumCredentialsStore {
-        if ($dependencies === []) {
-            return $credentialsStore;
-        }
-
         return new ProviderScopedPremiumCredentialsStore(
             $credentialsStore,
             $provider,

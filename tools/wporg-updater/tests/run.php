@@ -28,6 +28,7 @@ use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\GitHubReleaseManagedSource;
 use WpOrgPluginUpdater\GitHubPullRequestReader;
 use WpOrgPluginUpdater\GitHubReleaseSource;
+use WpOrgPluginUpdater\GitCommandRunner;
 use WpOrgPluginUpdater\GitRunnerInterface;
 use WpOrgPluginUpdater\HttpStatusRuntimeException;
 use WpOrgPluginUpdater\HttpClient;
@@ -38,6 +39,7 @@ use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\LabelHelper;
+use WpOrgPluginUpdater\MutationLock;
 use WpOrgPluginUpdater\OutputRedactor;
 use WpOrgPluginUpdater\PremiumProviderRegistry;
 use WpOrgPluginUpdater\PremiumProviderScaffolder;
@@ -51,6 +53,7 @@ use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\SyncReport;
+use WpOrgPluginUpdater\TempDirectoryJanitor;
 use WpOrgPluginUpdater\ArchiveDownloader;
 use WpOrgPluginUpdater\WordPressCoreClient;
 use WpOrgPluginUpdater\WordPressOrgManagedSource;
@@ -270,13 +273,28 @@ final class FakePullRequestReader implements GitHubPullRequestReader
     ) {
     }
 
-    public function listOpenPullRequests(): array
+    public function listOpenPullRequests(?string $label = null): array
     {
         if ($this->listFailure !== null) {
             throw $this->listFailure;
         }
 
-        return $this->openPullRequests;
+        if (! is_string($label) || $label === '') {
+            return $this->openPullRequests;
+        }
+
+        return array_values(array_filter(
+            $this->openPullRequests,
+            static function (array $pullRequest) use ($label): bool {
+                foreach ((array) ($pullRequest['labels'] ?? []) as $labelEntry) {
+                    if ((string) ($labelEntry['name'] ?? '') === $label) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        ));
     }
 
     public function getPullRequest(int $number): array
@@ -322,9 +340,24 @@ final class FakeGitHubAutomationClient implements GitHubAutomationClient
     {
     }
 
-    public function listOpenPullRequests(): array
+    public function listOpenPullRequests(?string $label = null): array
     {
-        return $this->openPullRequests;
+        if (! is_string($label) || $label === '') {
+            return $this->openPullRequests;
+        }
+
+        return array_values(array_filter(
+            $this->openPullRequests,
+            static function (array $pullRequest) use ($label): bool {
+                foreach ((array) ($pullRequest['labels'] ?? []) as $labelEntry) {
+                    if ((string) ($labelEntry['name'] ?? '') === $label) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        ));
     }
 
     public function getPullRequest(int $number): array
@@ -387,6 +420,51 @@ final class FakeGitHubAutomationClient implements GitHubAutomationClient
     public function markReadyForReview(string $nodeId): void
     {
     }
+}
+
+/**
+ * @param list<string> $command
+ * @return array{exit_code:int,stdout:string,stderr:string}
+ */
+function run_process(string $cwd, array $command): array
+{
+    $descriptor = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+    $process = proc_open($command, $descriptor, $pipes, $cwd);
+
+    if (! is_resource($process)) {
+        throw new RuntimeException(sprintf('Unable to start command: %s', implode(' ', $command)));
+    }
+
+    fclose($pipes[0]);
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $status = proc_close($process);
+
+    return [
+        'exit_code' => (int) $status,
+        'stdout' => is_string($stdout) ? $stdout : '',
+        'stderr' => is_string($stderr) ? $stderr : '',
+    ];
+}
+
+/**
+ * @param list<string> $command
+ */
+function run_process_or_fail(callable $assert, string $cwd, array $command, string $message): string
+{
+    $result = run_process($cwd, $command);
+    $assert(
+        $result['exit_code'] === 0,
+        $message . sprintf(" (command: %s, stderr: %s)", implode(' ', $command), trim($result['stderr']))
+    );
+
+    return trim($result['stdout']);
 }
 
 $fixtureDir = __DIR__ . '/fixtures';
@@ -1939,6 +2017,175 @@ $assert(($fakeGitRunner->localBranches['codex/test-update'] ?? null) === 'old-lo
 $assert(($fakeGitRunner->remoteBranches['codex/test-update'] ?? null) === 'old-remote-sha', 'Expected branch rollback guard to restore the remote automation branch revision.');
 $assert(! file_exists($branchGuardRoot . '/.wp-core-base/build/leftover/temp.txt'), 'Expected branch rollback guard to clean tool-created untracked residue.');
 $assert(in_array('clean-untracked', $fakeGitRunner->actions, true), 'Expected branch rollback guard to clean untracked repository files during rollback.');
+
+$gitRunnerRoot = sys_get_temp_dir() . '/wporg-git-runner-' . bin2hex(random_bytes(4));
+mkdir($gitRunnerRoot, 0777, true);
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'init'], 'Expected to initialize a temporary Git repository for GitCommandRunner tests.');
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'config', 'user.email', 'test@example.com'], 'Expected to configure a test Git user email.');
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'config', 'user.name', 'WP Core Base Tests'], 'Expected to configure a test Git user name.');
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'checkout', '-b', 'main'], 'Expected to create a main branch in the temporary Git repository.');
+file_put_contents($gitRunnerRoot . '/tracked.txt', "baseline\n");
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'add', 'tracked.txt'], 'Expected to stage baseline file in temporary Git repository.');
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'commit', '-m', 'Initial commit'], 'Expected to create baseline commit in temporary Git repository.');
+$remoteRoot = sys_get_temp_dir() . '/wporg-git-remote-' . bin2hex(random_bytes(4)) . '.git';
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'init', '--bare', $remoteRoot], 'Expected to create a temporary bare Git remote.');
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'remote', 'add', 'origin', $remoteRoot], 'Expected to configure temporary origin remote.');
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'push', '-u', 'origin', 'main'], 'Expected to push baseline branch to temporary origin.');
+$baselineRevision = run_process_or_fail($assert, $gitRunnerRoot, ['git', 'rev-parse', 'HEAD'], 'Expected to resolve baseline revision.');
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'remote', 'set-url', 'origin', '/path/that/does/not/exist'], 'Expected to reconfigure origin to an invalid path for push-failure rollback testing.');
+file_put_contents($gitRunnerRoot . '/tracked.txt', "changed\n");
+$gitCommandRunner = new GitCommandRunner($gitRunnerRoot);
+$pushRollbackRaised = false;
+
+try {
+    $gitCommandRunner->commitAndPush('main', 'Simulate push rollback', ['tracked.txt']);
+} catch (RuntimeException $exception) {
+    $pushRollbackRaised = str_contains($exception->getMessage(), 'branch was reset to ' . $baselineRevision);
+}
+
+$assert($pushRollbackRaised, 'Expected GitCommandRunner to report push failure rollback details including the baseline revision.');
+$assert(
+    run_process_or_fail($assert, $gitRunnerRoot, ['git', 'rev-parse', 'HEAD'], 'Expected to resolve post-rollback revision.') === $baselineRevision,
+    'Expected GitCommandRunner to reset the local branch back to the baseline revision when push fails.'
+);
+$assert(
+    trim((string) file_get_contents($gitRunnerRoot . '/tracked.txt')) === 'baseline',
+    'Expected GitCommandRunner push-failure rollback to restore tracked file contents.'
+);
+
+$lockRepoRoot = sys_get_temp_dir() . '/wporg-lock-timeout-' . bin2hex(random_bytes(4));
+mkdir($lockRepoRoot . '/.wp-core-base/build/locks', 0777, true);
+$lockPath = $lockRepoRoot . '/.wp-core-base/build/locks/mutation-test.lock';
+$lockHandle = fopen($lockPath, 'c+');
+$assert(is_resource($lockHandle), 'Expected lock timeout fixture to open lock file.');
+$assert(flock($lockHandle, LOCK_EX | LOCK_NB), 'Expected lock timeout fixture to acquire exclusive lock.');
+ftruncate($lockHandle, 0);
+rewind($lockHandle);
+fwrite($lockHandle, sprintf("pid=%d\nacquired_at=%s\n", getmypid() ?: 0, gmdate(DATE_ATOM)));
+fflush($lockHandle);
+$previousLockTimeout = getenv('WP_CORE_BASE_LOCK_TIMEOUT_SECONDS');
+putenv('WP_CORE_BASE_LOCK_TIMEOUT_SECONDS=1');
+$mutationLock = new MutationLock();
+$lockTimeoutRaised = false;
+
+try {
+    $mutationLock->synchronized($lockRepoRoot, static fn (): string => 'never-runs', 'mutation-test');
+} catch (RuntimeException $exception) {
+    $message = $exception->getMessage();
+    $lockTimeoutRaised = str_contains($message, 'Timed out after 1 seconds waiting for mutation lock')
+        && str_contains($message, 'holder pid=')
+        && str_contains($message, 'holder acquired_at=');
+}
+
+$assert($lockTimeoutRaised, 'Expected MutationLock timeout errors to include lock holder PID and acquisition timestamp diagnostics.');
+flock($lockHandle, LOCK_UN);
+fclose($lockHandle);
+
+if ($previousLockTimeout === false) {
+    putenv('WP_CORE_BASE_LOCK_TIMEOUT_SECONDS');
+} else {
+    putenv('WP_CORE_BASE_LOCK_TIMEOUT_SECONDS=' . $previousLockTimeout);
+}
+
+$httpClientForRetryContracts = new HttpClient();
+$parseRetryAfter = new ReflectionMethod(HttpClient::class, 'parseRetryAfterSeconds');
+$parseRetryAfter->setAccessible(true);
+$retryDelayFromHeaders = new ReflectionMethod(HttpClient::class, 'retryDelayFromHeaders');
+$retryDelayFromHeaders->setAccessible(true);
+$nextRetryDelayMicroseconds = new ReflectionMethod(HttpClient::class, 'nextRetryDelayMicroseconds');
+$nextRetryDelayMicroseconds->setAccessible(true);
+
+$assert($parseRetryAfter->invoke($httpClientForRetryContracts, '7') === 7, 'Expected Retry-After numeric parsing to return exact seconds.');
+$retryAfterDateSeconds = $parseRetryAfter->invoke(
+    $httpClientForRetryContracts,
+    gmdate('D, d M Y H:i:s \G\M\T', time() + 5)
+);
+$assert(is_int($retryAfterDateSeconds) && $retryAfterDateSeconds >= 1 && $retryAfterDateSeconds <= 6, 'Expected Retry-After HTTP-date parsing to resolve to a bounded positive delay.');
+$assert($parseRetryAfter->invoke($httpClientForRetryContracts, 'not-a-date') === null, 'Expected Retry-After parsing to reject invalid values.');
+$rateLimitDelay = $retryDelayFromHeaders->invoke($httpClientForRetryContracts, [
+    'x-ratelimit-remaining' => '0',
+    'x-ratelimit-reset' => (string) (time() + 3),
+]);
+$assert(is_int($rateLimitDelay) && $rateLimitDelay >= 1 && $rateLimitDelay <= 3, 'Expected x-ratelimit-reset handling to compute a bounded retry delay.');
+$cappedDelay = $nextRetryDelayMicroseconds->invoke(
+    $httpClientForRetryContracts,
+    250_000,
+    ['status' => 429, 'body' => '', 'headers' => ['retry-after' => '5000']]
+);
+$assert($cappedDelay === 900_000_000, 'Expected Retry-After delays to be capped at MAX_RETRY_DELAY_SECONDS.');
+$fallbackDelay = $nextRetryDelayMicroseconds->invoke(
+    $httpClientForRetryContracts,
+    123_000,
+    ['status' => 503, 'body' => '', 'headers' => []]
+);
+$assert($fallbackDelay === 123_000, 'Expected retry delay calculation to fall back when no rate-limit headers are available.');
+
+$fakeFilterClient = new FakeGitHubAutomationClient();
+$fakeFilterClient->openPullRequests = [
+    ['number' => 1, 'labels' => [['name' => 'automation:dependency-update']]],
+    ['number' => 2, 'labels' => [['name' => 'automation:framework-update']]],
+    ['number' => 3, 'labels' => [['name' => 'unrelated']]],
+];
+$assert(count($fakeFilterClient->listOpenPullRequests()) === 3, 'Expected unfiltered open pull request listing to return all pull requests.');
+$assert(
+    array_column($fakeFilterClient->listOpenPullRequests('automation:dependency-update'), 'number') === [1],
+    'Expected label-filtered open pull request listing to return only matching pull requests.'
+);
+
+$janitorRoot = sys_get_temp_dir() . '/wporg-janitor-contract-' . bin2hex(random_bytes(4));
+mkdir($janitorRoot, 0777, true);
+$staleManagedDirectory = $janitorRoot . '/wporg-update-old';
+$freshManagedDirectory = $janitorRoot . '/wporg-update-fresh';
+$unmanagedDirectory = $janitorRoot . '/custom-temp-old';
+mkdir($staleManagedDirectory . '/nested', 0777, true);
+mkdir($freshManagedDirectory, 0777, true);
+mkdir($unmanagedDirectory, 0777, true);
+file_put_contents($staleManagedDirectory . '/nested/stale.txt', "stale\n");
+file_put_contents($freshManagedDirectory . '/fresh.txt', "fresh\n");
+file_put_contents($unmanagedDirectory . '/unmanaged.txt', "unmanaged\n");
+touch($staleManagedDirectory, time() - 600);
+touch($freshManagedDirectory, time());
+touch($unmanagedDirectory, time() - 600);
+$janitorResult = (new TempDirectoryJanitor(['wporg-update-'], 60, $janitorRoot))->cleanup();
+$assert(
+    in_array($staleManagedDirectory, $janitorResult['removed'], true),
+    'Expected TempDirectoryJanitor to remove stale managed temporary directories.'
+);
+$assert(! is_dir($staleManagedDirectory), 'Expected TempDirectoryJanitor to delete stale managed temporary directory trees.');
+$assert(is_dir($freshManagedDirectory), 'Expected TempDirectoryJanitor to preserve managed temporary directories newer than max age.');
+$assert(is_dir($unmanagedDirectory), 'Expected TempDirectoryJanitor to ignore stale directories without recognized prefixes.');
+$assert($janitorResult['failed'] === [], 'Expected TempDirectoryJanitor cleanup contract test to complete without failures.');
+
+$structuredLoggerScript = $janitorRoot . '/structured-logger-contract.php';
+file_put_contents($structuredLoggerScript, sprintf(<<<'PHP'
+<?php
+declare(strict_types=1);
+require %s;
+putenv('WP_CORE_BASE_JSON_LOGS=1');
+$startedAt = \WpOrgPluginUpdater\StructuredLogger::startTimer();
+usleep(2000);
+\WpOrgPluginUpdater\StructuredLogger::log(
+    'INFO',
+    'sync',
+    'Structured logger contract test message.',
+    'component:test',
+    $startedAt,
+    ['contract' => 'structured-logger']
+);
+PHP, var_export($repoRoot . '/tools/wporg-updater/src/Autoload.php', true)));
+$structuredLoggerResult = run_process($repoRoot, ['php', $structuredLoggerScript]);
+$assert($structuredLoggerResult['exit_code'] === 0, 'Expected StructuredLogger contract subprocess to exit successfully.');
+$structuredLoggerLines = array_values(array_filter(array_map('trim', preg_split('/\R+/', $structuredLoggerResult['stderr']) ?: []), static fn (string $line): bool => $line !== ''));
+$assert(count($structuredLoggerLines) === 1, 'Expected StructuredLogger JSON mode contract test to emit exactly one log line.');
+$structuredLoggerPayload = json_decode($structuredLoggerLines[0], true);
+$assert(is_array($structuredLoggerPayload), 'Expected StructuredLogger contract output to be valid JSON.');
+$assert(($structuredLoggerPayload['operation'] ?? null) === 'sync', 'Expected StructuredLogger contract output to include operation.');
+$assert(($structuredLoggerPayload['component_key'] ?? null) === 'component:test', 'Expected StructuredLogger contract output to include component key.');
+$assert(($structuredLoggerPayload['level'] ?? null) === 'info', 'Expected StructuredLogger contract output to normalize level casing.');
+$assert(($structuredLoggerPayload['message'] ?? null) === 'Structured logger contract test message.', 'Expected StructuredLogger contract output to include message.');
+$assert(isset($structuredLoggerPayload['operation_id']) && preg_match('/^[a-f0-9]{16}$/', (string) $structuredLoggerPayload['operation_id']) === 1, 'Expected StructuredLogger contract output to include a stable 16-hex operation_id.');
+$assert(is_int($structuredLoggerPayload['duration_ms'] ?? null), 'Expected StructuredLogger contract output to include integer duration_ms when startedAt is provided.');
+$assert(($structuredLoggerPayload['context']['contract'] ?? null) === 'structured-logger', 'Expected StructuredLogger contract output to include context payload.');
 
 run_blocker_state_tests($assert);
 run_followup_integration_tests($assert);

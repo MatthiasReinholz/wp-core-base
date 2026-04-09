@@ -9,7 +9,7 @@ interface GitHubPullRequestReader
     /**
      * @return list<array<string, mixed>>
      */
-    public function listOpenPullRequests(): array;
+    public function listOpenPullRequests(?string $label = null): array;
 
     /**
      * @return array<string, mixed>

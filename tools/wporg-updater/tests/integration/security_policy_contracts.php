@@ -211,6 +211,24 @@ PHP);
         $providerSources['vendor-b']->visibleCredentialKeys() === ['vendor-b-key'],
         'Expected vendor-b provider to see only its own credential keys.'
     );
+
+    $unscopedAttempt = PremiumProviderRegistry::load($providerScopeRoot)->instantiate(
+        new \WpOrgPluginUpdater\HttpClient(),
+        $providerScopedStore,
+        []
+    );
+    $assert(
+        $unscopedAttempt['vendor-a']->visibleCredentialKeys() === [],
+        'Expected provider-scoped credentials to default to empty when no managed premium dependencies are present.'
+    );
+    $assert(
+        $unscopedAttempt['vendor-b']->visibleCredentialKeys() === [],
+        'Expected provider-scoped credentials to default to empty for every provider when dependencies are absent.'
+    );
+    $assert(
+        $providerSources['vendor-a']->rejectsDependencyForProvider('vendor-b'),
+        'Expected provider-scoped credentials to reject cross-provider dependency lookups.'
+    );
 }
 
 final class SecurityPolicyVendorAProvider extends \WpOrgPluginUpdater\AbstractPremiumManagedSource
@@ -242,6 +260,23 @@ final class SecurityPolicyVendorAProvider extends \WpOrgPluginUpdater\AbstractPr
         $keys = array_keys($this->credentialsStore->all());
         sort($keys);
         return $keys;
+    }
+
+    public function rejectsDependencyForProvider(string $provider): bool
+    {
+        try {
+            $this->credentialsStore->credentialsFor([
+                'component_key' => 'plugin:premium:' . $provider . ':cross-provider-probe',
+                'kind' => 'plugin',
+                'source' => 'premium',
+                'slug' => 'cross-provider-probe',
+                'source_config' => ['provider' => $provider],
+            ]);
+        } catch (RuntimeException) {
+            return true;
+        }
+
+        return false;
     }
 }
 

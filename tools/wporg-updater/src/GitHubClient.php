@@ -81,7 +81,26 @@ final class GitHubClient implements GitHubAutomationClient
     /**
      * @return list<array<string, mixed>>
      */
-    public function listOpenPullRequests(): array
+    public function listOpenPullRequests(?string $label = null): array
+    {
+        if (is_string($label) && $label !== '') {
+            try {
+                return $this->listOpenPullRequestsByLabel($label);
+            } catch (RuntimeException) {
+                return array_values(array_filter(
+                    $this->listAllOpenPullRequests(),
+                    static fn (array $pullRequest): bool => self::pullRequestHasLabel($pullRequest, $label)
+                ));
+            }
+        }
+
+        return $this->listAllOpenPullRequests();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function listAllOpenPullRequests(): array
     {
         $page = 1;
         $pullRequests = [];
@@ -106,6 +125,71 @@ final class GitHubClient implements GitHubAutomationClient
         } while (count($chunk) === 100);
 
         return $pullRequests;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function listOpenPullRequestsByLabel(string $label): array
+    {
+        $page = 1;
+        $pullRequestNumbers = [];
+
+        do {
+            $chunk = $this->requestJson(
+                'GET',
+                sprintf(
+                    '/repos/%s/issues?state=open&per_page=100&labels=%s&page=%d',
+                    $this->repository,
+                    rawurlencode($label),
+                    $page
+                )
+            );
+
+            if (! array_is_list($chunk)) {
+                throw new RuntimeException('GitHub returned a non-list payload for labeled pull request listing.');
+            }
+
+            foreach ($chunk as $candidate) {
+                if (! is_array($candidate) || ! isset($candidate['pull_request'])) {
+                    continue;
+                }
+
+                $number = $candidate['number'] ?? null;
+
+                if (is_int($number) && $number > 0) {
+                    $pullRequestNumbers[$number] = true;
+                }
+            }
+
+            $page++;
+        } while (count($chunk) === 100);
+
+        $pullRequests = [];
+
+        foreach (array_keys($pullRequestNumbers) as $number) {
+            $pullRequest = $this->getPullRequest((int) $number);
+
+            if (self::pullRequestHasLabel($pullRequest, $label)) {
+                $pullRequests[] = $pullRequest;
+            }
+        }
+
+        return $pullRequests;
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private static function pullRequestHasLabel(array $pullRequest, string $label): bool
+    {
+        foreach ((array) ($pullRequest['labels'] ?? []) as $entry) {
+            if ((string) ($entry['name'] ?? '') === $label) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
