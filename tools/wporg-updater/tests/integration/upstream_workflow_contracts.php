@@ -39,7 +39,7 @@ function run_upstream_workflow_contract_tests(
     $assert(str_contains($upstreamFinalizeWorkflow, 'release-sign'), 'Expected finalize release workflow to create a detached release signature.');
     $assert(str_contains($upstreamFinalizeWorkflow, 'check_framework_release_ci.sh'), 'Expected finalize release workflow to verify the merged release PR passed CI before publishing.');
     $assert(str_contains($upstreamFinalizeWorkflow, 'check_framework_release_assets.sh'), 'Expected finalize release workflow to verify the published release assets match the built snapshot.');
-    $assert(str_contains($upstreamFinalizeWorkflow, 'overwrite_files: true'), 'Expected finalize release workflow to allow idempotent release asset repair.');
+    $assert(str_contains($upstreamFinalizeWorkflow, 'gh release create'), 'Expected finalize release workflow to publish through GitHub CLI release creation.');
     $assert(str_contains($upstreamFinalizeWorkflow, "git push --delete origin"), 'Expected finalize release workflow to roll back the pushed tag when release publishing fails.');
     $assert(str_contains($upstreamFinalizeWorkflow, "group: wp-core-base-release-\${{ github.event.pull_request.head.ref }}"), 'Expected finalize release workflow to serialize publication by release branch/version.');
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected manual release workflow to publish a SHA-256 checksum asset.');
@@ -48,7 +48,8 @@ function run_upstream_workflow_contract_tests(
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'release-sign'), 'Expected manual release workflow to create a detached release signature.');
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'check_framework_release_ci.sh'), 'Expected manual recovery release workflow to verify the merged release PR passed CI before publishing.');
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'check_framework_release_assets.sh'), 'Expected manual recovery release workflow to compare existing release assets to the current built snapshot.');
-    $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'overwrite_files: true'), 'Expected manual recovery release workflow to repair stale release assets in place.');
+    $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'gh release upload'), 'Expected manual recovery release workflow to repair stale release assets through GitHub CLI upload.');
+    $assert(str_contains($upstreamRecoveryReleaseWorkflow, '--clobber'), 'Expected manual recovery release workflow to overwrite stale release assets in place.');
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'already contains the current verified assets; nothing to publish.'), 'Expected manual recovery release workflow to skip only when the GitHub Release already matches the current verified assets.');
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, "group: wp-core-base-release-release/\${{ inputs.version }}"), 'Expected manual recovery release workflow to serialize publication by release version.');
     $assert(str_contains($upstreamValidateWorkflow, '--artifact=dist/wp-core-base-vendor-snapshot.zip'), 'Expected CI release verification to validate the built release artifact, not only release metadata.');

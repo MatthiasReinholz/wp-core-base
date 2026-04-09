@@ -112,17 +112,16 @@ jobs:
         run: git push origin "${{ steps.release.outputs.version }}"
 
       - name: Create GitHub release
-        id: create_release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
-        with:
-          overwrite_files: true
-          tag_name: ${{ steps.release.outputs.version }}
-          title: wp-core-base ${{ steps.release.outputs.version }}
-          body_path: docs/releases/${{ steps.release.outputs.plain }}.md
-          files: |
-            dist/wp-core-base-vendor-snapshot.zip
-            dist/wp-core-base-vendor-snapshot.zip.sha256
-            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.release.outputs.version }}" \
+            dist/wp-core-base-vendor-snapshot.zip \
+            dist/wp-core-base-vendor-snapshot.zip.sha256 \
+            dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "wp-core-base ${{ steps.release.outputs.version }}" \
+            --notes-file "docs/releases/${{ steps.release.outputs.plain }}.md"
 
       - name: Verify published release assets are current
         env:
