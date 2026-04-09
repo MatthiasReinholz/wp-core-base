@@ -202,7 +202,12 @@ final class CoreUpdater
         try {
             if ((bool) $plannedPr['requires_code_update']) {
                 $paths = [];
-                $paths = $this->checkoutAndApplyCoreVersion($defaultBranch, $branch, (string) $release['download_url']);
+                $paths = $this->checkoutAndApplyCoreVersion(
+                    $defaultBranch,
+                    $branch,
+                    (string) $release['download_url'],
+                    $targetVersion
+                );
                 $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
 
                 if (! $changed) {
@@ -243,6 +248,8 @@ final class CoreUpdater
             $metadata['scope'] = $scope;
             $metadata['blocked_by'] = $blockedBy;
             $metadata['updated_at'] = gmdate(DATE_ATOM);
+            $metadata['trust_state'] = DependencyTrustState::VERIFIED;
+            $metadata['trust_details'] = 'WordPress core files were verified against official checksums before apply.';
 
             $body = $this->prBodyRenderer->renderCoreUpdate(
                 currentVersion: (string) $metadata['base_version'],
@@ -301,7 +308,12 @@ final class CoreUpdater
         $branchGuard = $this->beginBranchRollbackGuard($branch);
 
         try {
-            $paths = $this->checkoutAndApplyCoreVersion($defaultBranch, $branch, (string) $release['download_url']);
+            $paths = $this->checkoutAndApplyCoreVersion(
+                $defaultBranch,
+                $branch,
+                (string) $release['download_url'],
+                (string) $release['version']
+            );
             $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $release['version']), $paths);
 
             if (! $changed) {
@@ -333,6 +345,8 @@ final class CoreUpdater
                 'release_at' => (string) $release['release_at'],
                 'blocked_by' => $blockedBy,
                 'updated_at' => gmdate(DATE_ATOM),
+                'trust_state' => DependencyTrustState::VERIFIED,
+                'trust_details' => 'WordPress core files were verified against official checksums before apply.',
             ];
 
             $body = $this->prBodyRenderer->renderCoreUpdate(
@@ -460,7 +474,7 @@ final class CoreUpdater
     /**
      * @return list<string>
      */
-    private function checkoutAndApplyCoreVersion(string $defaultBranch, string $branch, string $downloadUrl): array
+    private function checkoutAndApplyCoreVersion(string $defaultBranch, string $branch, string $downloadUrl, string $targetVersion): array
     {
         $this->gitRunner->checkoutBranch($defaultBranch, $branch);
         $tempDir = sys_get_temp_dir() . '/wp-core-update-' . bin2hex(random_bytes(6));
@@ -471,7 +485,9 @@ final class CoreUpdater
 
         $archivePath = $tempDir . '/core.zip';
         $extractPath = $tempDir . '/extract';
-        mkdir($extractPath, 0777, true);
+        if (! mkdir($extractPath, 0777, true) && ! is_dir($extractPath)) {
+            throw new RuntimeException(sprintf('Failed to create extraction directory: %s', $extractPath));
+        }
 
         try {
             $this->archiveDownloader->downloadToFile($downloadUrl, $archivePath);
@@ -491,6 +507,7 @@ final class CoreUpdater
                 throw new RuntimeException('Expected extracted WordPress core archive to contain a wordpress/ root directory.');
             }
 
+            $this->coreClient->assertOfficialChecksums($targetVersion, $sourceRoot);
             $this->sanitizeExtractedTree($sourceRoot);
 
             $paths = [];
@@ -523,7 +540,9 @@ final class CoreUpdater
         $destinationWpContent = $this->config->repoRoot . '/' . $this->config->paths['content_root'];
 
         if (! is_dir($destinationWpContent)) {
-            mkdir($destinationWpContent, 0777, true);
+            if (! mkdir($destinationWpContent, 0777, true) && ! is_dir($destinationWpContent)) {
+                throw new RuntimeException(sprintf('Failed to create WordPress content directory: %s', $destinationWpContent));
+            }
         }
 
         $paths = [];
@@ -551,7 +570,9 @@ final class CoreUpdater
     private function syncBundledDirectory(string $sourceDirectory, string $destinationDirectory, string $pathPrefix): array
     {
         if (! is_dir($destinationDirectory)) {
-            mkdir($destinationDirectory, 0777, true);
+            if (! mkdir($destinationDirectory, 0777, true) && ! is_dir($destinationDirectory)) {
+                throw new RuntimeException(sprintf('Failed to create bundled destination directory: %s', $destinationDirectory));
+            }
         }
 
         $paths = [];
@@ -585,7 +606,9 @@ final class CoreUpdater
         }
 
         if (is_file($path) || is_link($path)) {
-            unlink($path);
+            if (! unlink($path)) {
+                throw new RuntimeException(sprintf('Failed to remove path: %s', $path));
+            }
             return;
         }
 
@@ -596,23 +619,39 @@ final class CoreUpdater
 
         foreach ($iterator as $item) {
             if ($item->isDir()) {
-                rmdir($item->getPathname());
+                if (! rmdir($item->getPathname())) {
+                    throw new RuntimeException(sprintf('Failed to remove directory: %s', $item->getPathname()));
+                }
             } else {
-                unlink($item->getPathname());
+                if (! unlink($item->getPathname())) {
+                    throw new RuntimeException(sprintf('Failed to remove file: %s', $item->getPathname()));
+                }
             }
         }
 
-        rmdir($path);
+        if (! rmdir($path)) {
+            throw new RuntimeException(sprintf('Failed to remove directory: %s', $path));
+        }
     }
 
     private function copyPath(string $source, string $destination): void
     {
         if (is_file($source)) {
-            copy($source, $destination);
+            $targetDir = dirname($destination);
+
+            if (! is_dir($targetDir) && ! mkdir($targetDir, 0777, true) && ! is_dir($targetDir)) {
+                throw new RuntimeException(sprintf('Failed to create copy destination directory: %s', $targetDir));
+            }
+
+            if (! copy($source, $destination)) {
+                throw new RuntimeException(sprintf('Failed to copy file %s to %s.', $source, $destination));
+            }
             return;
         }
 
-        mkdir($destination, 0777, true);
+        if (! mkdir($destination, 0777, true) && ! is_dir($destination)) {
+            throw new RuntimeException(sprintf('Failed to create directory: %s', $destination));
+        }
 
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS),
@@ -624,10 +663,14 @@ final class CoreUpdater
 
             if ($item->isDir()) {
                 if (! is_dir($target)) {
-                    mkdir($target, 0777, true);
+                    if (! mkdir($target, 0777, true) && ! is_dir($target)) {
+                        throw new RuntimeException(sprintf('Failed to create directory: %s', $target));
+                    }
                 }
             } else {
-                copy($item->getPathname(), $target);
+                if (! copy($item->getPathname(), $target)) {
+                    throw new RuntimeException(sprintf('Failed to copy file %s to %s.', $item->getPathname(), $target));
+                }
             }
         }
     }
@@ -657,7 +700,9 @@ final class CoreUpdater
 
             foreach ($forbiddenFiles as $pattern) {
                 if (fnmatch($pattern, $basename)) {
-                    @unlink($item->getPathname());
+                    if (! unlink($item->getPathname())) {
+                        throw new RuntimeException(sprintf('Failed to remove forbidden file during sanitize: %s', $item->getPathname()));
+                    }
                     break;
                 }
             }

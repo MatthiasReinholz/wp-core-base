@@ -142,7 +142,9 @@ final class RuntimeInspector
         }
 
         if (is_file($path) || is_link($path)) {
-            @unlink($path);
+            if (! unlink($path)) {
+                throw new RuntimeException(sprintf('Failed to remove file: %s', $path));
+            }
             return;
         }
 
@@ -150,7 +152,13 @@ final class RuntimeInspector
             return;
         }
 
-        foreach (@scandir($path) ?: [] as $entry) {
+        $entries = scandir($path);
+
+        if ($entries === false) {
+            throw new RuntimeException(sprintf('Failed to list directory: %s', $path));
+        }
+
+        foreach ($entries as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
@@ -165,7 +173,9 @@ final class RuntimeInspector
             $this->clearPath($entryPath);
         }
 
-        @rmdir($path);
+        if (! rmdir($path)) {
+            throw new RuntimeException(sprintf('Failed to remove directory: %s', $path));
+        }
     }
 
     /**
@@ -262,13 +272,13 @@ final class RuntimeInspector
 
     private function preservePermissions(string $source, string $destination): void
     {
-        $sourcePermissions = @fileperms($source);
+        $sourcePermissions = fileperms($source);
 
         if ($sourcePermissions === false) {
             throw new RuntimeException(sprintf('Failed to read permissions from %s', $source));
         }
 
-        if (! @chmod($destination, $sourcePermissions & 0777)) {
+        if (! chmod($destination, $sourcePermissions & 0777)) {
             throw new RuntimeException(sprintf('Failed to apply permissions to %s', $destination));
         }
     }
@@ -285,7 +295,9 @@ final class RuntimeInspector
 
         if (is_file($path) || is_link($path)) {
             if ($this->isStripped(basename($path), $stripPaths, $stripFiles)) {
-                unlink($path);
+                if (! unlink($path)) {
+                    throw new RuntimeException(sprintf('Failed to strip file: %s', $path));
+                }
             }
 
             return;
@@ -304,7 +316,9 @@ final class RuntimeInspector
             }
 
             if ($item->isLink() || $item->isFile()) {
-                unlink($item->getPathname());
+                if (! unlink($item->getPathname())) {
+                    throw new RuntimeException(sprintf('Failed to strip file: %s', $item->getPathname()));
+                }
             } elseif ($item->isDir()) {
                 $this->clearPath($item->getPathname());
             }

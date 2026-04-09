@@ -10,6 +10,7 @@ final class HttpClient implements ArchiveDownloader
 {
     private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
     private const REDIRECT_STATUSES = [301, 302, 303, 307, 308];
+    private const MAX_RETRY_DELAY_SECONDS = 900;
 
     public function __construct(
         private readonly string $userAgent = 'wp-core-base/1.0',
@@ -145,13 +146,15 @@ final class HttpClient implements ArchiveDownloader
                     return;
                 }
 
-                @unlink($temporaryDestination);
+                $this->bestEffortRemoveFile($temporaryDestination);
 
                 if (! $this->shouldRetryStatus($response['status']) || $attempt === $attempts) {
                     throw new RuntimeException(sprintf('Download request failed for %s with status %d.', $url, $response['status']));
                 }
+
+                $delayMicroseconds = $this->nextRetryDelayMicroseconds($delayMicroseconds, $response);
             } catch (RuntimeException $exception) {
-                @unlink($temporaryDestination);
+                $this->bestEffortRemoveFile($temporaryDestination);
 
                 if ($attempt === $attempts || ! $this->shouldRetryException($exception)) {
                     throw $exception;
@@ -180,6 +183,8 @@ final class HttpClient implements ArchiveDownloader
                 if (! $this->shouldRetryStatus($response['status']) || $attempt === $attempts) {
                     return $response;
                 }
+
+                $delayMicroseconds = $this->nextRetryDelayMicroseconds($delayMicroseconds, $response);
             } catch (RuntimeException $exception) {
                 if ($attempt === $attempts || ! $this->shouldRetryException($exception)) {
                     throw $exception;
@@ -419,7 +424,7 @@ final class HttpClient implements ArchiveDownloader
                 throw new RuntimeException(sprintf('Download redirect for %s did not include a Location header.', $url));
             }
 
-            @unlink($destination);
+            $this->bestEffortRemoveFile($destination);
             $redirectUrl = $this->resolveRedirectUrl($url, $location);
             $redirectHeaders = $this->headersForRedirect($headers, $url, $redirectUrl, $options);
 
@@ -457,6 +462,74 @@ final class HttpClient implements ArchiveDownloader
         }
 
         return true;
+    }
+
+    /**
+     * @param array{status:int, body:string, headers:array<string, string>} $response
+     */
+    private function nextRetryDelayMicroseconds(int $fallbackMicroseconds, array $response): int
+    {
+        $headerDelay = $this->retryDelayFromHeaders($response['headers']);
+
+        if ($headerDelay !== null && $headerDelay > 0) {
+            return min(self::MAX_RETRY_DELAY_SECONDS * 1_000_000, $headerDelay * 1_000_000);
+        }
+
+        return $fallbackMicroseconds;
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    private function retryDelayFromHeaders(array $headers): ?int
+    {
+        $retryAfter = $headers['retry-after'] ?? null;
+
+        if (is_string($retryAfter) && trim($retryAfter) !== '') {
+            $parsed = $this->parseRetryAfterSeconds($retryAfter);
+
+            if ($parsed !== null && $parsed > 0) {
+                return $parsed;
+            }
+        }
+
+        $remaining = $headers['x-ratelimit-remaining'] ?? null;
+        $reset = $headers['x-ratelimit-reset'] ?? null;
+
+        if (is_string($remaining) && trim($remaining) === '0' && is_string($reset) && ctype_digit(trim($reset))) {
+            $seconds = ((int) trim($reset)) - time();
+            return max(1, $seconds);
+        }
+
+        return null;
+    }
+
+    private function parseRetryAfterSeconds(string $retryAfter): ?int
+    {
+        $value = trim($retryAfter);
+
+        if (ctype_digit($value)) {
+            return (int) $value;
+        }
+
+        $timestamp = strtotime($value);
+
+        if ($timestamp === false) {
+            return null;
+        }
+
+        return max(1, $timestamp - time());
+    }
+
+    private function bestEffortRemoveFile(string $path): void
+    {
+        if (! is_file($path)) {
+            return;
+        }
+
+        if (! unlink($path)) {
+            fwrite(STDERR, sprintf("[warn] Failed to remove temporary file %s\n", $path));
+        }
     }
 
     /**

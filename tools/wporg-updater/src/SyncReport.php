@@ -20,9 +20,10 @@ final class SyncReport
     /**
      * @param list<string> $fatalErrors
      * @param list<string> $dependencyWarnings
+     * @param list<array{component_key:string,target_version:string,trust_state:string,trust_details:string}> $dependencyTrustStates
      * @return array<string, mixed>
      */
-    public static function build(array $fatalErrors, array $dependencyWarnings): array
+    public static function build(array $fatalErrors, array $dependencyWarnings, array $dependencyTrustStates = []): array
     {
         $fatalErrors = OutputRedactor::redactAll($fatalErrors);
         $dependencyWarnings = OutputRedactor::redactAll($dependencyWarnings);
@@ -41,6 +42,7 @@ final class SyncReport
             'dependency_warnings' => array_values($dependencyWarnings),
             'warning_count' => count($dependencyWarnings),
             'fatal_error_count' => count($fatalErrors),
+            'dependency_trust_states' => array_values($dependencyTrustStates),
         ];
     }
 
@@ -86,6 +88,7 @@ final class SyncReport
         $status = (string) ($report['status'] ?? self::STATUS_FAILURE);
         $fatalErrors = self::stringList($report['fatal_errors'] ?? []);
         $dependencyWarnings = self::stringList($report['dependency_warnings'] ?? []);
+        $dependencyTrustStates = is_array($report['dependency_trust_states'] ?? null) ? $report['dependency_trust_states'] : [];
         $generatedAt = (string) ($report['generated_at'] ?? '');
 
         $lines = [
@@ -95,6 +98,7 @@ final class SyncReport
             sprintf('- Generated at: `%s`', $generatedAt === '' ? 'unknown' : $generatedAt),
             sprintf('- Dependency source warnings: `%d`', count($dependencyWarnings)),
             sprintf('- Fatal errors: `%d`', count($fatalErrors)),
+            sprintf('- Trust records: `%d`', count($dependencyTrustStates)),
             '',
         ];
 
@@ -122,6 +126,23 @@ final class SyncReport
 
         if ($dependencyWarnings === [] && $fatalErrors === []) {
             $lines[] = 'No dependency-source warnings or fatal sync errors were reported.';
+        }
+
+        if ($dependencyTrustStates !== []) {
+            $lines[] = '';
+            $lines[] = '### Dependency Trust States';
+            $lines[] = '';
+
+            foreach ($dependencyTrustStates as $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+
+                $componentKey = (string) ($entry['component_key'] ?? 'unknown');
+                $targetVersion = (string) ($entry['target_version'] ?? 'unknown');
+                $trustState = (string) ($entry['trust_state'] ?? 'unknown');
+                $lines[] = sprintf('- `%s` -> `%s` (`%s`)', $componentKey, $targetVersion, $trustState);
+            }
         }
 
         return rtrim(implode("\n", $lines)) . "\n";

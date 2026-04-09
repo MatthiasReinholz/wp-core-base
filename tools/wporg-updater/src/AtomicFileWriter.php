@@ -23,19 +23,19 @@ final class AtomicFileWriter
                 throw new RuntimeException(sprintf('Unable to write temporary file for %s.', $path));
             }
 
-            $existingPermissions = @fileperms($path);
+            $existingPermissions = is_file($path) ? fileperms($path) : false;
             $mode = is_int($existingPermissions) ? ($existingPermissions & 0777) : 0664;
 
-            if (! @chmod($temporaryPath, $mode)) {
+            if (! chmod($temporaryPath, $mode)) {
                 throw new RuntimeException(sprintf('Unable to apply permissions to %s.', $temporaryPath));
             }
 
-            if (! @rename($temporaryPath, $path)) {
+            if (! rename($temporaryPath, $path)) {
                 throw new RuntimeException(sprintf('Unable to move temporary file into place for %s.', $path));
             }
         } finally {
-            if (is_file($temporaryPath)) {
-                @unlink($temporaryPath);
+            if (is_file($temporaryPath) && ! unlink($temporaryPath)) {
+                fwrite(STDERR, sprintf("[warn] Unable to clean up temporary file %s\n", $temporaryPath));
             }
         }
     }

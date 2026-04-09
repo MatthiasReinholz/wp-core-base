@@ -134,13 +134,15 @@ final class PremiumProviderRegistry
     }
 
     /**
+     * @param list<array<string, mixed>> $dependencies
      * @return array<string, PremiumManagedDependencySource>
      */
-    public function instantiate(HttpClient $httpClient, PremiumCredentialsStore $credentialsStore): array
+    public function instantiate(HttpClient $httpClient, PremiumCredentialsStore $credentialsStore, array $dependencies = []): array
     {
         $sources = [];
 
         foreach ($this->definitions as $provider => $definition) {
+            $providerCredentials = $this->scopedCredentialsStoreForProvider($provider, $credentialsStore, $dependencies);
             $path = $definition['path'];
 
             if ($path !== null) {
@@ -169,7 +171,7 @@ final class PremiumProviderRegistry
             }
 
             try {
-                $instance = new $class($httpClient, $credentialsStore);
+                $instance = new $class($httpClient, $providerCredentials);
             } catch (TypeError $exception) {
                 throw new RuntimeException(sprintf(
                     'Premium provider `%s` class %s must be constructible with (HttpClient, PremiumCredentialsStore).',
@@ -199,5 +201,55 @@ final class PremiumProviderRegistry
         }
 
         return $sources;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $dependencies
+     * @return list<string>
+     */
+    private function credentialLookupKeysForProvider(string $provider, PremiumCredentialsStore $credentialsStore, array $dependencies): array
+    {
+        $lookupKeys = [];
+
+        foreach ($dependencies as $dependency) {
+            if (! is_array($dependency)) {
+                continue;
+            }
+
+            $source = $dependency['source'] ?? null;
+
+            if (! is_string($source) || ! PremiumSourceResolver::isPremiumSource($source)) {
+                continue;
+            }
+
+            if (PremiumSourceResolver::providerForDependency($dependency) !== $provider) {
+                continue;
+            }
+
+            foreach ($credentialsStore->lookupKeysFor($dependency) as $lookupKey) {
+                $lookupKeys[$lookupKey] = true;
+            }
+        }
+
+        return array_keys($lookupKeys);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $dependencies
+     */
+    private function scopedCredentialsStoreForProvider(
+        string $provider,
+        PremiumCredentialsStore $credentialsStore,
+        array $dependencies,
+    ): PremiumCredentialsStore {
+        if ($dependencies === []) {
+            return $credentialsStore;
+        }
+
+        return new ProviderScopedPremiumCredentialsStore(
+            $credentialsStore,
+            $provider,
+            $this->credentialLookupKeysForProvider($provider, $credentialsStore, $dependencies),
+        );
     }
 }

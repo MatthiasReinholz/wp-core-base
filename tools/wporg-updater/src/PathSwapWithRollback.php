@@ -30,12 +30,12 @@ final class PathSwapWithRollback
         }
 
         if (file_exists($targetPath) || is_link($targetPath)) {
-            if (! @rename($targetPath, $backupPath)) {
+            if (! rename($targetPath, $backupPath)) {
                 throw new RuntimeException(sprintf('Unable to move existing path out of the way: %s', $targetPath));
             }
         }
 
-        if (! @rename($stagingPath, $targetPath)) {
+        if (! rename($stagingPath, $targetPath)) {
             $this->rollback($targetPath, $backupPath);
             throw new RuntimeException(sprintf('Unable to move staged path into place at %s.', $targetPath));
         }
@@ -48,7 +48,7 @@ final class PathSwapWithRollback
         }
 
         if (file_exists($backupPath) || is_link($backupPath)) {
-            if (! @rename($backupPath, $targetPath)) {
+            if (! rename($backupPath, $targetPath)) {
                 throw new RuntimeException(sprintf('Unable to restore backup path for %s.', $targetPath));
             }
         }

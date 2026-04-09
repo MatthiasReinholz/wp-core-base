@@ -42,6 +42,8 @@ final class PrBodyRenderer
             static fn (array $topic): string => sprintf('- [%s](%s)', $topic['title'], $topic['url']),
             $supportTopics
         ));
+        $provenanceRows = $this->provenanceRows($metadata);
+        $reviewerWarning = $this->reviewerWarning($metadata);
         $automationNote = match ($metadata['source'] ?? '') {
             'github-release' => 'This PR is managed by the GitHub release updater automation.',
             'premium' => 'This PR is managed by the premium provider updater automation.',
@@ -76,9 +78,16 @@ final class PrBodyRenderer
 
 {$supportHeading}
 
+## Artifact Provenance
+
+| Field | Value |
+| --- | --- |
+{$provenanceRows}
+
 ## Automation Notes
 
 - {$automationNote}
+- {$reviewerWarning}
 - If a newer patch release lands on the same release line before merge, this PR will be updated in place.
 - If a newer minor or major release lands before merge, the automation will open a separate blocked PR.
 
@@ -107,6 +116,8 @@ MARKDOWN);
             ? 'None'
             : implode(', ', array_map(static fn (int $number): string => '#' . $number, $blockedBy));
         $labelLines = implode("\n", array_map(static fn (string $label): string => '- `' . $label . '`', $labels));
+        $provenanceRows = $this->provenanceRows($metadata);
+        $reviewerWarning = $this->reviewerWarning($metadata);
 
         return trim(<<<MARKDOWN
 ## Summary
@@ -130,9 +141,16 @@ MARKDOWN);
 
 {$releaseHtml}
 
+## Artifact Provenance
+
+| Field | Value |
+| --- | --- |
+{$provenanceRows}
+
 ## Automation Notes
 
 - This PR is managed by the WordPress core updater automation.
+- {$reviewerWarning}
 - If a newer patch release lands on the same release line before merge, this PR will be updated in place.
 - If a newer minor or major release lands before merge, the automation will open a separate blocked PR.
 
@@ -280,5 +298,31 @@ MARKDOWN);
     private function joinMarkdownBlocks(array $blocks): string
     {
         return implode("\n\n", array_values(array_filter($blocks, static fn (string $block): bool => trim($block) !== '')));
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function provenanceRows(array $metadata): string
+    {
+        $state = DependencyTrustState::normalize((string) ($metadata['trust_state'] ?? DependencyTrustState::METADATA_ONLY));
+        $details = trim((string) ($metadata['trust_details'] ?? 'Archive authenticity was not independently verified.'));
+
+        if ($details === '') {
+            $details = 'Archive authenticity was not independently verified.';
+        }
+
+        return implode("\n", [
+            sprintf('| Trust state | `%s` |', $state),
+            sprintf('| Provenance details | %s |', $details),
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function reviewerWarning(array $metadata): string
+    {
+        return DependencyTrustState::reviewerWarning((string) ($metadata['trust_state'] ?? DependencyTrustState::METADATA_ONLY));
     }
 }

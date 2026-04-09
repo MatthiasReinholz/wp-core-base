@@ -78,7 +78,7 @@ final class SupportForumClient
      */
     public function parseFeed(string $xml): array
     {
-        $feed = simplexml_load_string($xml);
+        $feed = simplexml_load_string($xml, SimpleXMLElement::class, LIBXML_NONET);
 
         if (! $feed instanceof SimpleXMLElement) {
             throw new RuntimeException('Failed to parse support feed XML.');

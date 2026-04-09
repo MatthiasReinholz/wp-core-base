@@ -134,10 +134,10 @@ final class FrameworkReleaseVerifier
             throw new RuntimeException(sprintf('Release signature file not found: %s', $signaturePath));
         }
 
-        FrameworkReleaseSignature::verifyChecksumFile(
+        FrameworkReleaseSignature::verifyChecksumFileWithKeyPaths(
             $checksumPath,
             $signaturePath,
-            $publicKeyPath ?? ReleaseSignatureKeyStore::defaultPublicKeyPath($framework)
+            ReleaseSignatureKeyStore::publicKeyPaths($framework, $publicKeyPath)
         );
 
         $checksumContents = file_get_contents($checksumPath);

@@ -113,32 +113,42 @@ final class BranchRollbackGuard
 
     private function restoreTrackedBranches(): void
     {
+        $failures = [];
+
         foreach ($this->trackedBranches as $branch => $state) {
-            if ($branch === $this->originalBranch) {
-                $baseline = $state['local_revision'] ?? $state['remote_revision'] ?? $this->originalRevision;
-                $this->gitRunner->hardReset($baseline);
-                $this->gitRunner->cleanUntracked();
+            try {
+                if ($branch === $this->originalBranch) {
+                    $baseline = $state['local_revision'] ?? $state['remote_revision'] ?? $this->originalRevision;
+                    $this->gitRunner->hardReset($baseline);
+                    $this->gitRunner->cleanUntracked();
+
+                    if ($state['remote_revision'] !== null) {
+                        $this->gitRunner->forcePushRevision($branch, $state['remote_revision']);
+                    }
+
+                    continue;
+                }
+
+                if ($state['local_revision'] !== null) {
+                    $this->gitRunner->forceBranchToRevision($branch, $state['local_revision']);
+                } elseif ($state['remote_revision'] !== null) {
+                    $this->gitRunner->forceBranchToRevision($branch, $state['remote_revision']);
+                } else {
+                    $this->gitRunner->deleteLocalBranch($branch);
+                }
 
                 if ($state['remote_revision'] !== null) {
                     $this->gitRunner->forcePushRevision($branch, $state['remote_revision']);
+                } else {
+                    $this->gitRunner->deleteRemoteBranch($branch);
                 }
-
-                continue;
+            } catch (Throwable $throwable) {
+                $failures[] = sprintf('%s (%s)', $branch, OutputRedactor::redact($throwable->getMessage()));
             }
+        }
 
-            if ($state['local_revision'] !== null) {
-                $this->gitRunner->forceBranchToRevision($branch, $state['local_revision']);
-            } elseif ($state['remote_revision'] !== null) {
-                $this->gitRunner->forceBranchToRevision($branch, $state['remote_revision']);
-            } else {
-                $this->gitRunner->deleteLocalBranch($branch);
-            }
-
-            if ($state['remote_revision'] !== null) {
-                $this->gitRunner->forcePushRevision($branch, $state['remote_revision']);
-            } else {
-                $this->gitRunner->deleteRemoteBranch($branch);
-            }
+        if ($failures !== []) {
+            throw new \RuntimeException('Failed to restore one or more tracked branches: ' . implode('; ', $failures));
         }
     }
 
@@ -152,7 +162,9 @@ final class BranchRollbackGuard
     private function clearPath(string $path): void
     {
         if (is_link($path) || is_file($path)) {
-            @unlink($path);
+            if (! unlink($path)) {
+                fwrite(STDERR, sprintf("[warn] Unable to remove cleanup path %s\n", $path));
+            }
             return;
         }
 
@@ -168,6 +180,8 @@ final class BranchRollbackGuard
             $this->clearPath($path . '/' . $entry);
         }
 
-        @rmdir($path);
+        if (! rmdir($path)) {
+            fwrite(STDERR, sprintf("[warn] Unable to remove cleanup directory %s\n", $path));
+        }
     }
 }

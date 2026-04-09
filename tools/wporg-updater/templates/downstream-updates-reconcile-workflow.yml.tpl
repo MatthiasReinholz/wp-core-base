@@ -4,6 +4,9 @@ on:
   pull_request_target:
     types:
       - closed
+  workflow_dispatch:
+  schedule:
+    - cron: '43 */12 * * *'
 
 permissions:
   contents: write
@@ -17,10 +20,17 @@ concurrency:
 jobs:
   sync:
     if: >
+      (
+        github.event_name == 'workflow_dispatch' ||
+        github.event_name == 'schedule'
+      ) ||
+      (
+        github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
       (
         contains(github.event.pull_request.labels.*.name, 'automation:dependency-update') ||
         contains(github.event.pull_request.labels.*.name, 'automation:framework-update')
+      )
       )
     runs-on: ubuntu-latest
     steps:

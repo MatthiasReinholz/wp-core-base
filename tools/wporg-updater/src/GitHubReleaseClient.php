@@ -155,6 +155,13 @@ final class GitHubReleaseClient implements GitHubReleaseSource
             return;
         }
 
+        if (! $this->allowsZipballFallback($dependency)) {
+            throw new RuntimeException(sprintf(
+                '%s must define source_config.github_release_asset_pattern for packaged-release downloads, or explicitly opt into the weaker verification_mode=none zipball fallback.',
+                (string) ($dependency['component_key'] ?? $this->repository($dependency))
+            ));
+        }
+
         $zipballUrl = $release['zipball_url'] ?? null;
 
         if (! is_string($zipballUrl) || $zipballUrl === '') {
@@ -329,6 +336,15 @@ final class GitHubReleaseClient implements GitHubReleaseSource
         }
 
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    private function allowsZipballFallback(array $dependency): bool
+    {
+        $mode = trim((string) ($dependency['source_config']['verification_mode'] ?? 'inherit'));
+        return $mode === 'none';
     }
 
     /**
