@@ -113,16 +113,34 @@ jobs:
 
       - name: Create GitHub release
         if: steps.release_state.outputs.publish_required == 'true'
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
-        with:
-          overwrite_files: true
-          tag_name: ${{ steps.version.outputs.value }}
-          title: wp-core-base ${{ steps.version.outputs.value }}
-          body_path: docs/releases/${{ steps.version.outputs.plain }}.md
-          files: |
-            dist/wp-core-base-vendor-snapshot.zip
-            dist/wp-core-base-vendor-snapshot.zip.sha256
-            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_tag="${{ steps.version.outputs.value }}"
+          release_title="wp-core-base ${release_tag}"
+          release_notes="docs/releases/${{ steps.version.outputs.plain }}.md"
+
+          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${release_tag}" \
+              dist/wp-core-base-vendor-snapshot.zip \
+              dist/wp-core-base-vendor-snapshot.zip.sha256 \
+              dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+
+            gh release edit "${release_tag}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${release_title}" \
+              --notes-file "${release_notes}"
+          else
+            gh release create "${release_tag}" \
+              dist/wp-core-base-vendor-snapshot.zip \
+              dist/wp-core-base-vendor-snapshot.zip.sha256 \
+              dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${release_title}" \
+              --notes-file "${release_notes}"
+          fi
 
       - name: Verify published release assets are current
         if: steps.release_state.outputs.publish_required == 'true'
