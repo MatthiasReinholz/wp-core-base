@@ -138,27 +138,27 @@ final class RuntimeInspector
         }
 
         if (is_file($path) || is_link($path)) {
-            unlink($path);
+            @unlink($path);
             return;
         }
 
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST
-        );
+        if (! is_dir($path)) {
+            return;
+        }
 
-        foreach ($iterator as $item) {
-            $relative = ltrim(str_replace('\\', '/', substr($item->getPathname(), strlen($path))), '/');
+        foreach (@scandir($path) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $entryPath = $path . '/' . $entry;
+            $relative = ltrim(str_replace('\\', '/', substr($entryPath, strlen($path))), '/');
 
             if ($relative !== '' && $this->isExcluded($relative, $excludedPaths)) {
                 continue;
             }
 
-            if ($item->isLink() || $item->isFile()) {
-                unlink($item->getPathname());
-            } elseif ($item->isDir()) {
-                rmdir($item->getPathname());
-            }
+            $this->clearPath($entryPath);
         }
 
         @rmdir($path);

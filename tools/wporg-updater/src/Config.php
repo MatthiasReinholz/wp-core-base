@@ -19,6 +19,7 @@ final class Config
      * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>} $runtime
      * @param array{api_base:string} $github
      * @param array{base_branch:?string, dry_run:bool, managed_kinds:list<string>} $automation
+     * @param array{managed_release_min_age_hours:int, github_release_verification:string} $security
      */
     public function __construct(
         public readonly string $repoRoot,
@@ -29,6 +30,7 @@ final class Config
         public readonly array $runtime,
         public readonly array $github,
         public readonly array $automation,
+        public readonly array $security,
         public readonly array $dependencies,
     ) {
     }
@@ -77,6 +79,7 @@ final class Config
         $runtime = self::normalizeRuntime($data['runtime'] ?? [], $paths);
         $github = self::normalizeGithub($data['github'] ?? []);
         $automation = self::normalizeAutomation($data['automation'] ?? []);
+        $security = self::normalizeSecurity($data['security'] ?? []);
         $dependencies = self::normalizeDependencies($data['dependencies'] ?? [], $paths);
         self::assertProfileCoreCompatibility($profile, $core);
         self::assertSafeStageDirectory($runtime['stage_dir'], $paths, $runtime['ownership_roots']);
@@ -90,6 +93,7 @@ final class Config
             runtime: $runtime,
             github: $github,
             automation: $automation,
+            security: $security,
             dependencies: $dependencies,
         );
     }
@@ -112,6 +116,16 @@ final class Config
     public function githubApiBase(): string
     {
         return $this->github['api_base'];
+    }
+
+    public function managedReleaseMinAgeHours(): int
+    {
+        return $this->security['managed_release_min_age_hours'];
+    }
+
+    public function githubReleaseVerificationMode(): string
+    {
+        return $this->security['github_release_verification'];
     }
 
     public function coreEnabled(): bool
@@ -394,6 +408,36 @@ final class Config
     }
 
     /**
+     * @param array<string, mixed> $dependency
+     */
+    public function dependencyMinReleaseAgeHours(array $dependency): int
+    {
+        $override = $dependency['source_config']['min_release_age_hours'] ?? null;
+
+        if (is_int($override)) {
+            return $override;
+        }
+
+        return $this->managedReleaseMinAgeHours();
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    public function dependencyVerificationMode(array $dependency): string
+    {
+        $override = $dependency['source_config']['verification_mode'] ?? 'inherit';
+
+        if (! is_string($override) || $override === '' || $override === 'inherit') {
+            return (string) ($dependency['source'] === 'github-release'
+                ? $this->githubReleaseVerificationMode()
+                : 'none');
+        }
+
+        return $override;
+    }
+
+    /**
      * @param list<array<string, mixed>> $dependencies
      */
     public function withDependencies(array $dependencies): self
@@ -407,6 +451,7 @@ final class Config
             runtime: $this->runtime,
             github: $this->github,
             automation: $this->automation,
+            security: $this->security,
             dependencies: $dependencies,
         );
     }
@@ -423,6 +468,7 @@ final class Config
             'runtime' => $this->runtime,
             'github' => $this->github,
             'automation' => $this->automation,
+            'security' => $this->security,
             'dependencies' => array_map(static function (array $dependency): array {
                 return [
                     'name' => $dependency['name'],
@@ -714,6 +760,25 @@ final class Config
     }
 
     /**
+     * @param array<string, mixed> $value
+     * @return array{managed_release_min_age_hours:int, github_release_verification:string}
+     */
+    private static function normalizeSecurity(array $value): array
+    {
+        return [
+            'managed_release_min_age_hours' => self::nonNegativeInt(
+                $value['managed_release_min_age_hours'] ?? 0,
+                'security.managed_release_min_age_hours'
+            ),
+            'github_release_verification' => self::enumValue(
+                $value['github_release_verification'] ?? 'checksum-sidecar-optional',
+                'security.github_release_verification',
+                ['none', 'checksum-sidecar-optional', 'checksum-sidecar-required']
+            ),
+        ];
+    }
+
+    /**
      * @param mixed $value
      * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
      * @return list<array<string, mixed>>
@@ -822,6 +887,11 @@ final class Config
             $githubRepository = self::nullableString($sourceConfig['github_repository'] ?? null);
             $githubReleaseAssetPattern = self::nullableString($sourceConfig['github_release_asset_pattern'] ?? null);
             $githubTokenEnv = self::nullableString($sourceConfig['github_token_env'] ?? null);
+            $minReleaseAgeHours = isset($sourceConfig['min_release_age_hours']) && $sourceConfig['min_release_age_hours'] !== ''
+                ? self::nonNegativeInt($sourceConfig['min_release_age_hours'], sprintf('dependencies[%s].source_config.min_release_age_hours', $slug))
+                : null;
+            $verificationMode = self::nullableString($sourceConfig['verification_mode'] ?? null) ?? 'inherit';
+            $checksumAssetPattern = self::nullableString($sourceConfig['checksum_asset_pattern'] ?? null);
             $credentialKey = self::nullableString($sourceConfig['credential_key'] ?? null);
             $provider = self::nullableString($sourceConfig['provider'] ?? null);
             $providerProductId = isset($sourceConfig['provider_product_id']) && $sourceConfig['provider_product_id'] !== ''
@@ -833,6 +903,13 @@ final class Config
 
             if ($source === 'github-release' && $githubRepository === null) {
                 throw new RuntimeException(sprintf('GitHub release dependency %s must define source_config.github_repository.', $slug));
+            }
+
+            if (! in_array($verificationMode, ['inherit', 'none', 'checksum-sidecar-optional', 'checksum-sidecar-required'], true)) {
+                throw new RuntimeException(sprintf(
+                    'Dependency %s must use source_config.verification_mode of inherit, none, checksum-sidecar-optional, or checksum-sidecar-required.',
+                    $slug
+                ));
             }
 
             if ($providerProductId !== null && $providerProductId <= 0) {
@@ -866,6 +943,9 @@ final class Config
                     'github_repository' => $githubRepository,
                     'github_release_asset_pattern' => $githubReleaseAssetPattern,
                     'github_token_env' => $githubTokenEnv,
+                    'min_release_age_hours' => $minReleaseAgeHours,
+                    'verification_mode' => $verificationMode,
+                    'checksum_asset_pattern' => $checksumAssetPattern,
                     'credential_key' => $credentialKey,
                     'provider' => $provider,
                     'provider_product_id' => $providerProductId,
@@ -934,6 +1014,23 @@ final class Config
 
         $trimmed = trim($value);
         return $trimmed === '' ? null : $trimmed;
+    }
+
+    private static function nonNegativeInt(mixed $value, string $key): int
+    {
+        if (is_int($value)) {
+            $normalized = $value;
+        } elseif (is_string($value) && preg_match('/^\d+$/', trim($value)) === 1) {
+            $normalized = (int) trim($value);
+        } else {
+            throw new RuntimeException(sprintf('Config value "%s" must be a non-negative integer.', $key));
+        }
+
+        if ($normalized < 0) {
+            throw new RuntimeException(sprintf('Config value "%s" must be a non-negative integer.', $key));
+        }
+
+        return $normalized;
     }
 
     private static function enumValue(mixed $value, string $key, array $allowed): string

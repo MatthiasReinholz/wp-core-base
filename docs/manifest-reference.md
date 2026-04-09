@@ -19,6 +19,7 @@ The manifest returns a PHP array with these sections:
 - `runtime`
 - `github`
 - `automation`
+- `security`
 - `dependencies`
 
 ## `profile`
@@ -110,6 +111,23 @@ Keys:
 
 `managed_kinds` limits what `sync` may update. A dependency must be both `management: managed` and listed in `automation.managed_kinds` before the updater will touch it.
 
+## `security`
+
+Keys:
+
+- `managed_release_min_age_hours`
+- `github_release_verification`
+
+`managed_release_min_age_hours` defaults to `0`. Set it when you want `sync` to ignore very fresh upstream releases until they have aged for the configured number of hours.
+
+`github_release_verification` may be:
+
+- `none`
+- `checksum-sidecar-optional`
+- `checksum-sidecar-required`
+
+This setting applies only to `github-release` dependencies that inherit verification mode from the repo-level default.
+
 ## Dependency Entry Shape
 
 Each dependency entry supports:
@@ -131,6 +149,9 @@ Each dependency entry supports:
         'github_repository' => null,
         'github_release_asset_pattern' => null,
         'github_token_env' => null,
+        'min_release_age_hours' => null,
+        'verification_mode' => 'inherit',
+        'checksum_asset_pattern' => null,
         'credential_key' => null,
         'provider' => null,
         'provider_product_id' => null,
@@ -241,8 +262,23 @@ For a private GitHub release-backed dependency, use:
 - `source_config.github_repository`
 - `source_config.github_release_asset_pattern`
 - `source_config.github_token_env`
+- `source_config.min_release_age_hours`
+- `source_config.verification_mode`
+- `source_config.checksum_asset_pattern`
 
 The token value itself should stay in environment or repository secrets, not in the manifest.
+
+If the upstream project publishes a detached checksum sidecar, set:
+
+- `source_config.github_release_asset_pattern` to the actual ZIP asset
+- `source_config.checksum_asset_pattern` to the checksum sidecar asset
+
+Then choose either:
+
+- `source_config.verification_mode: checksum-sidecar-required`
+- or leave `inherit` and set `security.github_release_verification`
+
+`source_config.min_release_age_hours` overrides the repo-level cooldown for that one dependency.
 
 ## Premium Managed Dependencies
 

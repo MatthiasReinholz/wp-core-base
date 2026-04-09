@@ -14,6 +14,7 @@ use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\DownstreamScaffolder;
 use WpOrgPluginUpdater\ExtractedPayloadLocator;
+use WpOrgPluginUpdater\FileChecksum;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
@@ -1961,6 +1962,63 @@ $assert(! str_contains($redacted, 'very-secret-token'), 'Expected output redacti
 $assert(! str_contains($redacted, 'user:pass'), 'Expected output redaction to scrub basic-auth URL credentials.');
 $benignUrlRedaction = OutputRedactor::redact('See https://wordpress.org/plugins/example-plugin/ for details.');
 $assert(str_contains($benignUrlRedaction, 'https://wordpress.org/plugins/example-plugin/'), 'Expected benign HTTPS URLs to remain visible in diagnostics.');
+$securityConfig = Config::fromArray($repoRoot, [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => ['enabled' => false, 'mode' => 'external'],
+    'security' => [
+        'managed_release_min_age_hours' => 12,
+        'github_release_verification' => 'checksum-sidecar-required',
+    ],
+    'dependencies' => [
+        [
+            'name' => 'Security Plugin',
+            'slug' => 'security-plugin',
+            'kind' => 'plugin',
+            'management' => 'managed',
+            'source' => 'github-release',
+            'path' => 'cms/plugins/security-plugin',
+            'main_file' => 'security-plugin.php',
+            'version' => '1.0.0',
+            'checksum' => 'sha256:test',
+            'source_config' => [
+                'github_repository' => 'owner/security-plugin',
+                'github_release_asset_pattern' => 'security-plugin-*.zip',
+                'checksum_asset_pattern' => 'security-plugin-*.zip.sha256',
+                'verification_mode' => 'inherit',
+                'min_release_age_hours' => 6,
+            ],
+            'policy' => ['class' => 'managed-private', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+        ],
+        [
+            'name' => 'WordPress Org Plugin',
+            'slug' => 'wordpress-org-plugin',
+            'kind' => 'plugin',
+            'management' => 'managed',
+            'source' => 'wordpress.org',
+            'path' => 'cms/plugins/wordpress-org-plugin',
+            'main_file' => 'wordpress-org-plugin.php',
+            'version' => '1.0.0',
+            'checksum' => 'sha256:test',
+            'policy' => ['class' => 'managed-upstream', 'allow_runtime_paths' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
+        ],
+    ],
+]);
+$securityDependency = $securityConfig->dependencyByKey('plugin:github-release:security-plugin');
+$assert($securityConfig->managedReleaseMinAgeHours() === 12, 'Expected security.managed_release_min_age_hours to round-trip through config normalization.');
+$assert($securityConfig->githubReleaseVerificationMode() === 'checksum-sidecar-required', 'Expected security.github_release_verification to round-trip through config normalization.');
+$assert($securityConfig->dependencyMinReleaseAgeHours($securityDependency) === 6, 'Expected dependency source_config.min_release_age_hours to override the repo default.');
+$assert($securityConfig->dependencyVerificationMode($securityDependency) === 'checksum-sidecar-required', 'Expected inherit verification mode to resolve to the repo-level GitHub verification default.');
+$assert(($securityDependency['source_config']['checksum_asset_pattern'] ?? null) === 'security-plugin-*.zip.sha256', 'Expected checksum sidecar asset patterns to survive config normalization.');
+$assert(
+    $securityConfig->dependencyVerificationMode($securityConfig->dependencyByKey('plugin:wordpress.org:wordpress-org-plugin')) === 'none',
+    'Expected non-GitHub managed dependencies to default to no release checksum verification unless they opt in explicitly.'
+);
 
 $verifierReflection = new ReflectionClass(FrameworkReleaseVerifier::class);
 $extractChecksum = $verifierReflection->getMethod('extractChecksum');
@@ -1974,6 +2032,13 @@ try {
 }
 
 $assert($checksumRejected, 'Expected framework release verification to reject checksum lines bound to the wrong artifact name.');
+$checksumFixture = sys_get_temp_dir() . '/wporg-file-checksum-' . bin2hex(random_bytes(4)) . '.txt';
+file_put_contents($checksumFixture, "fixture\n");
+FileChecksum::assertSha256Matches($checksumFixture, 'sha256:' . hash_file('sha256', $checksumFixture), 'checksum fixture');
+$assert(
+    FileChecksum::extractSha256ForAsset(str_repeat('a', 64) . "  fixture.zip\n", 'fixture.zip') === str_repeat('a', 64),
+    'Expected generic checksum parsing to return the digest bound to the expected asset filename.'
+);
 
 $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
 mkdir($payloadRoot, 0777, true);
