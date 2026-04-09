@@ -123,6 +123,7 @@ Rules:
 - when the base branch changes after another automation PR merges, open dependency PRs are rebuilt onto the new base branch state so their manifest/checksum baseline stays current
 - if the target version is already present on the base branch after reconciliation, the stale PR is closed instead of being kept as a no-op
 - support topics refresh incrementally for WordPress.org plugins
+- when blocker verification is degraded by GitHub/API failures, later PRs stay blocked until verification succeeds again
 
 Framework PRs use the same queueing behavior, but operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.
 

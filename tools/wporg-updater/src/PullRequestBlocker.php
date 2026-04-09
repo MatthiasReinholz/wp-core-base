@@ -95,14 +95,14 @@ final class PullRequestBlocker
             $openPullRequests = $this->gitHubClient->listOpenPullRequests();
         } catch (\Throwable $throwable) {
             $verificationWarnings[] = sprintf(
-                'Could not list open pull requests for blocker evaluation and passed to avoid a false blocker result: %s',
+                'Could not list open pull requests for blocker evaluation and blocked until verification succeeds: %s',
                 OutputRedactor::redact($throwable->getMessage())
             );
             $this->emitWarnings($verificationWarnings);
-            fwrite(STDOUT, "Blocker evaluation is degraded by GitHub/API failures. Passing.\n");
+            fwrite(STDERR, "Blocker evaluation is degraded by GitHub/API failures. Blocking until verification succeeds.\n");
             return [
                 'status' => self::STATUS_DEGRADED,
-                'exit_code' => 0,
+                'exit_code' => 1,
                 'blockers' => [],
                 'warnings' => $verificationWarnings,
             ];
@@ -143,10 +143,10 @@ final class PullRequestBlocker
 
         fwrite(STDOUT, $verificationWarnings === []
             ? "No older open update PRs found. Passing.\n"
-            : "No confirmed older open update PRs found. Passing with warnings.\n");
+            : "No confirmed older open update PRs found, but verification is degraded. Blocking until verification succeeds.\n");
         return [
             'status' => $verificationWarnings === [] ? self::STATUS_CLEAR : self::STATUS_DEGRADED,
-            'exit_code' => 0,
+            'exit_code' => $verificationWarnings === [] ? 0 : 1,
             'blockers' => [],
             'warnings' => $verificationWarnings,
         ];

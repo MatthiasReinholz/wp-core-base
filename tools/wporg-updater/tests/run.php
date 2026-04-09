@@ -841,12 +841,18 @@ $assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zi
 $assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected finalize release workflow to publish a detached checksum signature asset.');
 $assert(str_contains($upstreamFinalizeWorkflow, 'build-release-artifact'), 'Expected finalize release workflow to build the vendored snapshot through the framework artifact builder.');
 $assert(str_contains($upstreamFinalizeWorkflow, 'release-sign'), 'Expected finalize release workflow to create a detached release signature.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'check_framework_release_ci.sh'), 'Expected finalize release workflow to verify the merged release PR passed CI before publishing.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'check_framework_release_assets.sh'), 'Expected finalize release workflow to verify the published release assets match the built snapshot.');
+$assert(str_contains($upstreamFinalizeWorkflow, 'overwrite_files: true'), 'Expected finalize release workflow to allow idempotent release asset repair.');
 $assert(str_contains($upstreamFinalizeWorkflow, "git push --delete origin"), 'Expected finalize release workflow to roll back the pushed tag when release publishing fails.');
 $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected manual release workflow to publish a SHA-256 checksum asset.');
 $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected manual release workflow to publish a detached checksum signature asset.');
 $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'build-release-artifact'), 'Expected manual release workflow to build the vendored snapshot through the framework artifact builder.');
 $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'release-sign'), 'Expected manual release workflow to create a detached release signature.');
-$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'GitHub Release ${{ steps.version.outputs.value }} already exists; nothing to publish.'), 'Expected manual recovery release workflow to exit cleanly when the GitHub Release already exists.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'check_framework_release_ci.sh'), 'Expected manual recovery release workflow to verify the merged release PR passed CI before publishing.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'check_framework_release_assets.sh'), 'Expected manual recovery release workflow to compare existing release assets to the current built snapshot.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'overwrite_files: true'), 'Expected manual recovery release workflow to repair stale release assets in place.');
+$assert(str_contains($upstreamRecoveryReleaseWorkflow, 'already contains the current verified assets; nothing to publish.'), 'Expected manual recovery release workflow to skip only when the GitHub Release already matches the current verified assets.');
 $assert(str_contains($upstreamValidateWorkflow, '--artifact=dist/wp-core-base-vendor-snapshot.zip'), 'Expected CI release verification to validate the built release artifact, not only release metadata.');
 $assert(str_contains($upstreamValidateWorkflow, '--checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256'), 'Expected CI release verification to validate the built checksum sidecar.');
 $assert(str_contains($upstreamValidateWorkflow, '--signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected CI release verification to validate the detached checksum signature.');
@@ -2265,7 +2271,16 @@ $degradedReader = new FakePullRequestReader(
 );
 $degradedStatus = (new PullRequestBlocker($degradedReader))->evaluateCurrentPullRequestStatus();
 $assert($degradedStatus['status'] === PullRequestBlocker::STATUS_DEGRADED, 'Expected pr-blocker to report degraded status when GitHub verification fails.');
-$assert($degradedStatus['exit_code'] === 0, 'Expected degraded pr-blocker status to preserve the current fail-open exit code.');
+$assert($degradedStatus['exit_code'] === 1, 'Expected degraded pr-blocker status to fail closed while GitHub verification is unavailable.');
+$degradedPredecessorReader = new FakePullRequestReader(
+    openPullRequests: [],
+    pullRequestFailures: [
+        5 => new RuntimeException('Missing permission to read predecessor PR.'),
+    ]
+);
+$degradedPredecessorStatus = (new PullRequestBlocker($degradedPredecessorReader))->evaluateCurrentPullRequestStatus();
+$assert($degradedPredecessorStatus['status'] === PullRequestBlocker::STATUS_DEGRADED, 'Expected pr-blocker to report degraded status when predecessor verification fails.');
+$assert($degradedPredecessorStatus['exit_code'] === 1, 'Expected degraded predecessor verification to fail closed.');
 
 $premiumSingleConfig = Config::fromArray($repoRoot, [
     'profile' => 'content-only',
