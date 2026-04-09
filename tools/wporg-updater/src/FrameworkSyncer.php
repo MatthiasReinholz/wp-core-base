@@ -58,7 +58,7 @@ final class FrameworkSyncer
         $defaultBranch = $this->config?->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
         $this->gitHubClient->ensureLabels(self::labelDefinitions());
-        $openPrs = $this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests());
+        $openPrs = $this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests('automation:framework-update'));
         $plannedPrs = [];
 
         foreach ($openPrs as $pr) {
@@ -549,7 +549,7 @@ final class FrameworkSyncer
     {
         $matching = [];
 
-        foreach ($this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests()) as $pullRequest) {
+        foreach ($this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests('automation:framework-update')) as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
             if (($metadata['target_version'] ?? null) === $targetVersion) {
