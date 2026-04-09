@@ -18,8 +18,8 @@ final class PremiumCredentialsStore
      */
     public function credentialsFor(array $dependency): array
     {
-        $lookupKey = $this->lookupKeyFor($dependency);
         $all = $this->all();
+        $lookupKey = $this->lookupKeyFor($dependency);
         $credentials = $all[$lookupKey] ?? null;
 
         if (! is_array($credentials)) {
@@ -42,6 +42,14 @@ final class PremiumCredentialsStore
             return trim($override);
         }
 
+        $all = $this->all();
+
+        foreach ($this->lookupKeysFor($dependency) as $lookupKey) {
+            if (isset($all[$lookupKey]) && is_array($all[$lookupKey])) {
+                return $lookupKey;
+            }
+        }
+
         $componentKey = $dependency['component_key'] ?? null;
 
         if (! is_string($componentKey) || $componentKey === '') {
@@ -49,6 +57,30 @@ final class PremiumCredentialsStore
         }
 
         return $componentKey;
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @return list<string>
+     */
+    public function lookupKeysFor(array $dependency): array
+    {
+        $override = $dependency['source_config']['credential_key'] ?? null;
+
+        if (is_string($override) && trim($override) !== '') {
+            return [trim($override)];
+        }
+
+        $componentKey = $dependency['component_key'] ?? null;
+
+        if (! is_string($componentKey) || $componentKey === '') {
+            throw new RuntimeException('Premium dependency is missing component_key.');
+        }
+
+        return array_values(array_unique(array_merge(
+            [$componentKey],
+            PremiumSourceResolver::legacyComponentKeysForDependency($dependency)
+        )));
     }
 
     /**
@@ -141,6 +173,19 @@ final class PremiumCredentialsStore
             $message = str_replace($value, '[REDACTED]', $message);
         }
 
-        return preg_replace('#https://[^\\s]+#', '[REDACTED_URL]', $message) ?? $message;
+        return preg_replace_callback(
+            '#https://[^\s]+#i',
+            static function (array $matches): string {
+                $url = $matches[0];
+                $parts = parse_url($url);
+
+                if (! is_array($parts) || (! isset($parts['user']) && ! isset($parts['pass']))) {
+                    return $url;
+                }
+
+                return preg_replace('#https://([^/\s:@]+):([^@\s/]+)@#i', 'https://[REDACTED]:[REDACTED]@', $url) ?? $url;
+            },
+            $message
+        ) ?? $message;
     }
 }

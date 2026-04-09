@@ -9,6 +9,7 @@ use RuntimeException;
 final class HttpClient implements ArchiveDownloader
 {
     private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
+    private const REDIRECT_STATUSES = [301, 302, 303, 307, 308];
 
     public function __construct(
         private readonly string $userAgent = 'wp-core-base/1.0',
@@ -29,91 +30,31 @@ final class HttpClient implements ArchiveDownloader
         ?string $body = null,
         bool $followRedirects = false,
     ): array {
-        if ($followRedirects && $this->hasAuthorizationHeader($headers)) {
-            throw new RuntimeException('Authenticated HTTP requests may not follow redirects.');
-        }
-
-        return $this->requestOnce($method, $url, $headers, $json, $body, $followRedirects);
+        return $this->requestWithOptions($method, $url, $headers, $json, $body, $followRedirects);
     }
 
     /**
      * @param array<string, string> $headers
      * @param array<string, mixed>|null $json
+     * @param array<string, mixed> $options
      * @return array{status:int, body:string, headers:array<string, string>}
      */
-    private function requestOnce(
+    public function requestWithOptions(
         string $method,
         string $url,
         array $headers = [],
         ?array $json = null,
         ?string $body = null,
         bool $followRedirects = false,
+        array $options = [],
     ): array {
-        $curl = curl_init($url);
-
-        if ($curl === false) {
-            throw new RuntimeException('Failed to initialize cURL.');
+        if ($followRedirects && $this->hasAuthorizationHeader($headers) && ! ($options['strip_auth_on_cross_origin_redirect'] ?? false)) {
+            throw new RuntimeException('Authenticated HTTP requests may not follow redirects unless cross-origin auth stripping is enabled.');
         }
 
-        $headerLines = [];
+        $this->assertAllowedUrl($url, $options);
 
-        foreach ($headers as $name => $value) {
-            $headerLines[] = sprintf('%s: %s', $name, $value);
-        }
-
-        if ($json !== null) {
-            $body = json_encode($json, JSON_THROW_ON_ERROR);
-            $headerLines[] = 'Content-Type: application/json';
-        }
-
-        $responseHeaders = [];
-
-        curl_setopt_array($curl, [
-            CURLOPT_CUSTOMREQUEST => strtoupper($method),
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => $followRedirects,
-            CURLOPT_MAXREDIRS => $followRedirects ? 5 : 0,
-            CURLOPT_TIMEOUT => $this->timeoutSeconds,
-            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeoutSeconds),
-            CURLOPT_USERAGENT => $this->userAgent,
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_ENCODING => '',
-            CURLOPT_HTTPHEADER => $headerLines,
-            CURLOPT_HEADERFUNCTION => static function ($curlHandle, string $headerLine) use (&$responseHeaders): int {
-                $length = strlen($headerLine);
-                $parts = explode(':', $headerLine, 2);
-
-                if (count($parts) === 2) {
-                    $responseHeaders[strtolower(trim($parts[0]))] = trim($parts[1]);
-                }
-
-                return $length;
-            },
-        ]);
-
-        if ($body !== null) {
-            curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
-        }
-
-        $this->applyProtocolRestrictions($curl, $followRedirects);
-
-        $responseBody = curl_exec($curl);
-
-        if (! is_string($responseBody)) {
-            $error = curl_error($curl);
-            curl_close($curl);
-            throw new RuntimeException(sprintf('HTTP request failed for %s: %s', $url, $error));
-        }
-
-        $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
-
-        return [
-            'status' => $status,
-            'body' => $responseBody,
-            'headers' => $responseHeaders,
-        ];
+        return $this->requestOnce($method, $url, $headers, $json, $body, $followRedirects, $options);
     }
 
     /**
@@ -122,7 +63,18 @@ final class HttpClient implements ArchiveDownloader
      */
     public function getJson(string $url, array $headers = []): array
     {
-        $response = $this->requestWithRetry('GET', $url, $headers);
+        return $this->getJsonWithOptions($url, $headers);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    public function getJsonWithOptions(string $url, array $headers = [], array $options = []): array
+    {
+        $options['max_body_bytes'] ??= 5 * 1024 * 1024;
+        $response = $this->requestWithRetry('GET', $url, $headers, $options);
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
             throw new RuntimeException(sprintf('JSON request failed for %s with status %d.', $url, $response['status']));
@@ -142,7 +94,17 @@ final class HttpClient implements ArchiveDownloader
      */
     public function get(string $url, array $headers = []): string
     {
-        $response = $this->requestWithRetry('GET', $url, $headers);
+        return $this->getWithOptions($url, $headers);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed> $options
+     */
+    public function getWithOptions(string $url, array $headers = [], array $options = []): string
+    {
+        $options['max_body_bytes'] ??= 5 * 1024 * 1024;
+        $response = $this->requestWithRetry('GET', $url, $headers, $options);
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
             throw new RuntimeException(sprintf('Request failed for %s with status %d.', $url, $response['status']));
@@ -156,17 +118,24 @@ final class HttpClient implements ArchiveDownloader
      */
     public function downloadToFile(string $url, string $destination, array $headers = []): void
     {
-        if ($this->hasAuthorizationHeader($headers)) {
-            throw new RuntimeException('Authenticated downloads are not supported.');
-        }
+        $this->downloadToFileWithOptions($url, $destination, $headers);
+    }
 
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed> $options
+     */
+    public function downloadToFileWithOptions(string $url, string $destination, array $headers = [], array $options = []): void
+    {
+        $this->assertAllowedUrl($url, $options);
         $temporaryDestination = $destination . '.part';
         $attempts = 3;
         $delayMicroseconds = 250000;
+        $options['max_download_bytes'] ??= 512 * 1024 * 1024;
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             try {
-                $response = $this->downloadOnce($url, $temporaryDestination, $headers);
+                $response = $this->downloadOnce($url, $temporaryDestination, $headers, $options);
 
                 if ($response['status'] >= 200 && $response['status'] < 300) {
                     if (! rename($temporaryDestination, $destination)) {
@@ -184,7 +153,7 @@ final class HttpClient implements ArchiveDownloader
             } catch (RuntimeException $exception) {
                 @unlink($temporaryDestination);
 
-                if ($attempt === $attempts) {
+                if ($attempt === $attempts || ! $this->shouldRetryException($exception)) {
                     throw $exception;
                 }
             }
@@ -196,22 +165,23 @@ final class HttpClient implements ArchiveDownloader
 
     /**
      * @param array<string, string> $headers
+     * @param array<string, mixed> $options
      * @return array{status:int, body:string, headers:array<string, string>}
      */
-    private function requestWithRetry(string $method, string $url, array $headers = []): array
+    private function requestWithRetry(string $method, string $url, array $headers = [], array $options = []): array
     {
         $attempts = 3;
         $delayMicroseconds = 250000;
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             try {
-                $response = $this->requestOnce($method, $url, $headers);
+                $response = $this->requestOnce($method, $url, $headers, null, null, false, $options);
 
                 if (! $this->shouldRetryStatus($response['status']) || $attempt === $attempts) {
                     return $response;
                 }
             } catch (RuntimeException $exception) {
-                if ($attempt === $attempts) {
+                if ($attempt === $attempts || ! $this->shouldRetryException($exception)) {
                     throw $exception;
                 }
             }
@@ -225,36 +195,51 @@ final class HttpClient implements ArchiveDownloader
 
     /**
      * @param array<string, string> $headers
+     * @param array<string, mixed>|null $json
+     * @param array<string, mixed> $options
      * @return array{status:int, body:string, headers:array<string, string>}
      */
-    private function downloadOnce(string $url, string $destination, array $headers = []): array
-    {
-        $fileHandle = fopen($destination, 'wb');
+    private function requestOnce(
+        string $method,
+        string $url,
+        array $headers = [],
+        ?array $json = null,
+        ?string $body = null,
+        bool $followRedirects = false,
+        array $options = [],
+        int $redirectDepth = 0,
+    ): array {
+        $redirectLimit = (int) ($options['max_redirects'] ?? 5);
 
-        if ($fileHandle === false) {
-            throw new RuntimeException(sprintf('Failed to open download destination %s.', $destination));
+        if ($redirectDepth > $redirectLimit) {
+            throw new RuntimeException(sprintf('HTTP redirect limit exceeded for %s.', $url));
         }
 
         $curl = curl_init($url);
 
         if ($curl === false) {
-            fclose($fileHandle);
             throw new RuntimeException('Failed to initialize cURL.');
         }
 
         $headerLines = [];
         $responseHeaders = [];
+        $responseBody = '';
+        $maxBodyBytes = isset($options['max_body_bytes']) ? (int) $options['max_body_bytes'] : null;
+        $bodyLimitExceeded = false;
 
         foreach ($headers as $name => $value) {
             $headerLines[] = sprintf('%s: %s', $name, $value);
         }
 
+        if ($json !== null) {
+            $body = json_encode($json, JSON_THROW_ON_ERROR);
+            $headerLines[] = 'Content-Type: application/json';
+        }
+
         curl_setopt_array($curl, [
-            CURLOPT_CUSTOMREQUEST => 'GET',
+            CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_RETURNTRANSFER => false,
-            CURLOPT_FILE => $fileHandle,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 5,
+            CURLOPT_FOLLOWLOCATION => false,
             CURLOPT_TIMEOUT => $this->timeoutSeconds,
             CURLOPT_CONNECTTIMEOUT => min(10, $this->timeoutSeconds),
             CURLOPT_USERAGENT => $this->userAgent,
@@ -272,22 +257,174 @@ final class HttpClient implements ArchiveDownloader
 
                 return $length;
             },
+            CURLOPT_WRITEFUNCTION => static function ($curlHandle, string $chunk) use (&$responseBody, $maxBodyBytes, &$bodyLimitExceeded): int {
+                $responseBody .= $chunk;
+
+                if ($maxBodyBytes !== null && strlen($responseBody) > $maxBodyBytes) {
+                    $bodyLimitExceeded = true;
+                    return 0;
+                }
+
+                return strlen($chunk);
+            },
         ]);
 
-        $this->applyProtocolRestrictions($curl, true);
+        if ($body !== null) {
+            curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
+        }
 
+        $this->applyProtocolRestrictions($curl, false);
+        $result = curl_exec($curl);
+
+        if ($result === false) {
+            $error = curl_error($curl);
+            curl_close($curl);
+
+            if ($bodyLimitExceeded) {
+                throw new RuntimeException(sprintf('HTTP response body exceeded the configured byte limit for %s.', $url));
+            }
+
+            throw new RuntimeException(sprintf('HTTP request failed for %s: %s', $url, $error));
+        }
+
+        $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        curl_close($curl);
+
+        if ($followRedirects && in_array($status, self::REDIRECT_STATUSES, true)) {
+            $location = $responseHeaders['location'] ?? null;
+
+            if (! is_string($location) || $location === '') {
+                throw new RuntimeException(sprintf('Redirect response for %s did not include a Location header.', $url));
+            }
+
+            $redirectUrl = $this->resolveRedirectUrl($url, $location);
+            $redirectHeaders = $this->headersForRedirect($headers, $url, $redirectUrl, $options);
+
+            return $this->requestOnce(
+                $method,
+                $redirectUrl,
+                $redirectHeaders,
+                $json,
+                $body,
+                true,
+                $options,
+                $redirectDepth + 1
+            );
+        }
+
+        return [
+            'status' => $status,
+            'body' => $responseBody,
+            'headers' => $responseHeaders,
+        ];
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed> $options
+     * @return array{status:int, body:string, headers:array<string, string>}
+     */
+    private function downloadOnce(
+        string $url,
+        string $destination,
+        array $headers = [],
+        array $options = [],
+        int $redirectDepth = 0,
+    ): array {
+        $redirectLimit = (int) ($options['max_redirects'] ?? 5);
+
+        if ($redirectDepth > $redirectLimit) {
+            throw new RuntimeException(sprintf('Download redirect limit exceeded for %s.', $url));
+        }
+
+        $fileHandle = fopen($destination, 'wb');
+
+        if ($fileHandle === false) {
+            throw new RuntimeException(sprintf('Failed to open download destination %s.', $destination));
+        }
+
+        $curl = curl_init($url);
+
+        if ($curl === false) {
+            fclose($fileHandle);
+            throw new RuntimeException('Failed to initialize cURL.');
+        }
+
+        $headerLines = [];
+        $responseHeaders = [];
+        $downloadedBytes = 0;
+        $downloadLimitExceeded = false;
+        $maxDownloadBytes = isset($options['max_download_bytes']) ? (int) $options['max_download_bytes'] : null;
+
+        foreach ($headers as $name => $value) {
+            $headerLines[] = sprintf('%s: %s', $name, $value);
+        }
+
+        curl_setopt_array($curl, [
+            CURLOPT_CUSTOMREQUEST => 'GET',
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_TIMEOUT => $this->timeoutSeconds,
+            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeoutSeconds),
+            CURLOPT_USERAGENT => $this->userAgent,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            CURLOPT_ENCODING => '',
+            CURLOPT_HTTPHEADER => $headerLines,
+            CURLOPT_HEADERFUNCTION => static function ($curlHandle, string $headerLine) use (&$responseHeaders): int {
+                $length = strlen($headerLine);
+                $parts = explode(':', $headerLine, 2);
+
+                if (count($parts) === 2) {
+                    $responseHeaders[strtolower(trim($parts[0]))] = trim($parts[1]);
+                }
+
+                return $length;
+            },
+            CURLOPT_WRITEFUNCTION => static function ($curlHandle, string $chunk) use ($fileHandle, $maxDownloadBytes, &$downloadedBytes, &$downloadLimitExceeded): int {
+                $downloadedBytes += strlen($chunk);
+
+                if ($maxDownloadBytes !== null && $downloadedBytes > $maxDownloadBytes) {
+                    $downloadLimitExceeded = true;
+                    return 0;
+                }
+
+                return fwrite($fileHandle, $chunk);
+            },
+        ]);
+
+        $this->applyProtocolRestrictions($curl, false);
         $result = curl_exec($curl);
 
         if ($result === false) {
             $error = curl_error($curl);
             curl_close($curl);
             fclose($fileHandle);
+
+            if ($downloadLimitExceeded) {
+                throw new RuntimeException(sprintf('Download exceeded the configured byte limit for %s.', $url));
+            }
+
             throw new RuntimeException(sprintf('Download request failed for %s: %s', $url, $error));
         }
 
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
         curl_close($curl);
         fclose($fileHandle);
+
+        if (in_array($status, self::REDIRECT_STATUSES, true)) {
+            $location = $responseHeaders['location'] ?? null;
+
+            if (! is_string($location) || $location === '') {
+                throw new RuntimeException(sprintf('Download redirect for %s did not include a Location header.', $url));
+            }
+
+            @unlink($destination);
+            $redirectUrl = $this->resolveRedirectUrl($url, $location);
+            $redirectHeaders = $this->headersForRedirect($headers, $url, $redirectUrl, $options);
+
+            return $this->downloadOnce($redirectUrl, $destination, $redirectHeaders, $options, $redirectDepth + 1);
+        }
 
         return [
             'status' => $status,
@@ -299,6 +436,27 @@ final class HttpClient implements ArchiveDownloader
     private function shouldRetryStatus(int $status): bool
     {
         return in_array($status, self::RETRYABLE_STATUSES, true);
+    }
+
+    private function shouldRetryException(RuntimeException $exception): bool
+    {
+        $message = $exception->getMessage();
+        $nonRetryableFragments = [
+            'configured byte limit',
+            'Request target host',
+            'Redirect target host',
+            'redirect limit exceeded',
+            'did not include a Location header',
+            'may not follow redirects unless cross-origin auth stripping is enabled',
+        ];
+
+        foreach ($nonRetryableFragments as $fragment) {
+            if (str_contains($message, $fragment)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -328,5 +486,108 @@ final class HttpClient implements ArchiveDownloader
 
         curl_setopt($curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
         curl_setopt($curl, CURLOPT_REDIR_PROTOCOLS, $followRedirects ? CURLPROTO_HTTPS : 0);
+    }
+
+    /**
+     * @param array<string, string> $headers
+     * @param array<string, mixed> $options
+     * @return array<string, string>
+     */
+    private function headersForRedirect(array $headers, string $fromUrl, string $toUrl, array $options): array
+    {
+        $redirectHosts = $options['allowed_redirect_hosts'] ?? null;
+
+        if (is_array($redirectHosts) && $redirectHosts !== []) {
+            $targetHost = strtolower((string) parse_url($toUrl, PHP_URL_HOST));
+
+            if ($targetHost === '' || ! in_array($targetHost, array_map('strtolower', $redirectHosts), true)) {
+                throw new RuntimeException(sprintf('Redirect target host %s is not allowed for %s.', $targetHost === '' ? '(unknown)' : $targetHost, $fromUrl));
+            }
+        }
+
+        $fromOrigin = $this->originForUrl($fromUrl);
+        $toOrigin = $this->originForUrl($toUrl);
+
+        if ($fromOrigin !== '' && $toOrigin !== '' && $fromOrigin !== $toOrigin) {
+            foreach (array_keys($headers) as $headerName) {
+                if (strcasecmp($headerName, 'Authorization') === 0) {
+                    unset($headers[$headerName]);
+                }
+            }
+        }
+
+        return $headers;
+    }
+
+    private function resolveRedirectUrl(string $currentUrl, string $location): string
+    {
+        if (preg_match('#^https://#i', $location) === 1) {
+            return $location;
+        }
+
+        $current = parse_url($currentUrl);
+
+        if (! is_array($current) || ! isset($current['scheme'], $current['host'])) {
+            throw new RuntimeException(sprintf('Unable to resolve redirect URL from %s.', $currentUrl));
+        }
+
+        $base = $current['scheme'] . '://' . $current['host'];
+
+        if (isset($current['port'])) {
+            $base .= ':' . $current['port'];
+        }
+
+        if (str_starts_with($location, '/')) {
+            return $base . $location;
+        }
+
+        $path = (string) ($current['path'] ?? '/');
+        $directory = rtrim(str_replace('\\', '/', dirname($path)), '/');
+
+        return $base . ($directory === '' ? '' : $directory) . '/' . $location;
+    }
+
+    /**
+     * @param array<string, mixed> $options
+     */
+    private function assertAllowedUrl(string $url, array $options): void
+    {
+        $allowedHosts = $options['allowed_redirect_hosts'] ?? null;
+
+        if (! is_array($allowedHosts) || $allowedHosts === []) {
+            return;
+        }
+
+        $targetHost = strtolower((string) parse_url($url, PHP_URL_HOST));
+
+        if ($targetHost === '' || ! in_array($targetHost, array_map('strtolower', $allowedHosts), true)) {
+            throw new RuntimeException(sprintf(
+                'Request target host %s is not allowed for %s.',
+                $targetHost === '' ? '(unknown)' : $targetHost,
+                $url
+            ));
+        }
+    }
+
+    private function originForUrl(string $url): string
+    {
+        $parts = parse_url($url);
+
+        if (! is_array($parts)) {
+            return '';
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+
+        if ($scheme === '' || $host === '') {
+            return '';
+        }
+
+        $port = isset($parts['port'])
+            ? (int) $parts['port']
+            : ($scheme === 'https' ? 443 : ($scheme === 'http' ? 80 : 0));
+
+        return sprintf('%s://%s:%d', $scheme, $host, $port);
     }
 }

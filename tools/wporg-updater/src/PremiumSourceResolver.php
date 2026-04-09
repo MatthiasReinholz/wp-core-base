@@ -22,6 +22,56 @@ final class PremiumSourceResolver
     }
 
     /**
+     * @param array<string, mixed> $sourceConfig
+     */
+    public static function componentKey(string $kind, string $source, string $slug, array $sourceConfig = []): string
+    {
+        if (! self::isPremiumSource($source)) {
+            return sprintf('%s:%s:%s', $kind, $source, $slug);
+        }
+
+        $provider = self::providerFor($source, $sourceConfig);
+
+        return sprintf('%s:%s:%s:%s', $kind, $source, $provider, $slug);
+    }
+
+    public static function legacyPremiumComponentKey(string $kind, string $slug): string
+    {
+        return sprintf('%s:premium:%s', $kind, $slug);
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @return list<string>
+     */
+    public static function legacyComponentKeysForDependency(array $dependency): array
+    {
+        $source = $dependency['source'] ?? null;
+        $kind = $dependency['kind'] ?? null;
+        $slug = $dependency['slug'] ?? null;
+
+        if (! is_string($source) || ! self::isPremiumSource($source) || ! is_string($kind) || ! is_string($slug)) {
+            return [];
+        }
+
+        return [self::legacyPremiumComponentKey($kind, $slug)];
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    public static function matchesComponentKey(array $dependency, string $key): bool
+    {
+        $componentKey = $dependency['component_key'] ?? null;
+
+        if (is_string($componentKey) && $componentKey === $key) {
+            return true;
+        }
+
+        return in_array($key, self::legacyComponentKeysForDependency($dependency), true);
+    }
+
+    /**
      * @param array<string, mixed> $dependency
      */
     public static function providerForDependency(array $dependency): ?string

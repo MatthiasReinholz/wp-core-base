@@ -31,9 +31,10 @@ Usage:
   {$phpCommandPrefix} doctor [--repo-root=/path] [--github]
   {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime]
   {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
-  {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force]
+  {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force] [--adopt-existing-managed-files]
   {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only]
   {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
+  {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
   {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0]
   {$phpCommandPrefix} suggest-manifest [--repo-root=/path]
   {$phpCommandPrefix} format-manifest [--repo-root=/path]
@@ -82,6 +83,7 @@ Common flags:
   --force
   --interactive
   --plan
+  --preview
   --dry-run
 
 Notes:
@@ -90,7 +92,7 @@ Notes:
   - --version pins adoption to a specific upstream release instead of latest.
   - `--source=premium` requires `--provider=KEY` where `KEY` is registered in `.wp-core-base/premium-providers.php`.
   - premium sources use the fixed JSON secret/env contract: `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`.
-  - --plan and --dry-run are preview aliases; they do not mutate the repo.
+  - --plan, --preview, and --dry-run are preview aliases; they do not mutate the repo.
 
 Examples:
   {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce
@@ -138,6 +140,7 @@ Common flags:
   --private
   --archive-subdir=PATH
   --plan
+  --preview
   --dry-run
 
 Notes:

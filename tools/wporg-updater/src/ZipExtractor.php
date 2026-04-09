@@ -9,8 +9,22 @@ use ZipArchive;
 
 final class ZipExtractor
 {
+    private const MAX_ENTRY_COUNT = 25000;
+    private const MAX_TOTAL_UNCOMPRESSED_BYTES = 1024 * 1024 * 1024;
+    private const MAX_COMPRESSION_RATIO = 200;
+
     public static function extractValidated(ZipArchive $zip, string $destination): void
     {
+        $totalUncompressedBytes = 0;
+
+        if ($zip->numFiles > self::MAX_ENTRY_COUNT) {
+            throw new RuntimeException(sprintf(
+                'Archive contains %d entries, which exceeds the limit of %d.',
+                $zip->numFiles,
+                self::MAX_ENTRY_COUNT
+            ));
+        }
+
         for ($index = 0; $index < $zip->numFiles; $index++) {
             $entryName = $zip->getNameIndex($index);
 
@@ -20,6 +34,29 @@ final class ZipExtractor
 
             self::assertSafeEntryName($entryName);
             self::assertNotSymlink($zip, $index, $entryName);
+            $stat = $zip->statIndex($index);
+
+            if (! is_array($stat)) {
+                throw new RuntimeException(sprintf('Archive entry %s is missing stat metadata.', $entryName));
+            }
+
+            $entrySize = (int) ($stat['size'] ?? 0);
+            $compressedSize = (int) ($stat['comp_size'] ?? 0);
+            $totalUncompressedBytes += $entrySize;
+
+            if ($totalUncompressedBytes > self::MAX_TOTAL_UNCOMPRESSED_BYTES) {
+                throw new RuntimeException(sprintf(
+                    'Archive expands beyond the allowed size limit of %d bytes.',
+                    self::MAX_TOTAL_UNCOMPRESSED_BYTES
+                ));
+            }
+
+            if ($compressedSize > 0 && $entrySize > ($compressedSize * self::MAX_COMPRESSION_RATIO)) {
+                throw new RuntimeException(sprintf(
+                    'Archive entry %s exceeds the allowed compression ratio.',
+                    $entryName
+                ));
+            }
         }
 
         if (! $zip->extractTo($destination)) {

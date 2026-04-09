@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class GitCommandRunner
+final class GitCommandRunner implements GitRunnerInterface
 {
     public function __construct(
         private readonly string $repoRoot,
@@ -47,6 +47,105 @@ final class GitCommandRunner
         $this->run(sprintf('git fetch origin %s', escapeshellarg($branch)));
 
         return trim($this->run(sprintf('git rev-parse origin/%s', escapeshellarg($branch))));
+    }
+
+    public function currentBranch(): ?string
+    {
+        [$status, $output] = $this->runWithStatus('git symbolic-ref --quiet --short HEAD', true);
+
+        if ($status !== 0) {
+            return null;
+        }
+
+        $branch = trim($output);
+        return $branch === '' ? null : $branch;
+    }
+
+    public function currentRevision(): string
+    {
+        return trim($this->run('git rev-parse HEAD'));
+    }
+
+    public function localBranchRevision(string $branch): ?string
+    {
+        [$status, $output] = $this->runWithStatus(sprintf('git rev-parse --verify --quiet refs/heads/%s', escapeshellarg($branch)), true);
+
+        if ($status !== 0) {
+            return null;
+        }
+
+        $revision = trim($output);
+        return $revision === '' ? null : $revision;
+    }
+
+    public function remoteBranchRevision(string $branch): ?string
+    {
+        if (! $this->remoteBranchExists($branch)) {
+            return null;
+        }
+
+        return $this->remoteRevision($branch);
+    }
+
+    public function checkoutRef(string $ref): void
+    {
+        $this->run(sprintf('git checkout %s', escapeshellarg($ref)));
+    }
+
+    public function checkoutDetached(string $revision): void
+    {
+        $this->run(sprintf('git checkout --detach %s', escapeshellarg($revision)));
+    }
+
+    public function hardReset(string $revision): void
+    {
+        $this->run(sprintf('git reset --hard %s', escapeshellarg($revision)));
+    }
+
+    public function cleanUntracked(): void
+    {
+        $this->run('git clean -fd');
+    }
+
+    public function forceBranchToRevision(string $branch, string $revision): void
+    {
+        $this->run(sprintf('git branch -f %s %s', escapeshellarg($branch), escapeshellarg($revision)));
+    }
+
+    public function deleteLocalBranch(string $branch): void
+    {
+        if ($this->localBranchRevision($branch) === null) {
+            return;
+        }
+
+        $this->run(sprintf('git branch -D %s', escapeshellarg($branch)));
+    }
+
+    public function forcePushRevision(string $branch, string $revision): void
+    {
+        $this->run(sprintf('git push --force origin %s:%s', escapeshellarg($revision), escapeshellarg($branch)));
+    }
+
+    public function deleteRemoteBranch(string $branch): void
+    {
+        if (! $this->remoteBranchExists($branch)) {
+            return;
+        }
+
+        $this->run(sprintf('git push origin --delete %s', escapeshellarg($branch)));
+    }
+
+    public function assertCleanWorktree(): void
+    {
+        [$status, $output] = $this->runWithStatus('git status --porcelain', true);
+
+        if ($status !== 0) {
+            throw new RuntimeException(sprintf('Unable to inspect Git worktree state.%s', $output === '' ? '' : "\n" . $output));
+        }
+
+        if (trim($output) !== '') {
+            throw new RuntimeException('Git worktree must be clean before running automation sync commands.');
+        }
     }
 
     private function hasStagedChanges(): bool

@@ -147,7 +147,7 @@ final class DependencyAuthoringService
         $matches = [];
 
         foreach ($dependencies as $index => $dependency) {
-            if ($componentKey !== null && $dependency['component_key'] === $componentKey) {
+            if ($componentKey !== null && PremiumSourceResolver::matchesComponentKey($dependency, $componentKey)) {
                 $removed = $dependency;
                 $removedIndex = $index;
                 break;
@@ -191,6 +191,7 @@ final class DependencyAuthoringService
 
         unset($dependencies[$removedIndex]);
         $nextConfig = $this->config->withDependencies(array_values($dependencies));
+        $trackedFileStates = $this->captureFileStates($this->trackedConfigPaths($this->config, $nextConfig));
         $removedAbsolutePath = $this->config->repoRoot . '/' . $removed['path'];
         $backupRoot = null;
         $backupPath = null;
@@ -204,13 +205,15 @@ final class DependencyAuthoringService
         }
 
         try {
-            $this->manifestWriter->write($nextConfig);
-            $this->refreshAdminGovernance($nextConfig);
-            $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
-        } catch (RuntimeException $exception) {
+            $this->persistConfig($nextConfig);
+            $this->config = $nextConfig;
+        } catch (\Throwable $exception) {
             if ($deletePath && $backupPath !== null && (file_exists($backupPath) || is_link($backupPath))) {
                 $this->runtimeInspector->copyPath($backupPath, $removedAbsolutePath);
             }
+
+            $this->restoreFileStates($trackedFileStates);
+            $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
 
             throw $exception;
         } finally {
@@ -355,7 +358,9 @@ final class DependencyAuthoringService
             'cleanup_root' => $cleanupRoot,
             'plan' => [
                 'operation' => 'add-dependency',
-                'component_key' => sprintf('%s:%s:%s', $kind, $source, $slug),
+                'component_key' => PremiumSourceResolver::componentKey($kind, $source, $slug, [
+                    'provider' => $provider,
+                ]),
                 'source' => $source,
                 'kind' => $kind,
                 'slug' => $slug,
@@ -381,6 +386,8 @@ final class DependencyAuthoringService
         $entry = $prepared['entry'];
         $destinationAbsolutePath = $prepared['destination_absolute_path'];
         $preparedSourcePath = $prepared['prepared_source_path'];
+        $nextConfig = $manifestMutation($entry);
+        $trackedFileStates = $this->captureFileStates($this->trackedConfigPaths($this->config, $nextConfig));
         $backupRoot = null;
         $backupPath = null;
         $hadExistingDestination = file_exists($destinationAbsolutePath) || is_link($destinationAbsolutePath);
@@ -398,19 +405,19 @@ final class DependencyAuthoringService
                 $this->runtimeInspector->copyPath($preparedSourcePath, $destinationAbsolutePath);
             }
 
-            $nextConfig = $manifestMutation($entry);
+            $this->persistConfig($nextConfig);
             $this->config = $nextConfig;
 
-            $result = $nextConfig->dependencyByKey(sprintf(
-                '%s:%s:%s',
+            $result = $nextConfig->dependencyByKey(PremiumSourceResolver::componentKey(
                 (string) $entry['kind'],
                 (string) $entry['source'],
-                (string) $entry['slug']
+                (string) $entry['slug'],
+                is_array($entry['source_config'] ?? null) ? $entry['source_config'] : []
             ));
             $result['next_steps'] = $this->nextStepsForDependency($result);
 
             return $result;
-        } catch (RuntimeException $exception) {
+        } catch (\Throwable $exception) {
             if (is_string($preparedSourcePath) && $preparedSourcePath !== '') {
                 $this->runtimeInspector->clearPath($destinationAbsolutePath);
 
@@ -418,6 +425,9 @@ final class DependencyAuthoringService
                     $this->runtimeInspector->copyPath($backupPath, $destinationAbsolutePath);
                 }
             }
+
+            $this->restoreFileStates($trackedFileStates);
+            $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
 
             throw $exception;
         } finally {
@@ -627,11 +637,7 @@ final class DependencyAuthoringService
             $manifest['dependencies'][] = $entry;
         }
 
-        $nextConfig = Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
-        $this->manifestWriter->write($nextConfig);
-        $this->refreshAdminGovernance($nextConfig);
-
-        return Config::load($this->config->repoRoot, $this->config->manifestPath);
+        return Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
     }
 
     /**
@@ -647,9 +653,13 @@ final class DependencyAuthoringService
 
         foreach ($manifest['dependencies'] as $dependency) {
             if (
-                (string) ($dependency['kind'] ?? '') === (string) $removedDependency['kind']
-                && (string) ($dependency['source'] ?? '') === (string) $removedDependency['source']
-                && (string) ($dependency['slug'] ?? '') === (string) $removedDependency['slug']
+                $this->dependencyMatchesIdentity(
+                    $dependency,
+                    (string) $removedDependency['kind'],
+                    (string) $removedDependency['source'],
+                    (string) $removedDependency['slug'],
+                    PremiumSourceResolver::providerForDependency($removedDependency)
+                )
             ) {
                 continue;
             }
@@ -668,11 +678,8 @@ final class DependencyAuthoringService
         }
 
         $manifest['dependencies'] = array_values($dependencies);
-        $nextConfig = Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
-        $this->manifestWriter->write($nextConfig);
-        $this->refreshAdminGovernance($nextConfig);
 
-        return Config::load($this->config->repoRoot, $this->config->manifestPath);
+        return Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
     }
 
     /**
@@ -688,7 +695,7 @@ final class DependencyAuthoringService
         $matches = [];
 
         foreach ($this->config->dependencies() as $dependency) {
-            if ($componentKey !== null && $dependency['component_key'] === $componentKey) {
+            if ($componentKey !== null && PremiumSourceResolver::matchesComponentKey($dependency, $componentKey)) {
                 return $dependency;
             }
 
@@ -777,11 +784,11 @@ final class DependencyAuthoringService
 
         $dependencySource = (string) ($dependency['source'] ?? '');
 
-        if ($dependencySource === $source) {
-            return true;
+        if (! PremiumSourceResolver::isPremiumSource($dependencySource) || ! PremiumSourceResolver::isPremiumSource($source)) {
+            return $dependencySource === $source;
         }
 
-        if (! PremiumSourceResolver::isPremiumSource($dependencySource) || ! PremiumSourceResolver::isPremiumSource($source) || $provider === null) {
+        if ($provider === null) {
             return false;
         }
 
@@ -969,6 +976,71 @@ final class DependencyAuthoringService
     {
         if ($this->adminGovernanceExporter !== null) {
             $this->adminGovernanceExporter->refresh($config);
+        }
+    }
+
+    private function persistConfig(Config $config): void
+    {
+        $this->manifestWriter->write($config);
+        $this->refreshAdminGovernance($config);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function trackedConfigPaths(Config $currentConfig, Config $nextConfig): array
+    {
+        $paths = [$currentConfig->manifestPath];
+
+        if ($this->adminGovernanceExporter !== null) {
+            $paths[] = $currentConfig->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($currentConfig);
+            $paths[] = $nextConfig->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($nextConfig);
+        }
+
+        return array_values(array_unique($paths));
+    }
+
+    /**
+     * @param list<string> $paths
+     * @return array<string, array{exists:bool, contents:?string}>
+     */
+    private function captureFileStates(array $paths): array
+    {
+        $states = [];
+
+        foreach ($paths as $path) {
+            $exists = is_file($path);
+            $contents = $exists ? file_get_contents($path) : null;
+
+            if ($exists && $contents === false) {
+                throw new RuntimeException(sprintf('Unable to capture file state for %s.', $path));
+            }
+
+            $states[$path] = [
+                'exists' => $exists,
+                'contents' => $contents === false ? null : $contents,
+            ];
+        }
+
+        return $states;
+    }
+
+    /**
+     * @param array<string, array{exists:bool, contents:?string}> $states
+     */
+    private function restoreFileStates(array $states): void
+    {
+        $writer = new AtomicFileWriter();
+
+        foreach ($states as $path => $state) {
+            if ($state['exists']) {
+                $writer->write($path, (string) $state['contents']);
+                continue;
+            }
+
+            if (is_file($path) || is_link($path)) {
+                $this->runtimeInspector->clearPath($path);
+            }
         }
     }
 }

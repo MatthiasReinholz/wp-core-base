@@ -78,6 +78,8 @@ final class Config
         $github = self::normalizeGithub($data['github'] ?? []);
         $automation = self::normalizeAutomation($data['automation'] ?? []);
         $dependencies = self::normalizeDependencies($data['dependencies'] ?? [], $paths);
+        self::assertProfileCoreCompatibility($profile, $core);
+        self::assertSafeStageDirectory($runtime['stage_dir'], $paths, $runtime['ownership_roots']);
 
         return new self(
             repoRoot: $repoRoot,
@@ -369,10 +371,23 @@ final class Config
      */
     public function dependencyByKey(string $key): array
     {
+        $matches = [];
+
         foreach ($this->dependencies as $dependency) {
-            if ($dependency['component_key'] === $key) {
-                return $dependency;
+            if (PremiumSourceResolver::matchesComponentKey($dependency, $key)) {
+                $matches[] = $dependency;
             }
+        }
+
+        if (count($matches) === 1) {
+            return $matches[0];
+        }
+
+        if (count($matches) > 1) {
+            throw new RuntimeException(sprintf(
+                'Dependency key %s is ambiguous after premium-provider key migration. Use the provider-aware component key instead.',
+                $key
+            ));
         }
 
         throw new RuntimeException(sprintf('Dependency not found for key %s.', $key));
@@ -495,6 +510,49 @@ final class Config
     }
 
     /**
+     * @param array{mode:string, enabled:bool} $core
+     */
+    private static function assertProfileCoreCompatibility(string $profile, array $core): void
+    {
+        if ($profile === 'content-only' && $core['mode'] === 'managed' && $core['enabled']) {
+            throw new RuntimeException('content-only profile may not manage WordPress core.');
+        }
+    }
+
+    /**
+     * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @param list<string> $ownershipRoots
+     */
+    private static function assertSafeStageDirectory(string $stageDir, array $paths, array $ownershipRoots): void
+    {
+        if ($stageDir === '.') {
+            throw new RuntimeException('runtime.stage_dir may not be the repository root.');
+        }
+
+        if ($stageDir === '.wp-core-base' || (self::pathStartsWith($stageDir, '.wp-core-base') && ! self::pathStartsWith($stageDir, '.wp-core-base/build'))) {
+            throw new RuntimeException(sprintf(
+                'runtime.stage_dir %s may not overlap the framework control tree outside .wp-core-base/build.',
+                $stageDir
+            ));
+        }
+
+        $protectedRoots = array_values(array_unique(array_merge(
+            [$paths['content_root'], $paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']],
+            $ownershipRoots
+        )));
+
+        foreach ($protectedRoots as $protectedRoot) {
+            if (self::pathStartsWith($stageDir, $protectedRoot) || self::pathStartsWith($protectedRoot, $stageDir)) {
+                throw new RuntimeException(sprintf(
+                    'runtime.stage_dir %s may not overlap live runtime root %s.',
+                    $stageDir,
+                    $protectedRoot
+                ));
+            }
+        }
+    }
+
+    /**
      * @param array<string, mixed> $value
      * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
      * @return array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>}
@@ -515,6 +573,9 @@ final class Config
                 throw new RuntimeException(sprintf('runtime.ownership_roots entry %s must live under paths.content_root.', $ownershipRoot));
             }
         }
+
+        $allowRuntimePaths = self::normalizedPathList($value['allow_runtime_paths'] ?? [], 'runtime.allow_runtime_paths');
+        self::assertSafeRuntimeAllowPaths($allowRuntimePaths, $paths, $ownershipRoots);
 
         return [
             'stage_dir' => self::normalizedRelativePath($value['stage_dir'] ?? '.wp-core-base/build/runtime', 'runtime.stage_dir'),
@@ -559,7 +620,7 @@ final class Config
                 ],
                 'runtime.forbidden_files'
             ),
-            'allow_runtime_paths' => self::normalizedPathList($value['allow_runtime_paths'] ?? [], 'runtime.allow_runtime_paths'),
+            'allow_runtime_paths' => $allowRuntimePaths,
             'strip_paths' => self::normalizedPathList($value['strip_paths'] ?? [], 'runtime.strip_paths'),
             'strip_files' => self::stringList($value['strip_files'] ?? [], 'runtime.strip_files'),
             'managed_sanitize_paths' => self::normalizedPathList(
@@ -820,7 +881,9 @@ final class Config
                     'sanitize_paths' => $sanitizePaths,
                     'sanitize_files' => $sanitizeFiles,
                 ],
-                'component_key' => sprintf('%s:%s:%s', $kind, $source, $slug),
+                'component_key' => PremiumSourceResolver::componentKey($kind, $source, $slug, [
+                    'provider' => $provider,
+                ]),
             ];
         }
 
@@ -984,5 +1047,34 @@ final class Config
     private static function pathStartsWith(string $path, string $prefix): bool
     {
         return $path === $prefix || str_starts_with($path, $prefix . '/');
+    }
+
+    /**
+     * @param list<string> $allowRuntimePaths
+     * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @param list<string> $ownershipRoots
+     */
+    private static function assertSafeRuntimeAllowPaths(array $allowRuntimePaths, array $paths, array $ownershipRoots): void
+    {
+        $broadRoots = array_values(array_unique(array_merge(
+            [$paths['content_root'], $paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']],
+            $ownershipRoots
+        )));
+
+        foreach ($allowRuntimePaths as $allowPath) {
+            if (! self::pathStartsWith($allowPath, $paths['content_root'])) {
+                throw new RuntimeException(sprintf(
+                    'runtime.allow_runtime_paths entry %s must live under paths.content_root.',
+                    $allowPath
+                ));
+            }
+
+            if (in_array($allowPath, $broadRoots, true)) {
+                throw new RuntimeException(sprintf(
+                    'runtime.allow_runtime_paths entry %s is too broad. Declare specific child paths instead.',
+                    $allowPath
+                ));
+            }
+        }
     }
 }

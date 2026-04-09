@@ -12,6 +12,9 @@ use SimpleXMLElement;
 
 final class SupportForumClient
 {
+    private const MAX_FEED_BYTES = 2 * 1024 * 1024;
+    private const MAX_PAGE_BYTES = 3 * 1024 * 1024;
+
     public function __construct(
         private readonly HttpClient $httpClient,
         private readonly int $maxPages,
@@ -30,7 +33,10 @@ final class SupportForumClient
     {
         $windowStart = $windowStart === null || $windowStart < $releaseAt ? $releaseAt : $windowStart;
         $topics = [];
-        $feedItems = $this->parseFeed($this->httpClient->get($this->feedUrl($slug)));
+        $feedItems = $this->parseFeed($this->httpClient->getWithOptions($this->feedUrl($slug), [], [
+            'max_body_bytes' => self::MAX_FEED_BYTES,
+            'allowed_redirect_hosts' => ['wordpress.org'],
+        ]));
 
         foreach ($feedItems as $item) {
             $openedAt = new DateTimeImmutable($item['opened_at']);
@@ -49,7 +55,10 @@ final class SupportForumClient
                 continue;
             }
 
-            $topicHtml = $this->httpClient->get($listing['url']);
+            $topicHtml = $this->httpClient->getWithOptions($listing['url'], [], [
+                'max_body_bytes' => self::MAX_PAGE_BYTES,
+                'allowed_redirect_hosts' => ['wordpress.org'],
+            ]);
             $openedAt = $this->extractTopicPublishedAt($topicHtml);
 
             if ($openedAt > $windowStart) {
@@ -79,7 +88,7 @@ final class SupportForumClient
 
         foreach ($feed->channel->item as $item) {
             $title = trim(html_entity_decode(strip_tags((string) $item->title), ENT_QUOTES | ENT_HTML5));
-            $url = trim((string) $item->link);
+            $url = $this->canonicalSupportTopicUrl((string) $item->link);
             $pubDate = trim((string) $item->pubDate);
 
             if ($title === '' || $url === '' || $pubDate === '') {
@@ -115,7 +124,7 @@ final class SupportForumClient
 
         foreach ($links as $link) {
             $title = trim(html_entity_decode(strip_tags($link->textContent ?? ''), ENT_QUOTES | ENT_HTML5));
-            $url = trim((string) $link->attributes?->getNamedItem('href')?->nodeValue);
+            $url = $this->canonicalSupportTopicUrl((string) $link->attributes?->getNamedItem('href')?->nodeValue);
 
             if ($title === '' || $url === '') {
                 continue;
@@ -156,7 +165,10 @@ final class SupportForumClient
      */
     private function crawlSupportPages(string $slug, int $maxPages): array
     {
-        $firstPageHtml = $this->httpClient->get($this->supportUrl($slug));
+        $firstPageHtml = $this->httpClient->getWithOptions($this->supportUrl($slug), [], [
+            'max_body_bytes' => self::MAX_PAGE_BYTES,
+            'allowed_redirect_hosts' => ['wordpress.org'],
+        ]);
         $pageCount = $this->extractPageCount($firstPageHtml);
 
         if ($pageCount > $maxPages) {
@@ -175,7 +187,10 @@ final class SupportForumClient
         }
 
         for ($page = 2; $page <= $pageCount; $page++) {
-            $html = $this->httpClient->get($this->supportUrl($slug) . 'page/' . $page . '/');
+            $html = $this->httpClient->getWithOptions($this->supportUrl($slug) . 'page/' . $page . '/', [], [
+                'max_body_bytes' => self::MAX_PAGE_BYTES,
+                'allowed_redirect_hosts' => ['wordpress.org'],
+            ]);
 
             foreach ($this->parseSupportListing($html) as $topic) {
                 $topics[$topic['url']] = $topic;
@@ -252,5 +267,30 @@ final class SupportForumClient
     private function feedUrl(string $slug): string
     {
         return sprintf('https://wordpress.org/support/plugin/%s/feed/', rawurlencode($slug));
+    }
+
+    private function canonicalSupportTopicUrl(string $url): string
+    {
+        $trimmed = trim($url);
+
+        if ($trimmed === '') {
+            return '';
+        }
+
+        $parts = parse_url($trimmed);
+
+        if (! is_array($parts)) {
+            throw new RuntimeException(sprintf('Support topic URL is invalid: %s', $url));
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $path = (string) ($parts['path'] ?? '');
+
+        if ($scheme !== 'https' || $host !== 'wordpress.org' || ! str_starts_with($path, '/support/')) {
+            throw new RuntimeException(sprintf('Support topic URL must stay on wordpress.org/support: %s', $url));
+        }
+
+        return 'https://wordpress.org' . $path;
     }
 }

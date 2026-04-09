@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class GitHubClient
+final class GitHubClient implements GitHubAutomationClient
 {
     public function __construct(
         private readonly HttpClient $httpClient,

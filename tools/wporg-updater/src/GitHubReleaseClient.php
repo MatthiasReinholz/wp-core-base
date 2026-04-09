@@ -164,29 +164,11 @@ final class GitHubReleaseClient implements GitHubReleaseSource
             ));
         }
 
-        $headers = $this->headers($dependency);
-
-        if (isset($headers['Authorization'])) {
-            $response = $this->httpClient->request('GET', $zipballUrl, $headers, null, null, false);
-
-            if (($response['status'] === 302 || $response['status'] === 301) && isset($response['headers']['location'])) {
-                $this->httpClient->downloadToFile($response['headers']['location'], $destination);
-                return;
-            }
-
-            if ($response['status'] >= 200 && $response['status'] < 300) {
-                $this->writeBinaryBody($destination, $response['body']);
-                return;
-            }
-
-            throw new RuntimeException(sprintf(
-                'GitHub release download for %s failed with status %d.',
-                $this->repository($dependency),
-                $response['status']
-            ));
-        }
-
-        $this->httpClient->downloadToFile($zipballUrl, $destination);
+        $this->httpClient->downloadToFileWithOptions($zipballUrl, $destination, $this->headers($dependency), [
+            'allowed_redirect_hosts' => $this->allowedDownloadHosts(),
+            'strip_auth_on_cross_origin_redirect' => true,
+            'max_download_bytes' => 512 * 1024 * 1024,
+        ]);
     }
 
     /**
@@ -248,10 +230,14 @@ final class GitHubReleaseClient implements GitHubReleaseSource
      */
     private function requestJson(string $path, array $headers): array
     {
-        $response = $this->httpClient->request(
+        $response = $this->httpClient->requestWithOptions(
             'GET',
             rtrim($this->apiBase, '/') . $path,
             $headers,
+            null,
+            null,
+            false,
+            ['max_body_bytes' => 5 * 1024 * 1024]
         );
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
@@ -321,30 +307,11 @@ final class GitHubReleaseClient implements GitHubReleaseSource
         $headers = $this->headers($dependency);
         $headers['Accept'] = 'application/octet-stream';
 
-        $response = $this->httpClient->request('GET', $assetApiUrl, $headers, null, null, false);
-
-        if (($response['status'] === 302 || $response['status'] === 301) && isset($response['headers']['location'])) {
-            $this->httpClient->downloadToFile($response['headers']['location'], $destination);
-            return;
-        }
-
-        if ($response['status'] >= 200 && $response['status'] < 300) {
-            $this->writeBinaryBody($destination, $response['body']);
-            return;
-        }
-
-        throw new RuntimeException(sprintf(
-            'GitHub release asset download for %s failed with status %d.',
-            $this->repository($dependency),
-            $response['status']
-        ));
-    }
-
-    private function writeBinaryBody(string $destination, string $body): void
-    {
-        if (file_put_contents($destination, $body) === false) {
-            throw new RuntimeException(sprintf('Failed to write GitHub archive download to %s.', $destination));
-        }
+        $this->httpClient->downloadToFileWithOptions($assetApiUrl, $destination, $headers, [
+            'allowed_redirect_hosts' => $this->allowedDownloadHosts(),
+            'strip_auth_on_cross_origin_redirect' => true,
+            'max_download_bytes' => 512 * 1024 * 1024,
+        ]);
     }
 
     private function repositoryPath(string $repository): string
@@ -356,6 +323,26 @@ final class GitHubReleaseClient implements GitHubReleaseSource
         }
 
         return rawurlencode($owner) . '/' . rawurlencode($repo);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function allowedDownloadHosts(): array
+    {
+        $apiHost = strtolower((string) parse_url($this->apiBase, PHP_URL_HOST));
+
+        if ($apiHost === 'api.github.com') {
+            return [
+                'api.github.com',
+                'github.com',
+                'codeload.github.com',
+                'objects.githubusercontent.com',
+                'release-assets.githubusercontent.com',
+            ];
+        }
+
+        return $apiHost === '' ? [] : [$apiHost];
     }
 
     /**

@@ -15,11 +15,11 @@ final class FrameworkSyncer
     public function __construct(
         private FrameworkConfig $framework,
         private readonly string $repoRoot,
-        private readonly FrameworkReleaseClient $frameworkReleaseClient,
+        private readonly FrameworkReleaseSource $frameworkReleaseClient,
         private readonly ReleaseClassifier $releaseClassifier,
         private readonly PrBodyRenderer $prBodyRenderer,
-        private readonly ?GitHubClient $gitHubClient,
-        private readonly GitCommandRunner $gitRunner,
+        private readonly ?GitHubAutomationClient $gitHubClient,
+        private readonly GitRunnerInterface $gitRunner,
         private readonly RuntimeInspector $runtimeInspector,
     ) {
     }
@@ -53,13 +53,23 @@ final class FrameworkSyncer
             throw new RuntimeException('framework-sync requires GITHUB_REPOSITORY and GITHUB_TOKEN unless --check-only is used.');
         }
 
+        $this->gitRunner->assertCleanWorktree();
         $defaultBranch = $this->gitHubClient->getDefaultBranch();
+        $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
         $this->gitHubClient->ensureLabels(self::labelDefinitions());
         $openPrs = $this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests());
         $plannedPrs = [];
 
         foreach ($openPrs as $pr) {
-            $plannedPrs[] = $this->planExistingPullRequest($pr, $this->framework->version, (string) $latestRelease['version'], (string) $latestRelease['release_at']);
+            try {
+                $plannedPrs[] = $this->planExistingPullRequest($pr, $this->framework->version, (string) $latestRelease['version'], (string) $latestRelease['release_at'], $baseRevision);
+            } catch (\Throwable $throwable) {
+                fwrite(STDERR, sprintf(
+                    "[warn] Ignoring malformed framework automation PR #%d: %s\n",
+                    (int) ($pr['number'] ?? 0),
+                    OutputRedactor::redact($throwable->getMessage())
+                ));
+            }
         }
 
         [$plannedPrs, $duplicatePrs] = $this->partitionPullRequestsByTargetVersion($plannedPrs);
@@ -83,7 +93,7 @@ final class FrameworkSyncer
                 array_values(array_map(static fn (array $previous): int => (int) $previous['number'], $activePlannedPrs))
             )));
 
-            if ($this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch)) {
+            if ($this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch, $baseRevision)) {
                 $activePlannedPrs[] = $plannedPr;
             }
         }
@@ -103,7 +113,8 @@ final class FrameworkSyncer
                 $latestRelease,
                 $scope,
                 array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
-                $defaultBranch
+                $defaultBranch,
+                $baseRevision
             );
         }
     }
@@ -112,7 +123,7 @@ final class FrameworkSyncer
      * @param array<string, mixed> $pullRequest
      * @return array<string, mixed>
      */
-    private function planExistingPullRequest(array $pullRequest, string $baseVersion, string $latestVersion, string $latestReleaseAt): array
+    private function planExistingPullRequest(array $pullRequest, string $baseVersion, string $latestVersion, string $latestReleaseAt, string $baseRevision): array
     {
         $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
@@ -128,7 +139,7 @@ final class FrameworkSyncer
             throw new RuntimeException(sprintf('Managed framework pull request #%d has incomplete metadata.', $pullRequest['number']));
         }
 
-        $requiresCodeUpdate = false;
+        $requiresCodeUpdate = $this->branchRefreshRequired($metadata, $baseRevision);
 
         if (
             $this->releaseClassifier->samePatchLine($targetVersion, $latestVersion) &&
@@ -156,7 +167,7 @@ final class FrameworkSyncer
      * @param array<string, mixed> $latestRelease
      * @param list<int> $blockedBy
      */
-    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch): bool
+    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch, string $baseRevision): bool
     {
         $metadata = $plannedPr['metadata'];
         $targetVersion = (string) $plannedPr['planned_target_version'];
@@ -167,6 +178,10 @@ final class FrameworkSyncer
         if ($branch === '') {
             throw new RuntimeException(sprintf('Managed framework pull request #%d is missing a branch name.', $plannedPr['number']));
         }
+
+        $this->assertRefreshableAutomationPullRequest($plannedPr, $branch, $defaultBranch);
+
+        $branchGuard = (bool) $plannedPr['requires_code_update'] ? $this->beginBranchRollbackGuard($branch) : null;
 
         if ($this->pullRequestAlreadySatisfied($this->framework->version, $targetVersion)) {
             $this->closeSupersededPullRequest(
@@ -182,68 +197,90 @@ final class FrameworkSyncer
         $releaseData = $this->findReleaseDataForVersion($targetVersion);
         $skippedFiles = (array) ($metadata['skipped_managed_files'] ?? []);
 
-        if ((bool) $plannedPr['requires_code_update']) {
-            $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData);
-            $this->framework = FrameworkConfig::load($this->repoRoot);
-            $skippedFiles = $result['skipped_files'];
-            $changed = $this->gitRunner->commitAndPush(
-                $branch,
-                sprintf('Update wp-core-base from %s to %s', (string) $metadata['base_version'], $targetVersion),
-                $result['changed_paths']
+        try {
+            if ((bool) $plannedPr['requires_code_update']) {
+                $result = [];
+                $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData);
+
+                $changed = $this->gitRunner->commitAndPush(
+                    $branch,
+                    sprintf('Update wp-core-base from %s to %s', (string) $metadata['base_version'], $targetVersion),
+                    $result['changed_paths']
+                );
+                $this->framework = FrameworkConfig::load($this->repoRoot);
+                $skippedFiles = $result['skipped_files'];
+
+                if (! $changed) {
+                    $this->closeSupersededPullRequest(
+                        (int) $plannedPr['number'],
+                        sprintf(
+                            'Refreshing this `wp-core-base` PR from the latest base branch produced no remaining file changes for `%s`. The PR has been closed as a no-op.',
+                            $targetVersion
+                        )
+                    );
+
+                    if ($branchGuard !== null) {
+                        $branchGuard->complete();
+                    }
+
+                    return false;
+                }
+            }
+
+            $labels = $this->deriveFrameworkLabels($scope, $blockedBy);
+            $metadata['component_key'] = self::COMPONENT_KEY;
+            $metadata['slug'] = 'wp-core-base';
+            $metadata['base_branch'] = $defaultBranch;
+            $metadata['base_revision'] = $baseRevision;
+            $metadata['base_version'] = $metadata['base_version'] ?? $this->framework->version;
+            $metadata['target_version'] = $targetVersion;
+            $metadata['scope'] = $scope;
+            $metadata['release_at'] = $releaseAt;
+            $metadata['release_url'] = $releaseData['release_url'];
+            $metadata['blocked_by'] = $blockedBy;
+            $metadata['branch'] = $branch;
+            $metadata['skipped_managed_files'] = $skippedFiles;
+            $metadata['updated_at'] = gmdate(DATE_ATOM);
+
+            $title = $this->titleForPullRequest((string) $metadata['base_version'], $targetVersion);
+            $body = $this->prBodyRenderer->renderFrameworkUpdate(
+                currentVersion: (string) $metadata['base_version'],
+                targetVersion: $targetVersion,
+                releaseScope: $scope,
+                releaseAt: $releaseAt,
+                labels: $labels,
+                sourceRepository: $this->framework->repository,
+                releaseUrl: (string) $releaseData['release_url'],
+                currentBaseline: (string) ($metadata['base_wordpress_core'] ?? $this->framework->baseline['wordpress_core']),
+                targetBaseline: (string) $releaseData['target_wordpress_core'],
+                notesSections: (array) $releaseData['notes_sections'],
+                skippedManagedFiles: $skippedFiles,
+                metadata: $metadata,
             );
 
-            if (! $changed) {
-                $this->closeSupersededPullRequest(
-                    (int) $plannedPr['number'],
-                    sprintf(
-                        'Refreshing this `wp-core-base` PR from the latest base branch produced no remaining file changes for `%s`. The PR has been closed as a no-op.',
-                        $targetVersion
-                    )
-                );
-                return false;
+            $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
+            $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
+            $this->syncDraftState($plannedPr, $blockedBy);
+
+            if ($branchGuard !== null) {
+                $branchGuard->complete();
             }
+
+            return true;
+        } catch (\Throwable $throwable) {
+            if ($branchGuard !== null) {
+                $branchGuard->rollback($throwable);
+            }
+
+            throw $throwable;
         }
-
-        $labels = $this->deriveFrameworkLabels($scope, $blockedBy);
-        $metadata['component_key'] = self::COMPONENT_KEY;
-        $metadata['slug'] = 'wp-core-base';
-        $metadata['base_version'] = $metadata['base_version'] ?? $this->framework->version;
-        $metadata['target_version'] = $targetVersion;
-        $metadata['scope'] = $scope;
-        $metadata['release_at'] = $releaseAt;
-        $metadata['release_url'] = $releaseData['release_url'];
-        $metadata['blocked_by'] = $blockedBy;
-        $metadata['branch'] = $branch;
-        $metadata['skipped_managed_files'] = $skippedFiles;
-        $metadata['updated_at'] = gmdate(DATE_ATOM);
-
-        $title = $this->titleForPullRequest((string) $metadata['base_version'], $targetVersion);
-        $body = $this->prBodyRenderer->renderFrameworkUpdate(
-            currentVersion: (string) $metadata['base_version'],
-            targetVersion: $targetVersion,
-            releaseScope: $scope,
-            releaseAt: $releaseAt,
-            labels: $labels,
-            sourceRepository: $this->framework->repository,
-            releaseUrl: (string) $releaseData['release_url'],
-            currentBaseline: (string) ($metadata['base_wordpress_core'] ?? $this->framework->baseline['wordpress_core']),
-            targetBaseline: (string) $releaseData['target_wordpress_core'],
-            notesSections: (array) $releaseData['notes_sections'],
-            skippedManagedFiles: $skippedFiles,
-            metadata: $metadata,
-        );
-
-        $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
-        $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
-        $this->syncDraftState($plannedPr, $blockedBy);
-        return true;
     }
 
     /**
      * @param array<string, mixed> $latestRelease
      * @param list<int> $blockedBy
      */
-    private function createPullRequestForLatest(array $latestRelease, string $scope, array $blockedBy, string $defaultBranch): void
+    private function createPullRequestForLatest(array $latestRelease, string $scope, array $blockedBy, string $defaultBranch, string $baseRevision): void
     {
         $existingPullRequest = $this->findOpenPullRequestForTarget((string) $latestRelease['version']);
 
@@ -258,58 +295,67 @@ final class FrameworkSyncer
 
         $branch = $this->newBranchName((string) $latestRelease['version']);
         $baseFramework = $this->framework;
-        $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $latestRelease);
-        $this->framework = FrameworkConfig::load($this->repoRoot);
-        $changed = $this->gitRunner->commitAndPush(
-            $branch,
-            sprintf('Update wp-core-base from %s to %s', $baseFramework->version, (string) $latestRelease['version']),
-            $result['changed_paths']
-        );
+        $branchGuard = $this->beginBranchRollbackGuard($branch);
 
-        if (! $changed) {
-            fwrite(STDOUT, sprintf(
-                "Skipping framework PR creation because updating wp-core-base to %s produced no file changes.\n",
-                $latestRelease['version']
-            ));
-            return;
+        try {
+            $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $latestRelease);
+            $this->framework = FrameworkConfig::load($this->repoRoot);
+            $changed = $this->gitRunner->commitAndPush(
+                $branch,
+                sprintf('Update wp-core-base from %s to %s', $baseFramework->version, (string) $latestRelease['version']),
+                $result['changed_paths']
+            );
+
+            if (! $changed) {
+                fwrite(STDOUT, sprintf(
+                    "Skipping framework PR creation because updating wp-core-base to %s produced no file changes.\n",
+                    $latestRelease['version']
+                ));
+                $branchGuard->complete();
+                return;
+            }
+
+            $labels = $this->deriveFrameworkLabels($scope, $blockedBy);
+            $metadata = [
+                'component_key' => self::COMPONENT_KEY,
+                'slug' => 'wp-core-base',
+                'branch' => $branch,
+                'base_branch' => $defaultBranch,
+                'base_revision' => $baseRevision,
+                'base_version' => $baseFramework->version,
+                'target_version' => (string) $latestRelease['version'],
+                'scope' => $scope,
+                'release_at' => (string) $latestRelease['release_at'],
+                'release_url' => (string) $latestRelease['release_url'],
+                'base_wordpress_core' => $baseFramework->baseline['wordpress_core'],
+                'target_wordpress_core' => $this->framework->baseline['wordpress_core'],
+                'blocked_by' => $blockedBy,
+                'skipped_managed_files' => $result['skipped_files'],
+                'updated_at' => gmdate(DATE_ATOM),
+            ];
+
+            $title = $this->titleForPullRequest($baseFramework->version, (string) $latestRelease['version']);
+            $body = $this->prBodyRenderer->renderFrameworkUpdate(
+                currentVersion: $baseFramework->version,
+                targetVersion: (string) $latestRelease['version'],
+                releaseScope: $scope,
+                releaseAt: (string) $latestRelease['release_at'],
+                labels: $labels,
+                sourceRepository: $this->framework->repository,
+                releaseUrl: (string) $latestRelease['release_url'],
+                currentBaseline: $baseFramework->baseline['wordpress_core'],
+                targetBaseline: $this->framework->baseline['wordpress_core'],
+                notesSections: (array) $latestRelease['notes_sections'],
+                skippedManagedFiles: $result['skipped_files'],
+                metadata: $metadata,
+            );
+
+            $pullRequest = $this->gitHubClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
+            $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
+            $branchGuard->complete();
+        } catch (\Throwable $throwable) {
+            $branchGuard->rollback($throwable);
         }
-
-        $labels = $this->deriveFrameworkLabels($scope, $blockedBy);
-        $metadata = [
-            'component_key' => self::COMPONENT_KEY,
-            'slug' => 'wp-core-base',
-            'branch' => $branch,
-            'base_branch' => $defaultBranch,
-            'base_version' => $baseFramework->version,
-            'target_version' => (string) $latestRelease['version'],
-            'scope' => $scope,
-            'release_at' => (string) $latestRelease['release_at'],
-            'release_url' => (string) $latestRelease['release_url'],
-            'base_wordpress_core' => $baseFramework->baseline['wordpress_core'],
-            'target_wordpress_core' => $this->framework->baseline['wordpress_core'],
-            'blocked_by' => $blockedBy,
-            'skipped_managed_files' => $result['skipped_files'],
-            'updated_at' => gmdate(DATE_ATOM),
-        ];
-
-        $title = $this->titleForPullRequest($baseFramework->version, (string) $latestRelease['version']);
-        $body = $this->prBodyRenderer->renderFrameworkUpdate(
-            currentVersion: $baseFramework->version,
-            targetVersion: (string) $latestRelease['version'],
-            releaseScope: $scope,
-            releaseAt: (string) $latestRelease['release_at'],
-            labels: $labels,
-            sourceRepository: $this->framework->repository,
-            releaseUrl: (string) $latestRelease['release_url'],
-            currentBaseline: $baseFramework->baseline['wordpress_core'],
-            targetBaseline: $this->framework->baseline['wordpress_core'],
-            notesSections: (array) $latestRelease['notes_sections'],
-            skippedManagedFiles: $result['skipped_files'],
-            metadata: $metadata,
-        );
-
-        $pullRequest = $this->gitHubClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
-        $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
     }
 
     private function pullRequestAlreadySatisfied(string $baseVersion, string $targetVersion): bool
@@ -327,14 +373,13 @@ final class FrameworkSyncer
         $tempDir = sys_get_temp_dir() . '/wp-core-base-framework-' . bin2hex(random_bytes(6));
         $archivePath = $tempDir . '/framework.zip';
         $extractPath = $tempDir . '/extract';
-        $resultPath = $tempDir . '/result.json';
 
         if (! mkdir($extractPath, 0775, true) && ! is_dir($extractPath)) {
             throw new RuntimeException(sprintf('Failed to create temp directory: %s', $extractPath));
         }
 
         try {
-            $this->frameworkReleaseClient->downloadReleaseAsset($this->framework, $releaseData['release'], $archivePath);
+            $this->frameworkReleaseClient->downloadVerifiedReleaseAsset($this->framework, $releaseData['release'], $archivePath);
             $zip = new ZipArchive();
 
             if ($zip->open($archivePath) !== true) {
@@ -345,50 +390,14 @@ final class FrameworkSyncer
             $zip->close();
 
             $payloadRoot = $this->resolveExtractedPayloadRoot($extractPath);
-            $bootstrapCli = $payloadRoot . '/tools/wporg-updater/bin/wporg-updater.php';
-
-            if (! is_file($bootstrapCli)) {
-                throw new RuntimeException(sprintf('Extracted framework release is missing the updater CLI: %s', $bootstrapCli));
-            }
-
-            $command = sprintf(
-                'php %s framework-apply --repo-root=%s --payload-root=%s --distribution-path=%s --result-path=%s',
-                escapeshellarg($bootstrapCli),
-                escapeshellarg($this->repoRoot),
-                escapeshellarg($payloadRoot),
-                escapeshellarg($this->framework->distributionPath()),
-                escapeshellarg($resultPath),
+            $installerResult = (new FrameworkInstaller($this->repoRoot, $this->runtimeInspector))->apply(
+                $payloadRoot,
+                $this->framework->distributionPath()
             );
 
-            $descriptorSpec = [
-                1 => ['pipe', 'w'],
-                2 => ['pipe', 'w'],
-            ];
-            $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $this->repoRoot);
-
-            if (! is_resource($process)) {
-                throw new RuntimeException('Failed to start framework bootstrap installer.');
-            }
-
-            $stdout = stream_get_contents($pipes[1]);
-            $stderr = stream_get_contents($pipes[2]);
-            fclose($pipes[1]);
-            fclose($pipes[2]);
-            $status = proc_close($process);
-
-            if ($status !== 0) {
-                throw new RuntimeException(sprintf("Framework bootstrap installer failed.\n%s\n%s", trim((string) $stdout), trim((string) $stderr)));
-            }
-
-            $result = json_decode((string) file_get_contents($resultPath), true);
-
-            if (! is_array($result)) {
-                throw new RuntimeException('Framework bootstrap installer did not write a valid result payload.');
-            }
-
             return [
-                'changed_paths' => array_values(array_map('strval', (array) ($result['changed_paths'] ?? []))),
-                'skipped_files' => array_values(array_map('strval', (array) ($result['skipped_files'] ?? []))),
+                'changed_paths' => array_values(array_map('strval', (array) ($installerResult['changed_paths'] ?? []))),
+                'skipped_files' => array_values(array_map('strval', (array) ($installerResult['skipped_files'] ?? []))),
             ];
         } finally {
             $this->runtimeInspector->clearPath($tempDir);
@@ -427,7 +436,7 @@ final class FrameworkSyncer
         }
 
         try {
-            $this->frameworkReleaseClient->downloadReleaseAsset($this->framework, $releaseData['release'], $archivePath);
+            $this->frameworkReleaseClient->downloadVerifiedReleaseAsset($this->framework, $releaseData['release'], $archivePath);
             $zip = new ZipArchive();
 
             if ($zip->open($archivePath) !== true) {
@@ -495,7 +504,7 @@ final class FrameworkSyncer
         foreach ($pullRequests as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
-            if ($metadata === null || ($metadata['component_key'] ?? null) !== self::COMPONENT_KEY) {
+            if ($metadata === null || ($metadata['component_key'] ?? null) !== self::COMPONENT_KEY || ! $this->isManagedRepositoryPullRequest($pullRequest)) {
                 continue;
             }
 
@@ -511,31 +520,7 @@ final class FrameworkSyncer
      */
     private function partitionPullRequestsByTargetVersion(array $plannedPrs): array
     {
-        usort(
-            $plannedPrs,
-            static fn (array $left, array $right): int => ((int) $left['number'] <=> (int) $right['number'])
-        );
-
-        $canonicalByTarget = [];
-        $duplicates = [];
-
-        foreach ($plannedPrs as $plannedPr) {
-            $targetVersion = (string) ($plannedPr['planned_target_version'] ?? '');
-
-            if ($targetVersion === '') {
-                $duplicates[] = $plannedPr;
-                continue;
-            }
-
-            if (! isset($canonicalByTarget[$targetVersion])) {
-                $canonicalByTarget[$targetVersion] = $plannedPr;
-                continue;
-            }
-
-            $duplicates[] = $plannedPr;
-        }
-
-        return [array_values($canonicalByTarget), $duplicates];
+        return ManagedPullRequestCanonicalizer::partitionByTargetVersion($plannedPrs);
     }
 
     private function titleForPullRequest(string $baseVersion, string $targetVersion): string
@@ -560,15 +545,20 @@ final class FrameworkSyncer
      */
     private function findOpenPullRequestForTarget(string $targetVersion): ?array
     {
+        $matching = [];
+
         foreach ($this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests()) as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
             if (($metadata['target_version'] ?? null) === $targetVersion) {
-                return $pullRequest;
+                $pullRequest['metadata'] = $metadata;
+                $pullRequest['planned_target_version'] = (string) ($metadata['target_version'] ?? '');
+                $pullRequest['planned_release_at'] = (string) ($metadata['release_at'] ?? '');
+                $matching[] = $pullRequest;
             }
         }
 
-        return null;
+        return ManagedPullRequestCanonicalizer::selectCanonical($matching);
     }
 
     /**
@@ -613,8 +603,9 @@ final class FrameworkSyncer
             try {
                 $pullRequest = $this->gitHubClient->getPullRequest($pullRequestNumber);
                 $mergedAt = $pullRequest['merged_at'] ?? null;
+                $state = (string) ($pullRequest['state'] ?? '');
 
-                if (! is_string($mergedAt) || $mergedAt === '') {
+                if ($state === 'open' && (! is_string($mergedAt) || $mergedAt === '')) {
                     $unresolved[] = $pullRequestNumber;
                 }
             } catch (\Throwable) {
@@ -639,5 +630,68 @@ final class FrameworkSyncer
         }
 
         fwrite(STDOUT, "Framework is already up to date.\n");
+    }
+
+    private function beginBranchRollbackGuard(string $branch): BranchRollbackGuard
+    {
+        $guard = new BranchRollbackGuard($this->repoRoot, $this->gitRunner);
+        $guard->begin();
+        $guard->trackBranch($branch);
+        return $guard;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function branchRefreshRequired(array $metadata, string $baseRevision): bool
+    {
+        if ($baseRevision === '') {
+            return false;
+        }
+
+        $recordedBaseRevision = $metadata['base_revision'] ?? null;
+
+        return ! is_string($recordedBaseRevision)
+            || $recordedBaseRevision === ''
+            || ! hash_equals($recordedBaseRevision, $baseRevision);
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function assertRefreshableAutomationPullRequest(array $pullRequest, string $branch, string $defaultBranch): void
+    {
+        $baseRef = (string) ($pullRequest['base']['ref'] ?? '');
+
+        if ($branch === $defaultBranch || ($baseRef !== '' && $branch === $baseRef)) {
+            throw new RuntimeException(sprintf(
+                'Framework automation PR #%d resolved to protected branch %s and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0),
+                $branch
+            ));
+        }
+
+        if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
+            throw new RuntimeException(sprintf(
+                'Framework automation PR #%d does not use a same-repository automation branch and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0)
+            ));
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function isManagedRepositoryPullRequest(array $pullRequest): bool
+    {
+        $head = is_array($pullRequest['head'] ?? null) ? $pullRequest['head'] : [];
+        $base = is_array($pullRequest['base'] ?? null) ? $pullRequest['base'] : [];
+        $headRef = (string) ($head['ref'] ?? '');
+        $headRepo = is_array($head['repo'] ?? null) ? $head['repo'] : [];
+        $baseRepo = is_array($base['repo'] ?? null) ? $base['repo'] : [];
+        $headFullName = strtolower((string) ($headRepo['full_name'] ?? ''));
+        $baseFullName = strtolower((string) ($baseRepo['full_name'] ?? ''));
+
+        return $headRef !== '' && $headFullName !== '' && $headFullName === $baseFullName;
     }
 }

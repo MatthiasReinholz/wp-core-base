@@ -44,6 +44,7 @@ final class PrBodyRenderer
         ));
         $automationNote = match ($metadata['source'] ?? '') {
             'github-release' => 'This PR is managed by the GitHub release updater automation.',
+            'premium' => 'This PR is managed by the premium provider updater automation.',
             default => 'This PR is managed by the WordPress.org updater automation.',
         };
 
