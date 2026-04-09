@@ -61,10 +61,12 @@ api_request() {
 }
 
 url_scheme() {
+  # shellcheck disable=SC2016
   php -r '$scheme = parse_url($argv[1], PHP_URL_SCHEME); echo is_string($scheme) ? $scheme : "";' "$1"
 }
 
 url_host() {
+  # shellcheck disable=SC2016
   php -r '$host = parse_url($argv[1], PHP_URL_HOST); echo is_string($host) ? $host : "";' "$1"
 }
 
