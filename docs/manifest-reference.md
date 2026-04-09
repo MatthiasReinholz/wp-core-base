@@ -280,6 +280,55 @@ Then choose either:
 
 `source_config.min_release_age_hours` overrides the repo-level cooldown for that one dependency.
 
+Agent-safe rule:
+
+- inspect the real upstream release assets before setting `github_release_asset_pattern` or `checksum_asset_pattern`
+- use `checksum-sidecar-required` only when the checksum file exists and binds the digest to the ZIP filename
+- do not invent glob patterns from the tag name alone
+
+Concrete hardened example:
+
+```php
+'security' => [
+    'managed_release_min_age_hours' => 24,
+    'github_release_verification' => 'checksum-sidecar-optional',
+],
+'dependencies' => [
+    [
+        'name' => 'Example Plugin',
+        'slug' => 'example-plugin',
+        'kind' => 'plugin',
+        'management' => 'managed',
+        'source' => 'github-release',
+        'path' => 'cms/plugins/example-plugin',
+        'main_file' => 'example-plugin.php',
+        'version' => '1.2.3',
+        'checksum' => 'sha256:...',
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => [
+            'github_repository' => 'owner/example-plugin',
+            'github_release_asset_pattern' => 'example-plugin-*.zip',
+            'github_token_env' => null,
+            'min_release_age_hours' => 48,
+            'verification_mode' => 'checksum-sidecar-required',
+            'checksum_asset_pattern' => 'example-plugin-*.zip.sha256',
+            'credential_key' => null,
+            'provider' => null,
+            'provider_product_id' => null,
+        ],
+        'policy' => [
+            'class' => 'managed-private',
+            'allow_runtime_paths' => [],
+            'strip_paths' => [],
+            'strip_files' => [],
+            'sanitize_paths' => [],
+            'sanitize_files' => [],
+        ],
+    ],
+],
+```
+
 ## Premium Managed Dependencies
 
 Premium managed plugin sources use one fixed env-var or GitHub secret contract:

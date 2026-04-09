@@ -712,6 +712,15 @@ $assert(preg_match('/^\d+\.\d+\.\d+$/', $currentFrameworkVersion) === 1, 'Expect
 $assert($frameworkConfig->distributionPath() === '.', 'Expected upstream framework metadata to point at the repository root.');
 $assert($frameworkConfig->checksumSignatureAssetName() === 'wp-core-base-vendor-snapshot.zip.sha256.sig', 'Expected framework metadata to derive the checksum-signature asset name.');
 $assert(str_ends_with(ReleaseSignatureKeyStore::defaultPublicKeyPath($frameworkConfig), 'tools/wporg-updater/keys/framework-release-public.pem'), 'Expected the default release public key path to resolve inside the framework distribution.');
+$agentsDoc = (string) file_get_contents($repoRoot . '/AGENTS.md');
+$assert($agentsDoc !== '', 'Expected upstream AGENTS.md to exist.');
+$assert(str_contains($agentsDoc, 'source_config.checksum_asset_pattern'), 'Expected AGENTS.md to document checksum sidecar settings for GitHub release dependencies.');
+$assert(str_contains($agentsDoc, 'Do not invent checksum asset patterns'), 'Expected AGENTS.md to warn agents against guessing checksum asset patterns.');
+$managingDependenciesDoc = (string) file_get_contents($repoRoot . '/docs/managing-dependencies.md');
+$assert(str_contains($managingDependenciesDoc, 'Agent-ready GitHub release hardening workflow'), 'Expected managing-dependencies.md to include an explicit agent workflow for GitHub release hardening.');
+$assert(str_contains($managingDependenciesDoc, "verification_mode' => 'checksum-sidecar-required'"), 'Expected managing-dependencies.md to show the exact hardened manifest shape for GitHub release verification.');
+$downstreamUsageDoc = (string) file_get_contents($repoRoot . '/docs/downstream-usage.md');
+$assert(str_contains($downstreamUsageDoc, 'download-time trust controls'), 'Expected downstream-usage.md to explain GitHub release trust controls.');
 $releaseNotesMarkdown = (string) file_get_contents($repoRoot . '/docs/releases/' . $currentFrameworkVersion . '.md');
 $assert($releaseNotesMarkdown !== '', 'Expected framework release notes to exist.');
 $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) === [], 'Expected framework release notes to include all required sections.');
@@ -1539,6 +1548,9 @@ $assert(str_contains($scaffoldedUsage, 'vendor/wp-core-base/bin/wp-core-base add
 $assert(str_contains($scaffoldedUsage, '.wp-core-base/manifest.php'), 'Expected scaffolded usage guide to explain the manifest source of truth.');
 $assert(str_contains($scaffoldedAgents, '.wp-core-base/USAGE.md'), 'Expected scaffolded downstream AGENTS.md to point agents at the local usage guide first.');
 $assert(str_contains($scaffoldedAgents, 'Do not start by hand-editing `.wp-core-base/manifest.php`'), 'Expected scaffolded downstream AGENTS.md to steer agents toward the CLI-first workflow.');
+$assert(str_contains($scaffoldedAgents, 'GitHub Release Trust Checks'), 'Expected scaffolded downstream AGENTS.md to include GitHub release trust-check guidance.');
+$assert(str_contains($scaffoldedAgents, 'source_config.checksum_asset_pattern'), 'Expected scaffolded downstream AGENTS.md to tell agents where checksum sidecar patterns belong.');
+$assert(str_contains($scaffoldedAgents, 'Do not guess checksum patterns from tag names alone.'), 'Expected scaffolded downstream AGENTS.md to warn agents against guessing checksum patterns.');
 $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
 $assert(str_contains($scaffoldedWorkflow, 'WPORG_REPO_ROOT: ${{ github.workspace }}'), 'Expected scaffolded workflow to set WPORG_REPO_ROOT so sync runs against the downstream repo.');
 $assert(! str_contains($scaffoldedWorkflow, 'pull_request_target:'), 'Expected scaffolded updates workflow to keep scheduled/manual execution separate from PR reconciliation.');

@@ -93,6 +93,24 @@ GitHub support is release-backed. The repository must publish stable GitHub Rele
 
 For private GitHub dependencies, the manifest should point to an environment variable through `source_config.github_token_env`.
 
+GitHub release-backed dependencies may also opt into two download-time trust controls:
+
+- release cooldowns through `security.managed_release_min_age_hours` or `source_config.min_release_age_hours`
+- checksum-sidecar verification through `security.github_release_verification`, `source_config.verification_mode`, and `source_config.checksum_asset_pattern`
+
+Use those only after checking the real upstream release assets. The framework binds the checksum sidecar to the ZIP filename, so the checksum file must contain a line for the exact asset being downloaded.
+
+For AI coding agents working in a downstream repo, the safe sequence is:
+
+1. inspect the GitHub Release assets
+2. confirm the ZIP asset glob
+3. confirm the checksum sidecar asset glob
+4. update the manifest
+5. run `doctor --repo-root=.`
+6. run `sync`
+
+If upstream does not publish a checksum sidecar, keep verification optional or disabled for that dependency.
+
 Premium workflow sources use one fixed env var or GitHub secret:
 
 - `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
