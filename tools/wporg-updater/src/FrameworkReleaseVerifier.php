@@ -219,6 +219,7 @@ final class FrameworkReleaseVerifier
                 $payloadRoot,
                 'vendor/wp-core-base'
             );
+            $this->initializeVerificationGitWorktree($downstreamRoot);
             $this->assertInstalledArtifactOperable($downstreamRoot);
         } finally {
             $runtimeInspector->clearPath($tempRoot);
@@ -268,6 +269,40 @@ final class FrameworkReleaseVerifier
                 $command,
                 $output
             ));
+        }
+
+        return (string) $stdout;
+    }
+
+    private function initializeVerificationGitWorktree(string $downstreamRoot): void
+    {
+        $this->runProcess($downstreamRoot, 'git init -q');
+    }
+
+    private function runProcess(string $workingDirectory, string $command): string
+    {
+        $descriptorSpec = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
+
+        if (! is_resource($process)) {
+            throw new RuntimeException(sprintf('Failed to start release verification command: %s', $command));
+        }
+
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        $status = proc_close($process);
+        $output = trim((string) $stdout . "\n" . (string) $stderr);
+
+        if ($status !== 0) {
+            throw new RuntimeException(sprintf("Command failed during release verification: %s\n%s", $command, $output));
         }
 
         return (string) $stdout;
