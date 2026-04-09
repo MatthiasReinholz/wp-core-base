@@ -225,6 +225,8 @@ Use `runtime.strip_paths` and `runtime.strip_files` for global strip-on-stage ru
 
 Use `dependencies[].policy.strip_paths` and `dependencies[].policy.strip_files` for local dependency-specific strip rules.
 
+Dependency-level `policy.strip_paths` entries are relative to that dependency's root path, not the repository root. For a dependency at `cms/plugins/project-plugin`, a policy entry of `build` means `cms/plugins/project-plugin/build`.
+
 Strip-on-stage is supported for `local` entries. Use it when local source trees are intentionally richer than the final runtime payload.
 
 ## Managed Sanitation
@@ -233,11 +235,15 @@ Use `runtime.managed_sanitize_paths` and `runtime.managed_sanitize_files` for gl
 
 Use `dependencies[].policy.sanitize_paths` and `dependencies[].policy.sanitize_files` for managed dependency-specific sanitation rules.
 
+Dependency-level `policy.sanitize_paths` entries are relative to that dependency's root path, not the repository root. Wildcards such as `**/docs` are evaluated inside the dependency tree.
+
 Managed sanitation applies during `sync` before the dependency is validated, copied into the repo, and checksummed. The manifest checksum for a managed dependency is therefore the checksum of the sanitized runtime tree, not the raw upstream archive.
 
 `sanitize_paths` entries may use a `**/name` form to remove matching nested subtrees anywhere inside the managed dependency root.
 
 Ideal packaging is still preferred: managed artifacts should already be runtime-ready. Sanitation exists to normalize common WordPress ecosystem extras such as `README*`, build metadata, or test directories when they appear in otherwise valid release archives.
+
+`dependencies[].policy.allow_runtime_paths` is also dependency-root-relative. Use it only for narrowly-scoped child paths that should bypass runtime-hygiene checks inside that one dependency. Do not use broad root-like values that suppress most hygiene enforcement.
 
 ## Managed Versus Local
 

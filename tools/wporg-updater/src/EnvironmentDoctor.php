@@ -10,14 +10,20 @@ final class EnvironmentDoctor
 {
     private int $errors = 0;
     private int $warnings = 0;
+    /** @var list<array{level:string,message:string}> */
+    private array $messages = [];
 
     public function __construct(
         private readonly string $repoRoot,
+        private readonly bool $emitOutput = true,
     ) {
     }
 
     public function run(bool $requireGitHub = false): int
     {
+        $this->errors = 0;
+        $this->warnings = 0;
+        $this->messages = [];
         $this->printHeading('wp-core-base doctor');
 
         $this->okIf(is_dir($this->repoRoot), sprintf('Repository root exists: %s', $this->repoRoot), 'Repository root does not exist.');
@@ -75,6 +81,19 @@ final class EnvironmentDoctor
         $this->printSummary();
 
         return $this->errors === 0 ? 0 : 1;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function report(): array
+    {
+        return [
+            'status' => $this->errors === 0 ? 'success' : 'failure',
+            'error_count' => $this->errors,
+            'warning_count' => $this->warnings,
+            'messages' => $this->messages,
+        ];
     }
 
     private function inspectConfiguredStructure(Config $config): void
@@ -746,14 +765,6 @@ final class EnvironmentDoctor
         )));
 
         foreach ((array) $config->runtime['allow_runtime_paths'] as $allowPath) {
-            if (! $this->pathStartsWith((string) $allowPath, $config->paths['content_root'])) {
-                $this->warn(sprintf(
-                    'runtime.allow_runtime_paths entry %s lives outside paths.content_root. Treat it as legacy compatibility and move it under the content root when possible.',
-                    (string) $allowPath
-                ));
-                continue;
-            }
-
             if (in_array((string) $allowPath, $broadPaths, true)) {
                 $this->warn(sprintf(
                     'runtime.allow_runtime_paths entry %s broadly suppresses undeclared-path detection. Prefer declaring specific child paths instead.',
@@ -1003,11 +1014,19 @@ final class EnvironmentDoctor
 
     private function printHeading(string $heading): void
     {
+        if (! $this->emitOutput) {
+            return;
+        }
+
         fwrite(STDOUT, $heading . "\n\n");
     }
 
     private function printSummary(): void
     {
+        if (! $this->emitOutput) {
+            return;
+        }
+
         fwrite(STDOUT, "\n");
 
         if ($this->errors === 0) {
@@ -1020,23 +1039,47 @@ final class EnvironmentDoctor
 
     private function ok(string $message): void
     {
+        $this->messages[] = ['level' => 'ok', 'message' => $message];
+
+        if (! $this->emitOutput) {
+            return;
+        }
+
         fwrite(STDOUT, "[ok] " . $message . "\n");
     }
 
     private function warn(string $message): void
     {
         $this->warnings++;
+        $this->messages[] = ['level' => 'warn', 'message' => $message];
+
+        if (! $this->emitOutput) {
+            return;
+        }
+
         fwrite(STDOUT, "[warn] " . $message . "\n");
     }
 
     private function error(string $message): void
     {
         $this->errors++;
+        $this->messages[] = ['level' => 'error', 'message' => $message];
+
+        if (! $this->emitOutput) {
+            return;
+        }
+
         fwrite(STDOUT, "[error] " . $message . "\n");
     }
 
     private function note(string $message): void
     {
+        $this->messages[] = ['level' => 'note', 'message' => $message];
+
+        if (! $this->emitOutput) {
+            return;
+        }
+
         fwrite(STDOUT, "[note] " . $message . "\n");
     }
 

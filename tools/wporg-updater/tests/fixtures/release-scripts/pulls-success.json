@@ -1,0 +1,14 @@
+[
+  {
+    "number": 42,
+    "merged_at": "2026-04-09T10:00:00Z",
+    "base": {
+      "ref": "main"
+    },
+    "head": {
+      "ref": "release/v1.3.2",
+      "sha": "release-head-sha"
+    },
+    "merge_commit_sha": "merge-commit-sha"
+  }
+]

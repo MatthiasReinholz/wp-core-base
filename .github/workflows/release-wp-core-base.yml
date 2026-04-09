@@ -55,56 +55,25 @@ jobs:
           COMMIT_SHA="$(git rev-parse HEAD)"
           bash scripts/ci/check_framework_release_pr.sh "${GITHUB_REPOSITORY}" "${{ steps.version.outputs.value }}" "$COMMIT_SHA"
 
-      - name: Validate release metadata
-        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.version.outputs.value }}
-
-      - name: Check whether GitHub Release already exists
-        id: existing_release
+      - name: Verify merged release PR passed CI
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
         run: |
-          set -euo pipefail
-          release_url="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${{ steps.version.outputs.value }}"
-          status="$(
-            curl -sS \
-              -o /tmp/wp-core-base-existing-release.json \
-              -w "%{http_code}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "${release_url}"
-          )"
+          COMMIT_SHA="$(git rev-parse HEAD)"
+          bash scripts/ci/check_framework_release_ci.sh "${GITHUB_REPOSITORY}" "${{ steps.version.outputs.value }}" "$COMMIT_SHA"
 
-          case "${status}" in
-            200)
-              echo "exists=true" >> "$GITHUB_OUTPUT"
-              ;;
-            404)
-              echo "exists=false" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              cat /tmp/wp-core-base-existing-release.json >&2
-              echo "Failed to check whether release ${GITHUB_REPOSITORY}@${{ steps.version.outputs.value }} already exists." >&2
-              exit 1
-              ;;
-          esac
+      - name: Validate release metadata
+        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.version.outputs.value }}
 
       - name: Build vendored framework snapshot
-        if: steps.existing_release.outputs.exists != 'true'
         run: |
-          mkdir -p dist/wp-core-base
-          rsync -a --delete \
-            --exclude '.git/' \
-            --exclude '.wp-core-base/build/' \
-            --exclude 'dist/' \
-            ./ dist/wp-core-base/
-          cd dist
-          zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
-          sha256sum wp-core-base-vendor-snapshot.zip > wp-core-base-vendor-snapshot.zip.sha256
+          php tools/wporg-updater/bin/wporg-updater.php build-release-artifact \
+            --repo-root=. \
+            --output=dist/wp-core-base-vendor-snapshot.zip \
+            --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256
 
       - name: Sign release checksum sidecar
-        if: steps.existing_release.outputs.exists != 'true'
         env:
           WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM: ${{ secrets.WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM }}
           WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE: ${{ secrets.WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE }}
@@ -117,7 +86,6 @@ jobs:
             --passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE
 
       - name: Verify release artifact
-        if: steps.existing_release.outputs.exists != 'true'
         run: |
           php tools/wporg-updater/bin/wporg-updater.php release-verify \
             --repo-root=. \
@@ -126,10 +94,24 @@ jobs:
             --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256 \
             --signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig
 
+      - name: Assess published release asset state
+        id: release_state
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          bash scripts/ci/check_framework_release_assets.sh \
+            "${GITHUB_REPOSITORY}" \
+            "${{ steps.version.outputs.value }}" \
+            dist/wp-core-base-vendor-snapshot.zip \
+            dist/wp-core-base-vendor-snapshot.zip.sha256 \
+            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
+
       - name: Create GitHub release
-        if: steps.existing_release.outputs.exists != 'true'
+        if: steps.release_state.outputs.publish_required == 'true'
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
         with:
+          overwrite_files: true
           tag_name: ${{ steps.version.outputs.value }}
           title: wp-core-base ${{ steps.version.outputs.value }}
           body_path: docs/releases/${{ steps.version.outputs.plain }}.md
@@ -138,6 +120,20 @@ jobs:
             dist/wp-core-base-vendor-snapshot.zip.sha256
             dist/wp-core-base-vendor-snapshot.zip.sha256.sig
 
-      - name: Report existing release
-        if: steps.existing_release.outputs.exists == 'true'
-        run: echo "GitHub Release ${{ steps.version.outputs.value }} already exists; nothing to publish."
+      - name: Verify published release assets are current
+        if: steps.release_state.outputs.publish_required == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          bash scripts/ci/check_framework_release_assets.sh \
+            --require-current \
+            "${GITHUB_REPOSITORY}" \
+            "${{ steps.version.outputs.value }}" \
+            dist/wp-core-base-vendor-snapshot.zip \
+            dist/wp-core-base-vendor-snapshot.zip.sha256 \
+            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
+
+      - name: Report existing verified release
+        if: steps.release_state.outputs.publish_required != 'true'
+        run: echo "GitHub Release ${{ steps.version.outputs.value }} already contains the current verified assets; nothing to publish."

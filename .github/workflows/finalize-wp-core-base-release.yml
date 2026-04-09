@@ -51,17 +51,20 @@ jobs:
       - name: Validate release metadata
         run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.release.outputs.version }}
 
+      - name: Verify merged release PR passed CI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          COMMIT_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+          bash scripts/ci/check_framework_release_ci.sh "${GITHUB_REPOSITORY}" "${{ steps.release.outputs.version }}" "$COMMIT_SHA"
+
       - name: Build vendored framework snapshot
         run: |
-          mkdir -p dist/wp-core-base
-          rsync -a --delete \
-            --exclude '.git/' \
-            --exclude '.wp-core-base/build/' \
-            --exclude 'dist/' \
-            ./ dist/wp-core-base/
-          cd dist
-          zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
-          sha256sum wp-core-base-vendor-snapshot.zip > wp-core-base-vendor-snapshot.zip.sha256
+          php tools/wporg-updater/bin/wporg-updater.php build-release-artifact \
+            --repo-root=. \
+            --output=dist/wp-core-base-vendor-snapshot.zip \
+            --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256
 
       - name: Sign release checksum sidecar
         env:
@@ -108,6 +111,7 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
         with:
+          overwrite_files: true
           tag_name: ${{ steps.release.outputs.version }}
           title: wp-core-base ${{ steps.release.outputs.version }}
           body_path: docs/releases/${{ steps.release.outputs.plain }}.md
@@ -116,10 +120,49 @@ jobs:
             dist/wp-core-base-vendor-snapshot.zip.sha256
             dist/wp-core-base-vendor-snapshot.zip.sha256.sig
 
-      - name: Roll back tag on release publish failure
-        if: ${{ failure() && steps.create_release.outcome == 'failure' }}
+      - name: Verify published release assets are current
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          bash scripts/ci/check_framework_release_assets.sh \
+            --require-current \
+            "${GITHUB_REPOSITORY}" \
+            "${{ steps.release.outputs.version }}" \
+            dist/wp-core-base-vendor-snapshot.zip \
+            dist/wp-core-base-vendor-snapshot.zip.sha256 \
+            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
+
+      - name: Roll back tag and release on publish failure
+        if: ${{ failure() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
+          release_lookup_status="$(
+            curl -sS \
+              -o /tmp/wp-core-base-release-rollback.json \
+              -w "%{http_code}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}"
+          )"
+
+          if [ "${release_lookup_status}" = '200' ]; then
+            release_id="$(jq -r '.id' /tmp/wp-core-base-release-rollback.json)"
+
+            if [ -n "${release_id}" ] && [ "${release_id}" != 'null' ]; then
+              curl -fsSL \
+                -X DELETE \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}" >/dev/null
+            fi
+          fi
+
           git tag -d "$VERSION" || true
           git push --delete origin "$VERSION" || true

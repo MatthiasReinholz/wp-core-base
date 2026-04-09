@@ -22,6 +22,20 @@ final class FrameworkReleaseVerifier
         ?string $publicKeyPath = null,
     ): string
     {
+        return $this->verifyDetailed($expectedTag, $artifactPath, $checksumPath, $signaturePath, $publicKeyPath)['release_tag'];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function verifyDetailed(
+        ?string $expectedTag = null,
+        ?string $artifactPath = null,
+        ?string $checksumPath = null,
+        ?string $signaturePath = null,
+        ?string $publicKeyPath = null,
+    ): array
+    {
         $framework = FrameworkConfig::load($this->repoRoot);
         $releaseVersion = $framework->normalizedVersion();
         $releaseTag = 'v' . $releaseVersion;
@@ -63,32 +77,48 @@ final class FrameworkReleaseVerifier
             ));
         }
 
+        $contractReport = (new FrameworkPublicContractVerifier($this->repoRoot))->verify($framework, $releaseNotes);
+
         if (trim($framework->repository) === '') {
             throw new RuntimeException('Framework metadata must declare repository.');
         }
 
+        $artifactVerified = false;
+
         if ($artifactPath !== null || $checksumPath !== null || $signaturePath !== null || $publicKeyPath !== null) {
             if (! is_string($artifactPath) || trim($artifactPath) === '' || ! is_string($checksumPath) || trim($checksumPath) === '') {
-                throw new RuntimeException('Artifact verification requires both --artifact and --checksum-file.');
+                throw new RuntimeException('Artifact verification requires --artifact, --checksum-file, and --signature-file.');
+            }
+
+            if (! is_string($signaturePath) || trim($signaturePath) === '') {
+                throw new RuntimeException('Artifact verification requires --signature-file so unsigned checksum sidecars are never trusted.');
             }
 
             $this->verifyArtifact(
                 $framework,
                 $artifactPath,
                 $checksumPath,
-                is_string($signaturePath) && trim($signaturePath) !== '' ? $signaturePath : null,
+                $signaturePath,
                 is_string($publicKeyPath) && trim($publicKeyPath) !== '' ? $publicKeyPath : null
             );
+            $artifactVerified = true;
         }
 
-        return $releaseTag;
+        return [
+            'status' => 'success',
+            'release_tag' => $releaseTag,
+            'framework_version' => $releaseVersion,
+            'release_notes_path' => $releaseNotesPath,
+            'artifact_verified' => $artifactVerified,
+            'baseline' => $contractReport['baseline'],
+        ];
     }
 
     private function verifyArtifact(
         FrameworkConfig $framework,
         string $artifactPath,
         string $checksumPath,
-        ?string $signaturePath,
+        string $signaturePath,
         ?string $publicKeyPath,
     ): void
     {
@@ -100,13 +130,15 @@ final class FrameworkReleaseVerifier
             throw new RuntimeException(sprintf('Release checksum file not found: %s', $checksumPath));
         }
 
-        if ($signaturePath !== null) {
-            FrameworkReleaseSignature::verifyChecksumFile(
-                $checksumPath,
-                $signaturePath,
-                $publicKeyPath ?? ReleaseSignatureKeyStore::defaultPublicKeyPath($framework)
-            );
+        if (! is_file($signaturePath)) {
+            throw new RuntimeException(sprintf('Release signature file not found: %s', $signaturePath));
         }
+
+        FrameworkReleaseSignature::verifyChecksumFile(
+            $checksumPath,
+            $signaturePath,
+            $publicKeyPath ?? ReleaseSignatureKeyStore::defaultPublicKeyPath($framework)
+        );
 
         $checksumContents = file_get_contents($checksumPath);
 
@@ -161,6 +193,15 @@ final class FrameworkReleaseVerifier
                     $framework->assetName(),
                     $payloadFramework->assetName()
                 ));
+            }
+
+            foreach (FrameworkReleaseArtifactBuilder::excludedPaths() as $excludedPath) {
+                if (file_exists($payloadRoot . '/' . $excludedPath) || is_link($payloadRoot . '/' . $excludedPath)) {
+                    throw new RuntimeException(sprintf(
+                        'Release artifact unexpectedly included excluded path: %s',
+                        $excludedPath
+                    ));
+                }
             }
 
             if (! mkdir($downstreamRoot, 0775, true) && ! is_dir($downstreamRoot)) {

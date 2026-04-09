@@ -100,6 +100,10 @@ final class RuntimeInspector
                 continue;
             }
 
+            if ($entry['is_symlink']) {
+                throw new RuntimeException(sprintf('Symlink detected in checksum tree: %s', $entry['relative_path']));
+            }
+
             $contents = file_get_contents($entry['absolute_path']);
 
             if (! is_string($contents)) {

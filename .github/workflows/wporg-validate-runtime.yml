@@ -2,6 +2,9 @@ name: wp-core-base CI
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -10,6 +13,12 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php-version:
+          - '8.1'
+          - '8.3'
+          - '8.4'
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -17,7 +26,7 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
         with:
-          php-version: '8.3'
+          php-version: ${{ matrix.php-version }}
           coverage: none
 
       - name: Run doctor
@@ -38,17 +47,47 @@ jobs:
       - name: Stage runtime payload
         run: php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: phpstan
+
+      - name: Install actionlint
+        run: |
+          curl -fsSL -o /tmp/actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Run actionlint
+        run: /tmp/actionlint -color
+
+      - name: Run shellcheck
+        run: shellcheck scripts/ci/*.sh
+
+      - name: Test release CI helper scripts
+        run: bash scripts/ci/test_release_scripts.sh
+
+      - name: Run PHPStan
+        run: phpstan analyse --configuration=phpstan.neon.dist --no-progress
+
       - name: Build release verification fixture
         run: |
-          mkdir -p dist/wp-core-base
-          rsync -a --delete \
-            --exclude '.git/' \
-            --exclude '.wp-core-base/build/' \
-            --exclude 'dist/' \
-            ./ dist/wp-core-base/
-          cd dist
-          zip -qr wp-core-base-vendor-snapshot.zip wp-core-base
-          sha256sum wp-core-base-vendor-snapshot.zip > wp-core-base-vendor-snapshot.zip.sha256
+          php tools/wporg-updater/bin/wporg-updater.php build-release-artifact \
+            --repo-root=. \
+            --output=dist/wp-core-base-vendor-snapshot.zip \
+            --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256
 
       - name: Sign release verification fixture
         run: |
