@@ -28,6 +28,26 @@ For routine plugin, theme, MU plugin, runtime-file, or runtime-directory changes
 
 Do not start by hand-editing `.wp-core-base/manifest.php` unless the change is unusual or clearly advanced.
 
+## GitHub Release Trust Checks
+
+If a task involves a managed `github-release` dependency and you want stronger download-time trust checks:
+
+1. inspect the real upstream GitHub Release assets first
+2. confirm the ZIP asset name or stable glob
+3. confirm whether a matching checksum sidecar asset exists
+4. only then edit `.wp-core-base/manifest.php` to set:
+   - `source_config.github_release_asset_pattern`
+   - `source_config.checksum_asset_pattern`
+   - `source_config.verification_mode`
+   - optionally `source_config.min_release_age_hours`
+5. if several GitHub release dependencies should share the same default posture, prefer repo-level:
+   - `security.github_release_verification`
+   - `security.managed_release_min_age_hours`
+6. run `__WPORG_PHP_PATH__ doctor --repo-root=.`
+7. run `__WPORG_PHP_PATH__ sync`
+
+Use `checksum-sidecar-required` only when the checksum asset really exists and binds the digest to the ZIP filename. Do not guess checksum patterns from tag names alone.
+
 ## Premium Plugin Workflow
 
 No premium vendor is built into `wp-core-base`.

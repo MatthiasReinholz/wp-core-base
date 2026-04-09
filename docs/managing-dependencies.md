@@ -106,6 +106,42 @@ Recommended hardened setup:
 
 That makes `sync` verify the downloaded archive before extraction. If you prefer a repo-wide default, set `security.github_release_verification` and `security.managed_release_min_age_hours` in the manifest instead.
 
+### Agent-ready GitHub release hardening workflow
+
+If an AI coding agent is upgrading a downstream repo to use GitHub release trust checks, it should follow this order exactly:
+
+1. inspect the real upstream GitHub Release assets
+2. confirm the ZIP asset name or stable glob
+3. confirm whether a matching checksum sidecar asset exists
+4. add the dependency normally if it does not exist yet
+5. edit `.wp-core-base/manifest.php` only after the asset names are confirmed
+6. set:
+   - `source_config.github_release_asset_pattern`
+   - `source_config.checksum_asset_pattern`
+   - `source_config.verification_mode`
+   - optionally `source_config.min_release_age_hours`
+7. run `doctor --repo-root=.`
+8. run `sync`
+9. only keep `checksum-sidecar-required` if the upstream checksum file really binds the digest to the ZIP filename
+
+Recommended per-dependency manifest shape:
+
+```php
+'source_config' => [
+    'github_repository' => 'owner/example-plugin',
+    'github_release_asset_pattern' => 'example-plugin-*.zip',
+    'github_token_env' => null,
+    'min_release_age_hours' => 24,
+    'verification_mode' => 'checksum-sidecar-required',
+    'checksum_asset_pattern' => 'example-plugin-*.zip.sha256',
+    'credential_key' => null,
+    'provider' => null,
+    'provider_product_id' => null,
+],
+```
+
+If the checksum sidecar does not exist upstream, do not guess. Leave verification at `none` or a repo-level optional mode instead.
+
 ## Add A Premium Plugin
 
 Premium workflow updates use a downstream-registered provider adapter.
