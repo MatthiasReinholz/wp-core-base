@@ -11,6 +11,10 @@ env:
 permissions:
   contents: write
 
+concurrency:
+  group: wp-core-base-release-${{ github.event.pull_request.head.ref }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Publish merged wp-core-base release

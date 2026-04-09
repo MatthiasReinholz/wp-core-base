@@ -15,6 +15,10 @@ permissions:
   contents: write
   pull-requests: read
 
+concurrency:
+  group: wp-core-base-release-release/${{ inputs.version }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Release wp-core-base
