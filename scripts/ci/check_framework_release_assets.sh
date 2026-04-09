@@ -60,13 +60,87 @@ api_request() {
     "$1"
 }
 
+url_scheme() {
+  php -r '$scheme = parse_url($argv[1], PHP_URL_SCHEME); echo is_string($scheme) ? $scheme : "";' "$1"
+}
+
+url_host() {
+  php -r '$host = parse_url($argv[1], PHP_URL_HOST); echo is_string($host) ? $host : "";' "$1"
+}
+
+allowed_asset_redirect_host() {
+  case "$1" in
+    api.github.com|uploads.github.com|github.com|objects.githubusercontent.com|objects-origin.githubusercontent.com|release-assets.githubusercontent.com|github-releases.githubusercontent.com)
+      return 0
+      ;;
+    *.githubusercontent.com)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+assert_allowed_asset_redirect_url() {
+  local redirect_url="$1"
+  local redirect_scheme
+  local redirect_host
+
+  redirect_scheme="$(url_scheme "$redirect_url")"
+  redirect_host="$(url_host "$redirect_url")"
+
+  if [ "$redirect_scheme" != 'https' ]; then
+    echo "Release asset redirect must use https: ${redirect_url}" >&2
+    exit 1
+  fi
+
+  if [ -z "$redirect_host" ] || ! allowed_asset_redirect_host "$redirect_host"; then
+    echo "Release asset redirect host is not allowlisted: ${redirect_url}" >&2
+    exit 1
+  fi
+}
+
 download_asset() {
-  curl -fsSL \
-    -H "Accept: application/octet-stream" \
-    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$1" \
-    -o "$2"
+  local asset_api_url="$1"
+  local destination="$2"
+  local probe_output
+  local status_code
+  local redirect_url
+
+  probe_output="$(
+    curl -sS \
+      -o "$destination" \
+      -w "%{http_code}\n%{redirect_url}" \
+      -H "Accept: application/octet-stream" \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$asset_api_url"
+  )"
+
+  status_code="$(printf '%s' "$probe_output" | sed -n '1p')"
+  redirect_url="$(printf '%s' "$probe_output" | sed -n '2p')"
+
+  case "$status_code" in
+    200)
+      return
+      ;;
+    302|303|307|308)
+      rm -f "$destination"
+
+      if [ -z "$redirect_url" ]; then
+        echo "Release asset download redirect did not provide a destination URL: ${asset_api_url}" >&2
+        exit 1
+      fi
+
+      assert_allowed_asset_redirect_url "$redirect_url"
+      curl --proto '=https' -fsSL "$redirect_url" -o "$destination"
+      return
+      ;;
+  esac
+
+  rm -f "$destination"
+  echo "Failed to download release asset via ${asset_api_url} (status ${status_code})." >&2
+  exit 1
 }
 
 mark_state() {
