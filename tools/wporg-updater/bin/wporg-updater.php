@@ -440,7 +440,9 @@ try {
     if ($mode === 'refresh-admin-governance') {
         $mutationLock->synchronized(
             $repoRoot,
-            static fn (): null => ($adminGovernanceExporter->refresh($config) ?: null),
+            static function () use ($adminGovernanceExporter, $config): void {
+                $adminGovernanceExporter->refresh($config);
+            },
             'refresh-admin-governance'
         );
         fwrite(STDOUT, "Refreshed admin governance runtime data\n");
@@ -455,7 +457,9 @@ try {
     if ($mode === 'format-manifest') {
         $mutationLock->synchronized(
             $repoRoot,
-            static fn (): null => ((new ManifestWriter())->write($config) ?: null),
+            static function () use ($config): void {
+                (new ManifestWriter())->write($config);
+            },
             'format-manifest'
         );
         fwrite(STDOUT, sprintf("Formatted manifest: %s\n", $config->manifestPath));
