@@ -94,6 +94,8 @@ Revocation procedure:
 2. Re-sign current release checksums with a trusted key.
 3. Publish a security advisory noting the revoked key identifier(s) and replacement key identifier.
 
+Future design work for explicit expiry metadata and committed revocation-list policy is documented in `docs/security-key-lifecycle-rfc.md`.
+
 ## Secret Handling
 
 Secrets belong in environment variables, not in the manifest.

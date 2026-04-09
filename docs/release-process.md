@@ -93,6 +93,31 @@ The publish workflows require these GitHub Actions secrets:
 
 Downstream `framework-sync` now verifies the detached signature before trusting the checksum sidecar. A checksum file from the release origin is no longer sufficient by itself.
 
+### Signing Key Rotation Runbook
+
+Use this procedure when rotating framework release signing keys:
+
+1. Generate the new keypair outside the repository and keep the private key in your secret manager.
+2. Commit only the new public key as `tools/wporg-updater/keys/framework-release-public-<yyyymm>.pem`.
+3. Configure release workflows to sign with the new private key secret.
+4. Run `release-verify` against a signed artifact and confirm verification succeeds with the new key.
+5. Keep the prior public key committed during the overlap window so existing release lines remain verifiable.
+6. After the overlap window ends, update `tools/wporg-updater/keys/framework-release-public.pem` to the active key and remove fully retired rotated public keys.
+
+Key selection order during verification:
+
+- `--public-key` CLI override (if passed)
+- `tools/wporg-updater/keys/framework-release-public.pem`
+- `tools/wporg-updater/keys/framework-release-public-*.pem`
+- absolute paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated)
+
+Emergency rotation (suspected compromise):
+
+1. Remove compromised public keys from committed key paths and any `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` values.
+2. Rotate signing secrets to a known-good private key.
+3. Re-sign and republish affected checksum signatures.
+4. Publish a security advisory with revoked key ID(s), replacement key ID, and affected version range.
+
 ## Branch Protection Expectations
 
 The default branch should require:
