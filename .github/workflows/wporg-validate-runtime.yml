@@ -2,6 +2,9 @@ name: wp-core-base CI
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -62,8 +65,19 @@ jobs:
           curl -fsSL -o /tmp/actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz
           tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
 
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
       - name: Run actionlint
         run: /tmp/actionlint -color
+
+      - name: Run shellcheck
+        run: shellcheck scripts/ci/*.sh
+
+      - name: Test release CI helper scripts
+        run: bash scripts/ci/test_release_scripts.sh
 
       - name: Run PHPStan
         run: phpstan analyse --configuration=phpstan.neon.dist --no-progress

@@ -835,6 +835,7 @@ $assert(str_contains($upstreamUpdatesWorkflow, $setupPhpActionSha), 'Expected up
 $assert(! str_contains($upstreamUpdatesWorkflow, 'pull_request_target:'), 'Expected upstream updates workflow to keep scheduled/manual execution separate from PR reconciliation.');
 $assert(str_contains($upstreamReconcileWorkflow, $checkoutActionSha), 'Expected upstream reconciliation workflow to pin actions/checkout by full commit SHA.');
 $assert(str_contains($upstreamReconcileWorkflow, $setupPhpActionSha), 'Expected upstream reconciliation workflow to pin setup-php by full commit SHA.');
+$assert(str_contains($upstreamValidateWorkflow, "push:\n    branches:\n      - main"), 'Expected upstream CI workflow to validate the exact merged release commit on pushes to main.');
 $assert(str_contains($upstreamReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected upstream reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
 $assert(str_contains($upstreamReconcileWorkflow, "automation:framework-update"), 'Expected upstream reconciliation workflow to limit closed-PR reconciliation to framework automation PRs.');
 $assert(str_contains($upstreamFinalizeWorkflow, 'wp-core-base-vendor-snapshot.zip.sha256'), 'Expected finalize release workflow to publish a SHA-256 checksum asset.');
@@ -858,6 +859,8 @@ $assert(str_contains($upstreamValidateWorkflow, '--checksum-file=dist/wp-core-ba
 $assert(str_contains($upstreamValidateWorkflow, '--signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected CI release verification to validate the detached checksum signature.');
 $assert(str_contains($upstreamValidateWorkflow, 'phpstan analyse --configuration=phpstan.neon.dist'), 'Expected CI to run PHPStan as a framework integrity check.');
 $assert(str_contains($upstreamValidateWorkflow, '/tmp/actionlint -color'), 'Expected CI to lint GitHub workflows with actionlint.');
+$assert(str_contains($upstreamValidateWorkflow, 'shellcheck scripts/ci/*.sh'), 'Expected CI to lint critical release scripts with shellcheck.');
+$assert(str_contains($upstreamValidateWorkflow, 'bash scripts/ci/test_release_scripts.sh'), 'Expected CI to execute fixture-driven release helper script tests.');
 $assert(str_contains($upstreamValidateWorkflow, 'verify_downstream_fixture.php --profile=${{ matrix.profile }}'), 'Expected CI to exercise both downstream fixture profiles.');
 
 $signatureFixtureRoot = sys_get_temp_dir() . '/wporg-release-signature-' . bin2hex(random_bytes(4));

@@ -130,13 +130,11 @@ final class Updater
         $activePlannedPrs = [];
 
         foreach ($plannedPrs as $plannedPr) {
-            $blockedBy = array_values(array_unique(array_merge(
-                $this->unresolvedBlockedBy((array) (($plannedPr['metadata']['blocked_by'] ?? []))),
-                array_values(array_map(
-                    static fn (array $previous): int => (int) $previous['number'],
-                    $activePlannedPrs
-                ))
-            )));
+            $blockedBy = ManagedPullRequestQueue::blockedByForPlannedPullRequest(
+                $this->gitHubClient,
+                (array) (($plannedPr['metadata']['blocked_by'] ?? [])),
+                $activePlannedPrs
+            );
 
             if ($this->refreshPullRequest(
                 dependency: $dependency,
@@ -337,7 +335,7 @@ final class Updater
 
             $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
             $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
-            $this->syncDraftState($plannedPr, $blockedBy);
+            ManagedPullRequestQueue::syncDraftState($this->gitHubClient, $plannedPr, $blockedBy);
 
             if ($branchGuard !== null) {
                 $branchGuard->complete();
@@ -1285,58 +1283,4 @@ final class Updater
         return array_values(array_merge($topicsWithDates, $topicsWithoutDates));
     }
 
-    /**
-     * @param array<string, mixed> $pullRequest
-     * @param list<int> $blockedBy
-     */
-    private function syncDraftState(array $pullRequest, array $blockedBy): void
-    {
-        $nodeId = (string) ($pullRequest['node_id'] ?? '');
-
-        if ($nodeId === '') {
-            return;
-        }
-
-        $isDraft = (bool) ($pullRequest['draft'] ?? false);
-
-        if ($blockedBy !== [] && ! $isDraft) {
-            $this->gitHubClient->convertToDraft($nodeId);
-            return;
-        }
-
-        if ($blockedBy === [] && $isDraft) {
-            $this->gitHubClient->markReadyForReview($nodeId);
-        }
-    }
-
-    /**
-     * @param list<mixed> $blockedBy
-     * @return list<int>
-     */
-    private function unresolvedBlockedBy(array $blockedBy): array
-    {
-        $unresolved = [];
-
-        foreach ($blockedBy as $number) {
-            if (! is_int($number) && ! ctype_digit((string) $number)) {
-                continue;
-            }
-
-            $pullRequestNumber = (int) $number;
-
-            try {
-                $pullRequest = $this->gitHubClient->getPullRequest($pullRequestNumber);
-                $mergedAt = $pullRequest['merged_at'] ?? null;
-                $state = (string) ($pullRequest['state'] ?? '');
-
-                if ($state === 'open' && (! is_string($mergedAt) || $mergedAt === '')) {
-                    $unresolved[] = $pullRequestNumber;
-                }
-            } catch (\Throwable) {
-                $unresolved[] = $pullRequestNumber;
-            }
-        }
-
-        return array_values(array_unique($unresolved));
-    }
 }

@@ -68,7 +68,7 @@ php scripts/ci/verify_downstream_fixture.php --profile=content-only
 The release flow is intentionally staged:
 
 - `prepare-wp-core-base-release` derives the version bump, refreshes an existing release branch when appropriate, updates `.wp-core-base/framework.php`, scaffolds `docs/releases/<version>.md` when needed, and opens `release/vX.Y.Z`
-- `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, verifies that the merged release PR already passed `wp-core-base CI`, creates the annotated tag from the merge commit, builds the vendorable snapshot through `build-release-artifact`, and publishes `wp-core-base-vendor-snapshot.zip` plus its SHA-256 checksum file
+- `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, verifies that the exact merged commit already passed `wp-core-base CI` on `main`, creates the annotated tag from the merge commit, builds the vendorable snapshot through `build-release-artifact`, and publishes `wp-core-base-vendor-snapshot.zip` plus its SHA-256 checksum file
 - `finalize-wp-core-base-release` also signs the checksum sidecar and publishes the detached signature `wp-core-base-vendor-snapshot.zip.sha256.sig`
 - both publish workflows verify that the GitHub Release assets match the freshly built local snapshot after publication
 - `release-wp-core-base` is the manual recovery workflow for publishing a GitHub Release from an already existing tag after a failed finalize run, including checksum-sidecar signing and asset freshness checks against the current tag build
@@ -103,4 +103,4 @@ The default branch should require:
 - passing release metadata verification
 
 Release publishing should happen only from the default branch state that already passed those checks.
-The publish workflows enforce that requirement directly by checking the release PR CI run instead of assuming branch protection was configured correctly.
+The publish workflows enforce that requirement directly by checking the successful `wp-core-base CI` push run for the exact merged release commit instead of assuming branch protection was configured correctly.

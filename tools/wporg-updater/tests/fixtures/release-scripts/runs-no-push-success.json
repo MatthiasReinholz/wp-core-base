@@ -1,0 +1,18 @@
+{
+  "workflow_runs": [
+    {
+      "head_sha": "merge-commit-sha",
+      "head_branch": "main",
+      "event": "push",
+      "status": "completed",
+      "conclusion": "failure"
+    },
+    {
+      "head_sha": "merge-commit-sha",
+      "head_branch": "release/v1.3.2",
+      "event": "pull_request",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ]
+}

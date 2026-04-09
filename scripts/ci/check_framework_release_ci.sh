@@ -54,21 +54,19 @@ if [ -z "$release_pr_json" ]; then
 fi
 
 pr_number="$(printf '%s' "$release_pr_json" | jq -r '.number')"
-head_sha="$(printf '%s' "$release_pr_json" | jq -r '.head.sha')"
-head_ref="$(printf '%s' "$release_pr_json" | jq -r '.head.ref')"
 
 runs_json="$(
-  github_api_get "${API_ROOT}/repos/${REPOSITORY}/actions/workflows/${WORKFLOW_FILE}/runs?head_sha=${head_sha}&per_page=100"
+  github_api_get "${API_ROOT}/repos/${REPOSITORY}/actions/workflows/${WORKFLOW_FILE}/runs?head_sha=${COMMIT_SHA}&per_page=100"
 )"
 
 successful_run_count="$(
-  printf '%s' "$runs_json" | jq --arg head_sha "$head_sha" --arg head_ref "$head_ref" '
+  printf '%s' "$runs_json" | jq --arg commit_sha "$COMMIT_SHA" '
     [
       .workflow_runs[]?
       | select(
-          .head_sha == $head_sha and
-          .head_branch == $head_ref and
-          (.event == "pull_request" or .event == "pull_request_target") and
+          .head_sha == $commit_sha and
+          .head_branch == "main" and
+          .event == "push" and
           .status == "completed" and
           .conclusion == "success"
         )
@@ -78,10 +76,10 @@ successful_run_count="$(
 
 if [ "$successful_run_count" -lt 1 ]; then
   run_summary="$(
-    printf '%s' "$runs_json" | jq -r --arg head_sha "$head_sha" --arg head_ref "$head_ref" '
+    printf '%s' "$runs_json" | jq -r --arg commit_sha "$COMMIT_SHA" '
       [
         .workflow_runs[]?
-        | select(.head_sha == $head_sha and .head_branch == $head_ref)
+        | select(.head_sha == $commit_sha)
         | "\(.event):\(.status):\(.conclusion // "null")"
       ] | unique | join(", ")
     '
@@ -91,8 +89,8 @@ if [ "$successful_run_count" -lt 1 ]; then
     run_summary="no matching workflow runs found"
   fi
 
-  echo "Release PR #${pr_number} for ${VERSION} has no successful ${WORKFLOW_FILE} run on head commit ${head_sha}. Found: ${run_summary}." >&2
+  echo "Release PR #${pr_number} for ${VERSION} has no successful ${WORKFLOW_FILE} push run on merged commit ${COMMIT_SHA}. Found: ${run_summary}." >&2
   exit 1
 fi
 
-echo "Verified merged release PR #${pr_number} for ${VERSION} and successful ${WORKFLOW_FILE} run on ${head_sha}."
+echo "Verified merged release PR #${pr_number} for ${VERSION} and successful ${WORKFLOW_FILE} push run on merged commit ${COMMIT_SHA}."

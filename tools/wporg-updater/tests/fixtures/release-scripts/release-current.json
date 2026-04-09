@@ -1,0 +1,16 @@
+{
+  "assets": [
+    {
+      "name": "wp-core-base-vendor-snapshot.zip",
+      "url": "https://api.github.com/assets/artifact"
+    },
+    {
+      "name": "wp-core-base-vendor-snapshot.zip.sha256",
+      "url": "https://api.github.com/assets/checksum"
+    },
+    {
+      "name": "wp-core-base-vendor-snapshot.zip.sha256.sig",
+      "url": "https://api.github.com/assets/signature"
+    }
+  ]
+}
