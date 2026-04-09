@@ -34,6 +34,8 @@ set -euo pipefail
 output=""
 write_format=""
 url=""
+redirect_url=""
+auth_header_present="false"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -45,7 +47,16 @@ while [ "$#" -gt 0 ]; do
       write_format="$2"
       shift 2
       ;;
-    -H|-X)
+    -H)
+      if [ "$2" = "Authorization: Bearer ${GITHUB_TOKEN:-}" ]; then
+        auth_header_present="true"
+      fi
+      shift 2
+      ;;
+    -X)
+      shift 2
+      ;;
+    --proto)
       shift 2
       ;;
     -fsSL|-sS|-f|-s|-S|-L)
@@ -91,12 +102,45 @@ case "$url" in
     body_file="${FAKE_RELEASE_FIXTURE:-}"
     ;;
   https://api.github.com/assets/artifact)
-    body_file="${FAKE_REMOTE_ARTIFACT_FILE:?}"
+    if [ -n "${FAKE_REDIRECT_ARTIFACT_URL:-}" ]; then
+      status="302"
+      redirect_url="${FAKE_REDIRECT_ARTIFACT_URL}"
+    else
+      body_file="${FAKE_REMOTE_ARTIFACT_FILE:?}"
+    fi
     ;;
   https://api.github.com/assets/checksum)
-    body_file="${FAKE_REMOTE_CHECKSUM_FILE:?}"
+    if [ -n "${FAKE_REDIRECT_CHECKSUM_URL:-}" ]; then
+      status="302"
+      redirect_url="${FAKE_REDIRECT_CHECKSUM_URL}"
+    else
+      body_file="${FAKE_REMOTE_CHECKSUM_FILE:?}"
+    fi
     ;;
   https://api.github.com/assets/signature)
+    if [ -n "${FAKE_REDIRECT_SIGNATURE_URL:-}" ]; then
+      status="302"
+      redirect_url="${FAKE_REDIRECT_SIGNATURE_URL}"
+    else
+      body_file="${FAKE_REMOTE_SIGNATURE_FILE:?}"
+    fi
+    ;;
+  https://objects.githubusercontent.com/artifact)
+    body_file="${FAKE_REMOTE_ARTIFACT_FILE:?}"
+    ;;
+  https://objects.githubusercontent.com/checksum)
+    body_file="${FAKE_REMOTE_CHECKSUM_FILE:?}"
+    ;;
+  https://objects.githubusercontent.com/signature)
+    body_file="${FAKE_REMOTE_SIGNATURE_FILE:?}"
+    ;;
+  https://evil.example.invalid/artifact)
+    body_file="${FAKE_REMOTE_ARTIFACT_FILE:?}"
+    ;;
+  https://evil.example.invalid/checksum)
+    body_file="${FAKE_REMOTE_CHECKSUM_FILE:?}"
+    ;;
+  https://evil.example.invalid/signature)
     body_file="${FAKE_REMOTE_SIGNATURE_FILE:?}"
     ;;
   *)
@@ -104,6 +148,15 @@ case "$url" in
     exit 1
     ;;
 esac
+
+if [ "${FAKE_FAIL_ON_REDIRECT_AUTH:-0}" = "1" ] && [ "$auth_header_present" = "true" ]; then
+  case "$url" in
+    https://objects.githubusercontent.com/*|https://evil.example.invalid/*)
+      echo "Authorization header must not be forwarded to redirected asset host: ${url}" >&2
+      exit 1
+      ;;
+  esac
+fi
 
 if [ -n "${output}" ]; then
   if [ -n "${body_file}" ]; then
@@ -118,7 +171,9 @@ else
 fi
 
 if [ -n "${write_format}" ]; then
-  printf '%s' "${status}"
+  rendered="${write_format//\%\{http_code\}/${status}}"
+  rendered="${rendered//\%\{redirect_url\}/${redirect_url}}"
+  printf '%b' "${rendered}"
 fi
 EOF
 
@@ -140,6 +195,10 @@ export FAKE_PULLS_FIXTURE="${FIXTURE_ROOT}/pulls-success.json"
 export FAKE_RELEASE_FIXTURE="${FIXTURE_ROOT}/release-current.json"
 export FAKE_REMOTE_CHECKSUM_FILE="${REMOTE_DIR}/checksum-current"
 export FAKE_REMOTE_SIGNATURE_FILE="${REMOTE_DIR}/signature-current"
+unset FAKE_REDIRECT_ARTIFACT_URL
+unset FAKE_REDIRECT_CHECKSUM_URL
+unset FAKE_REDIRECT_SIGNATURE_URL
+unset FAKE_FAIL_ON_REDIRECT_AUTH
 
 CI_SUCCESS_OUTPUT="${TMP_DIR}/ci-success.out"
 unset FAKE_RUNS_FIXTURE_SEQUENCE
@@ -180,8 +239,43 @@ assert_contains "${ASSET_CURRENT_OUTPUT}" "already contains the current verified
 assert_contains "${ASSET_CURRENT_GITHUB_OUTPUT}" "publish_required=false"
 assert_contains "${ASSET_CURRENT_GITHUB_OUTPUT}" "reason=current"
 
+ASSET_REDIRECT_OUTPUT="${TMP_DIR}/assets-redirect.out"
+ASSET_REDIRECT_GITHUB_OUTPUT="${TMP_DIR}/assets-redirect.github-output"
+export FAKE_REDIRECT_ARTIFACT_URL="https://objects.githubusercontent.com/artifact"
+export FAKE_REDIRECT_CHECKSUM_URL="https://objects.githubusercontent.com/checksum"
+export FAKE_REDIRECT_SIGNATURE_URL="https://objects.githubusercontent.com/signature"
+export FAKE_FAIL_ON_REDIRECT_AUTH="1"
+GITHUB_OUTPUT="${ASSET_REDIRECT_GITHUB_OUTPUT}" \
+  bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    example/repo \
+    v1.3.2 \
+    "${ARTIFACT_PATH}" \
+    "${CHECKSUM_PATH}" \
+    "${SIGNATURE_PATH}" > "${ASSET_REDIRECT_OUTPUT}"
+assert_contains "${ASSET_REDIRECT_OUTPUT}" "already contains the current verified release assets"
+assert_contains "${ASSET_REDIRECT_GITHUB_OUTPUT}" "publish_required=false"
+
+ASSET_BAD_REDIRECT_OUTPUT="${TMP_DIR}/assets-bad-redirect.out"
+export FAKE_REDIRECT_ARTIFACT_URL="https://evil.example.invalid/artifact"
+export FAKE_REDIRECT_CHECKSUM_URL="https://evil.example.invalid/checksum"
+export FAKE_REDIRECT_SIGNATURE_URL="https://evil.example.invalid/signature"
+if GITHUB_OUTPUT="${TMP_DIR}/assets-bad-redirect.github-output" \
+  bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    example/repo \
+    v1.3.2 \
+    "${ARTIFACT_PATH}" \
+    "${CHECKSUM_PATH}" \
+    "${SIGNATURE_PATH}" > "${ASSET_BAD_REDIRECT_OUTPUT}" 2>&1; then
+  echo "Expected release asset helper to reject non-allowlisted redirect hosts." >&2
+  exit 1
+fi
+assert_contains "${ASSET_BAD_REDIRECT_OUTPUT}" "Release asset redirect host is not allowlisted"
+
 ASSET_STALE_OUTPUT="${TMP_DIR}/assets-stale.out"
 ASSET_STALE_GITHUB_OUTPUT="${TMP_DIR}/assets-stale.github-output"
+unset FAKE_REDIRECT_ARTIFACT_URL
+unset FAKE_REDIRECT_CHECKSUM_URL
+unset FAKE_REDIRECT_SIGNATURE_URL
 export FAKE_REMOTE_ARTIFACT_FILE="${REMOTE_DIR}/artifact-stale"
 GITHUB_OUTPUT="${ASSET_STALE_GITHUB_OUTPUT}" \
   bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \

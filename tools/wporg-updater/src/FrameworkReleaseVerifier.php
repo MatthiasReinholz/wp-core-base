@@ -219,8 +219,111 @@ final class FrameworkReleaseVerifier
                 $payloadRoot,
                 'vendor/wp-core-base'
             );
+            $this->initializeVerificationGitWorktree($downstreamRoot);
+            $this->assertInstalledArtifactOperable($downstreamRoot);
         } finally {
             $runtimeInspector->clearPath($tempRoot);
+        }
+    }
+
+    private function assertInstalledArtifactOperable(string $downstreamRoot): void
+    {
+        $doctorOutput = $this->runVendoredCommand(
+            $downstreamRoot,
+            'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --json'
+        );
+        $this->assertSuccessfulJsonResult($doctorOutput, 'doctor');
+
+        $stageRuntimeOutput = $this->runVendoredCommand(
+            $downstreamRoot,
+            'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/release-verify-runtime --json'
+        );
+        $this->assertSuccessfulJsonResult($stageRuntimeOutput, 'stage-runtime');
+    }
+
+    private function runVendoredCommand(string $workingDirectory, string $command): string
+    {
+        $descriptorSpec = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
+
+        if (! is_resource($process)) {
+            throw new RuntimeException(sprintf('Failed to start vendored release verification command: %s', $command));
+        }
+
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        $status = proc_close($process);
+        $output = trim((string) $stdout . "\n" . (string) $stderr);
+
+        if ($status !== 0) {
+            throw new RuntimeException(sprintf(
+                "Installed release artifact command failed: %s\n%s",
+                $command,
+                $output
+            ));
+        }
+
+        return (string) $stdout;
+    }
+
+    private function initializeVerificationGitWorktree(string $downstreamRoot): void
+    {
+        $this->runProcess($downstreamRoot, 'git init -q');
+    }
+
+    private function runProcess(string $workingDirectory, string $command): string
+    {
+        $descriptorSpec = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
+
+        if (! is_resource($process)) {
+            throw new RuntimeException(sprintf('Failed to start release verification command: %s', $command));
+        }
+
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+
+        $status = proc_close($process);
+        $output = trim((string) $stdout . "\n" . (string) $stderr);
+
+        if ($status !== 0) {
+            throw new RuntimeException(sprintf("Command failed during release verification: %s\n%s", $command, $output));
+        }
+
+        return (string) $stdout;
+    }
+
+    private function assertSuccessfulJsonResult(string $output, string $commandName): void
+    {
+        $decoded = json_decode($output, true);
+
+        if (! is_array($decoded)) {
+            throw new RuntimeException(sprintf(
+                'Installed release artifact %s command did not return valid JSON output.',
+                $commandName
+            ));
+        }
+
+        if (($decoded['status'] ?? null) !== 'success') {
+            throw new RuntimeException(sprintf(
+                'Installed release artifact %s command reported failure.',
+                $commandName
+            ));
         }
     }
 
