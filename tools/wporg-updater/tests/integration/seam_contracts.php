@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 use WpOrgPluginUpdater\AdminGovernanceExporter;
 use WpOrgPluginUpdater\Config;
+use WpOrgPluginUpdater\ConfigNormalizer;
 use WpOrgPluginUpdater\ConfigMutationStateManager;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\FrameworkRuntimeFiles;
 use WpOrgPluginUpdater\GitHubLabelSynchronizer;
+use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\HttpStatusRuntimeException;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\ManifestWriter;
@@ -262,6 +264,63 @@ function run_seam_contract_tests(callable $assert, string $repoRoot): void
 
     $assert($forbiddenRejected, 'Expected ensureLabels to surface non-404 GitHub API failures instead of masking them as missing labels.');
     $assert(github_label_request_count($requests, 'POST', '/repos/example/repo/labels') === 0, 'Expected ensureLabels to avoid label creation after a non-404 API failure.');
+
+    $httpClient = new HttpClient();
+    $requestBodyLimitRejected = false;
+
+    try {
+        $httpClient->requestWithOptions(
+            'POST',
+            'https://example.com/upload',
+            ['Accept' => 'application/json'],
+            null,
+            str_repeat('a', 16),
+            false,
+            ['max_request_bytes' => 8]
+        );
+    } catch (RuntimeException $exception) {
+        $requestBodyLimitRejected = str_contains($exception->getMessage(), 'request body exceeded the configured byte limit');
+    }
+
+    $assert($requestBodyLimitRejected, 'Expected HttpClient request options to reject oversized outbound request bodies.');
+
+    $jsonDepthRejected = false;
+    $tooDeepPayload = '"leaf"';
+
+    for ($index = 0; $index < 40; $index++) {
+        $tooDeepPayload = '{"n":' . $tooDeepPayload . '}';
+    }
+
+    try {
+        HttpClient::decodeJsonObject($tooDeepPayload, 'Depth test.', 16);
+    } catch (RuntimeException $exception) {
+        $jsonDepthRejected = str_contains($exception->getMessage(), 'Depth test.');
+    }
+
+    $assert($jsonDepthRejected, 'Expected HttpClient JSON decoding helper to fail when JSON nesting exceeds the configured decode depth.');
+
+    $manifestReference = (string) file_get_contents($repoRoot . '/docs/manifest-reference.md');
+
+    foreach (ConfigNormalizer::DEFAULT_FORBIDDEN_PATHS as $pathEntry) {
+        $assert(
+            str_contains($manifestReference, "`{$pathEntry}`"),
+            sprintf('Expected manifest reference defaults section to list forbidden path `%s`.', $pathEntry)
+        );
+    }
+
+    foreach (ConfigNormalizer::DEFAULT_FORBIDDEN_FILES as $filePattern) {
+        $assert(
+            str_contains($manifestReference, "`{$filePattern}`"),
+            sprintf('Expected manifest reference defaults section to list forbidden file pattern `%s`.', $filePattern)
+        );
+    }
+
+    foreach (ConfigNormalizer::DEFAULT_MANAGED_SANITIZE_PATH_SUFFIXES as $sanitizeSuffix) {
+        $assert(
+            str_contains($manifestReference, "`{$sanitizeSuffix}`"),
+            sprintf('Expected manifest reference defaults section to list managed sanitize path suffix `%s`.', $sanitizeSuffix)
+        );
+    }
 }
 
 /**

@@ -10,6 +10,53 @@ final class ConfigNormalizer
 {
     private const RUNTIME_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'];
     private const ALL_KINDS = ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'];
+    public const DEFAULT_FORBIDDEN_PATHS = [
+        '.git',
+        '.github',
+        '.gitlab',
+        '.circleci',
+        '.wordpress-org',
+        'node_modules',
+        'docs',
+        'doc',
+        'tests',
+        'test',
+        '__tests__',
+        'examples',
+        'example',
+        'demo',
+        'screenshots',
+    ];
+    public const DEFAULT_FORBIDDEN_FILES = [
+        'README*',
+        'CHANGELOG*',
+        '.gitignore',
+        '.gitattributes',
+        'phpunit.xml*',
+        'composer.json',
+        'composer.lock',
+        'package.json',
+        'package-lock.json',
+        'pnpm-lock.yaml',
+        'yarn.lock',
+    ];
+    public const DEFAULT_MANAGED_SANITIZE_PATH_SUFFIXES = [
+        '.github',
+        '.gitlab',
+        '.circleci',
+        '.wordpress-org',
+        'node_modules',
+        'docs',
+        'doc',
+        'tests',
+        'test',
+        '__tests__',
+        'examples',
+        'example',
+        'demo',
+        'screenshots',
+    ];
+    public const DEFAULT_MANAGED_SANITIZE_FILES = self::DEFAULT_FORBIDDEN_FILES;
 
     /**
      * @param array<string, mixed> $data
@@ -165,108 +212,42 @@ final class ConfigNormalizer
             'staged_kinds' => self::kindList($value['staged_kinds'] ?? self::RUNTIME_KINDS, 'runtime.staged_kinds'),
             'validated_kinds' => self::kindList($value['validated_kinds'] ?? self::RUNTIME_KINDS, 'runtime.validated_kinds'),
             'forbidden_paths' => self::stringList(
-                $value['forbidden_paths'] ?? [
-                    '.git',
-                    '.github',
-                    '.gitlab',
-                    '.circleci',
-                    '.wordpress-org',
-                    'node_modules',
-                    'docs',
-                    'doc',
-                    'tests',
-                    'test',
-                    '__tests__',
-                    'examples',
-                    'example',
-                    'demo',
-                    'screenshots',
-                ],
+                $value['forbidden_paths'] ?? self::DEFAULT_FORBIDDEN_PATHS,
                 'runtime.forbidden_paths'
             ),
             'forbidden_files' => self::stringList(
-                $value['forbidden_files'] ?? [
-                    'README*',
-                    'CHANGELOG*',
-                    '.gitignore',
-                    '.gitattributes',
-                    'phpunit.xml*',
-                    'composer.json',
-                    'composer.lock',
-                    'package.json',
-                    'package-lock.json',
-                    'pnpm-lock.yaml',
-                    'yarn.lock',
-                ],
+                $value['forbidden_files'] ?? self::DEFAULT_FORBIDDEN_FILES,
                 'runtime.forbidden_files'
             ),
             'allow_runtime_paths' => $allowRuntimePaths,
             'strip_paths' => self::normalizedPathList($value['strip_paths'] ?? [], 'runtime.strip_paths'),
             'strip_files' => self::stringList($value['strip_files'] ?? [], 'runtime.strip_files'),
             'managed_sanitize_paths' => self::normalizedPathList(
-                $value['managed_sanitize_paths'] ?? [
-                    $paths['plugins_root'] . '/.github',
-                    $paths['plugins_root'] . '/.gitlab',
-                    $paths['plugins_root'] . '/.circleci',
-                    $paths['plugins_root'] . '/.wordpress-org',
-                    $paths['plugins_root'] . '/node_modules',
-                    $paths['plugins_root'] . '/docs',
-                    $paths['plugins_root'] . '/doc',
-                    $paths['plugins_root'] . '/tests',
-                    $paths['plugins_root'] . '/test',
-                    $paths['plugins_root'] . '/__tests__',
-                    $paths['plugins_root'] . '/examples',
-                    $paths['plugins_root'] . '/example',
-                    $paths['plugins_root'] . '/demo',
-                    $paths['plugins_root'] . '/screenshots',
-                    $paths['themes_root'] . '/.github',
-                    $paths['themes_root'] . '/.gitlab',
-                    $paths['themes_root'] . '/.circleci',
-                    $paths['themes_root'] . '/.wordpress-org',
-                    $paths['themes_root'] . '/node_modules',
-                    $paths['themes_root'] . '/docs',
-                    $paths['themes_root'] . '/doc',
-                    $paths['themes_root'] . '/tests',
-                    $paths['themes_root'] . '/test',
-                    $paths['themes_root'] . '/__tests__',
-                    $paths['themes_root'] . '/examples',
-                    $paths['themes_root'] . '/example',
-                    $paths['themes_root'] . '/demo',
-                    $paths['themes_root'] . '/screenshots',
-                    $paths['mu_plugins_root'] . '/.github',
-                    $paths['mu_plugins_root'] . '/.gitlab',
-                    $paths['mu_plugins_root'] . '/.circleci',
-                    $paths['mu_plugins_root'] . '/.wordpress-org',
-                    $paths['mu_plugins_root'] . '/node_modules',
-                    $paths['mu_plugins_root'] . '/docs',
-                    $paths['mu_plugins_root'] . '/doc',
-                    $paths['mu_plugins_root'] . '/tests',
-                    $paths['mu_plugins_root'] . '/test',
-                    $paths['mu_plugins_root'] . '/__tests__',
-                    $paths['mu_plugins_root'] . '/examples',
-                    $paths['mu_plugins_root'] . '/example',
-                    $paths['mu_plugins_root'] . '/demo',
-                    $paths['mu_plugins_root'] . '/screenshots',
-                ],
+                $value['managed_sanitize_paths'] ?? self::defaultManagedSanitizePaths($paths),
                 'runtime.managed_sanitize_paths'
             ),
             'managed_sanitize_files' => self::stringList(
-                $value['managed_sanitize_files'] ?? [
-                    'README*',
-                    'CHANGELOG*',
-                    '.gitignore',
-                    '.gitattributes',
-                    'phpunit.xml*',
-                    'composer.json',
-                    'composer.lock',
-                    'package.json',
-                    'package-lock.json',
-                    'pnpm-lock.yaml',
-                    'yarn.lock',
-                ],
+                $value['managed_sanitize_files'] ?? self::DEFAULT_MANAGED_SANITIZE_FILES,
                 'runtime.managed_sanitize_files'
             ),
         ];
+    }
+
+    /**
+     * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @return list<string>
+     */
+    private static function defaultManagedSanitizePaths(array $paths): array
+    {
+        $entries = [];
+
+        foreach ([$paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']] as $root) {
+            foreach (self::DEFAULT_MANAGED_SANITIZE_PATH_SUFFIXES as $suffix) {
+                $entries[] = $root . '/' . $suffix;
+            }
+        }
+
+        return $entries;
     }
 
     /**
