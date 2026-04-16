@@ -24,18 +24,23 @@ The legacy `.github/wporg-updates.php` model is no longer the primary configurat
 
 ## Commands
 
-The CLI supports:
+Most downstream users only need the routine command group.
+
+Routine/downstream commands:
 
 - `doctor`
 - `sync`
 - `stage-runtime`
 - `scaffold-downstream`
 - `framework-sync`
-- `refresh-admin-governance`
-- `release-verify`
-- `suggest-manifest`
-- `format-manifest`
 - `pr-blocker`
+
+Maintainer/workflow commands:
+
+- `refresh-admin-governance` (run after manual manifest edits when you need governance data refreshed without running authoring commands)
+- `suggest-manifest` (run when migrating an existing repository and you want candidate manifest entries from the current runtime tree)
+- `format-manifest` (run after manual manifest edits to enforce deterministic formatting before review/commit)
+- `release-verify` (run in release preparation/finalize workflows to validate release metadata, artifact checksum, and detached signature contract)
 
 ## Sync Behavior
 

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace WpOrgPluginUpdater;
 
+use JsonException;
 use RuntimeException;
 
 final class HttpClient implements ArchiveDownloader
 {
     public const DEFAULT_MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
+    public const DEFAULT_MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 
     private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
     private const REDIRECT_STATUSES = [301, 302, 303, 307, 308];
@@ -83,13 +85,7 @@ final class HttpClient implements ArchiveDownloader
             throw new RuntimeException(sprintf('JSON request failed for %s with status %d.', $url, $response['status']));
         }
 
-        $decoded = json_decode($response['body'], true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException(sprintf('Failed to decode JSON from %s.', $url));
-        }
-
-        return $decoded;
+        return self::decodeJsonObject($response['body'], sprintf('Failed to decode JSON from %s.', $url));
     }
 
     /**
@@ -243,6 +239,14 @@ final class HttpClient implements ArchiveDownloader
             $headerLines[] = 'Content-Type: application/json';
         }
 
+        if ($body !== null) {
+            $maxRequestBytes = isset($options['max_request_bytes']) ? (int) $options['max_request_bytes'] : self::DEFAULT_MAX_REQUEST_BODY_BYTES;
+
+            if ($maxRequestBytes > 0 && strlen($body) > $maxRequestBytes) {
+                throw new RuntimeException(sprintf('HTTP request body exceeded the configured byte limit for %s.', $url));
+            }
+        }
+
         curl_setopt_array($curl, [
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_RETURNTRANSFER => false,
@@ -324,6 +328,24 @@ final class HttpClient implements ArchiveDownloader
             'body' => $responseBody,
             'headers' => $responseHeaders,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>|list<mixed>
+     */
+    public static function decodeJsonObject(string $jsonBody, string $errorPrefix, int $depth = 32): array
+    {
+        try {
+            $decoded = json_decode($jsonBody, true, $depth, JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new RuntimeException($errorPrefix . ' ' . $exception->getMessage(), previous: $exception);
+        }
+
+        if (! is_array($decoded)) {
+            throw new RuntimeException($errorPrefix . ' JSON payload must decode to an object or array.');
+        }
+
+        return $decoded;
     }
 
     /**

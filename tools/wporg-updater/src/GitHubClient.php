@@ -417,20 +417,10 @@ final class GitHubClient implements GitHubAutomationClient
             );
         }
 
-        if (strlen($response['body']) > HttpClient::DEFAULT_MAX_JSON_BODY_BYTES) {
-            throw new RuntimeException(sprintf(
-                'GitHub API %s %s exceeded the maximum JSON response size of %d bytes.',
-                $method,
-                $path,
-                HttpClient::DEFAULT_MAX_JSON_BODY_BYTES
-            ));
-        }
-
-        $decoded = json_decode($response['body'], true);
-
-        if (! is_array($decoded)) {
-            throw new RuntimeException(sprintf('GitHub API %s %s returned invalid JSON.', $method, $path));
-        }
+        $decoded = HttpClient::decodeJsonObject(
+            $response['body'],
+            sprintf('GitHub API %s %s returned invalid JSON.', $method, $path)
+        );
 
         if ($graphql && isset($decoded['errors'])) {
             throw new RuntimeException(sprintf('GitHub GraphQL error for %s: %s', $path, json_encode($decoded['errors'], JSON_THROW_ON_ERROR)));

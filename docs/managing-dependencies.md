@@ -38,6 +38,8 @@ For mode-specific help, prefer:
 vendor/wp-core-base/bin/wp-core-base help add-dependency
 vendor/wp-core-base/bin/wp-core-base help adopt-dependency
 vendor/wp-core-base/bin/wp-core-base help remove-dependency
+vendor/wp-core-base/bin/wp-core-base help scaffold-premium-provider
+vendor/wp-core-base/bin/wp-core-base help sync
 ```
 
 ## Add A WordPress.org Plugin

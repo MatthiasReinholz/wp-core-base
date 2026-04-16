@@ -134,6 +134,24 @@ Normalized parser defaults:
 - `staged_kinds`: all runtime kinds
 - `validated_kinds`: all runtime kinds
 
+Default runtime hygiene lists:
+
+- `forbidden_paths`:
+  - `.git`, `.github`, `.gitlab`, `.circleci`, `.wordpress-org`, `node_modules`
+  - `docs`, `doc`, `tests`, `test`, `__tests__`
+  - `examples`, `example`, `demo`, `screenshots`
+- `forbidden_files`:
+  - `README*`, `CHANGELOG*`, `.gitignore`, `.gitattributes`
+  - `phpunit.xml*`, `composer.json`, `composer.lock`
+  - `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`
+- `managed_sanitize_paths`:
+  - For each root in `plugins_root`, `themes_root`, and `mu_plugins_root`, the normalizer adds:
+  - `.github`, `.gitlab`, `.circleci`, `.wordpress-org`, `node_modules`
+  - `docs`, `doc`, `tests`, `test`, `__tests__`
+  - `examples`, `example`, `demo`, `screenshots`
+- `managed_sanitize_files`:
+  - same list as `forbidden_files`
+
 `manifest_mode` may be:
 
 - `strict`: undeclared runtime paths under the managed roots are validation errors and are not staged
