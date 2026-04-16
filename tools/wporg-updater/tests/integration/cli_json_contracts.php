@@ -59,6 +59,33 @@ function run_cli_json_contract_tests(
     $assert(($doctorJson['status'] ?? null) === 'success', 'Expected doctor --json to report success for the local repository without live GitHub requirements.');
     $assert(is_array($doctorJson['messages'] ?? null), 'Expected doctor --json to include structured messages.');
 
+    $parallelDoctorResults = run_commands_json_allow_failure_parallel($repoRoot, [
+        [
+            'php',
+            'tools/wporg-updater/bin/wporg-updater.php',
+            'doctor',
+            '--repo-root=.',
+            '--json',
+        ],
+        [
+            'php',
+            'tools/wporg-updater/bin/wporg-updater.php',
+            'doctor',
+            '--repo-root=.',
+            '--json',
+        ],
+    ]);
+    $assert(count($parallelDoctorResults) === 2, 'Expected two doctor --json results for concurrent runtime staging isolation coverage.');
+
+    foreach ($parallelDoctorResults as $parallelDoctorResult) {
+        $payload = $parallelDoctorResult['payload'];
+        $assert($parallelDoctorResult['exit_code'] === 0, 'Expected concurrent doctor --json invocations to succeed.');
+        $assert(is_array($payload['messages'] ?? null), 'Expected concurrent doctor --json output to preserve the messages array.');
+        $assert(array_key_exists('status', $payload), 'Expected concurrent doctor --json output to preserve the status key.');
+        $assert(array_key_exists('error_count', $payload), 'Expected concurrent doctor --json output to preserve the error_count key.');
+        $assert(array_key_exists('warning_count', $payload), 'Expected concurrent doctor --json output to preserve the warning_count key.');
+    }
+
     $stageRuntimeJsonOutput = '.wp-core-base/build/runtime-json';
     $stageRuntimeJson = run_command_json($repoRoot, [
         'php',
@@ -406,4 +433,67 @@ function run_command_json_allow_failure(string $cwd, array $command): array
         'exit_code' => $status,
         'payload' => $decoded,
     ];
+}
+
+/**
+ * @param list<list<string>> $commands
+ * @return list<array{exit_code:int,payload:array<string,mixed>}>
+ */
+function run_commands_json_allow_failure_parallel(string $cwd, array $commands): array
+{
+    $descriptor = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+    $handles = [];
+
+    foreach ($commands as $index => $command) {
+        $process = proc_open($command, $descriptor, $pipes, $cwd);
+
+        if (! is_resource($process)) {
+            throw new RuntimeException(sprintf('Unable to start parallel command: %s', implode(' ', $command)));
+        }
+
+        fclose($pipes[0]);
+
+        $handles[$index] = [
+            'command' => $command,
+            'process' => $process,
+            'stdout_pipe' => $pipes[1],
+            'stderr_pipe' => $pipes[2],
+        ];
+    }
+
+    $results = [];
+
+    foreach ($handles as $handle) {
+        $stdout = stream_get_contents($handle['stdout_pipe']);
+        $stderr = stream_get_contents($handle['stderr_pipe']);
+        fclose($handle['stdout_pipe']);
+        fclose($handle['stderr_pipe']);
+        $status = proc_close($handle['process']);
+
+        if (! is_string($stdout) || trim($stdout) === '') {
+            throw new RuntimeException(sprintf(
+                "Parallel command did not produce JSON output in %s: %s\n%s",
+                $cwd,
+                implode(' ', $handle['command']),
+                is_string($stderr) ? $stderr : ''
+            ));
+        }
+
+        $decoded = json_decode($stdout, true, 512, JSON_THROW_ON_ERROR);
+
+        if (! is_array($decoded)) {
+            throw new RuntimeException(sprintf('Parallel command did not return a JSON object: %s', implode(' ', $handle['command'])));
+        }
+
+        $results[] = [
+            'exit_code' => $status,
+            'payload' => $decoded,
+        ];
+    }
+
+    return $results;
 }

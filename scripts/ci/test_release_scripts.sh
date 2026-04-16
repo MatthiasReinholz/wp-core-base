@@ -18,10 +18,13 @@ GIT_LOG="${TMP_DIR}/git.log"
 ARTIFACT_PATH="${LOCAL_DIR}/wp-core-base-vendor-snapshot.zip"
 CHECKSUM_PATH="${LOCAL_DIR}/wp-core-base-vendor-snapshot.zip.sha256"
 SIGNATURE_PATH="${LOCAL_DIR}/wp-core-base-vendor-snapshot.zip.sha256.sig"
+EXPECTED_RELEASE_TITLE="wp-core-base v1.3.2"
+EXPECTED_RELEASE_NOTES_PATH="${LOCAL_DIR}/release-notes.md"
 
 printf 'fixture artifact\n' > "${ARTIFACT_PATH}"
 printf '%s  %s\n' "$(shasum -a 256 "${ARTIFACT_PATH}" | awk '{print $1}')" "$(basename "${ARTIFACT_PATH}")" > "${CHECKSUM_PATH}"
 printf 'fixture signature\n' > "${SIGNATURE_PATH}"
+printf 'Fixture release notes.\n' > "${EXPECTED_RELEASE_NOTES_PATH}"
 
 cp "${ARTIFACT_PATH}" "${REMOTE_DIR}/artifact-current"
 cp "${CHECKSUM_PATH}" "${REMOTE_DIR}/checksum-current"
@@ -307,6 +310,8 @@ run_finalize_preflight() {
 
     GITHUB_OUTPUT="${github_output_file}" \
       bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+        --expected-title "${EXPECTED_RELEASE_TITLE}" \
+        --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
         example/repo \
         "${version}" \
         "${ARTIFACT_PATH}" \
@@ -322,7 +327,7 @@ run_finalize_preflight() {
     fi
 
     if [ "${tag_exists}" = "true" ] && [ "${publish_required}" = "false" ]; then
-      echo "GitHub Release ${version} already contains the current verified assets; nothing to publish."
+      echo "GitHub Release ${version} already contains the current verified assets and metadata; nothing to publish."
     fi
   ) > "${output_file}" 2>&1
 }
@@ -453,12 +458,14 @@ export FAKE_RELEASE_STATUS="200"
 export FAKE_REMOTE_ARTIFACT_FILE="${REMOTE_DIR}/artifact-current"
 GITHUB_OUTPUT="${ASSET_CURRENT_GITHUB_OUTPUT}" \
   bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
     example/repo \
     v1.3.2 \
     "${ARTIFACT_PATH}" \
     "${CHECKSUM_PATH}" \
     "${SIGNATURE_PATH}" > "${ASSET_CURRENT_OUTPUT}"
-assert_contains "${ASSET_CURRENT_OUTPUT}" "already contains the current verified release assets"
+assert_contains "${ASSET_CURRENT_OUTPUT}" "already contains the current verified release assets and metadata"
 assert_contains "${ASSET_CURRENT_GITHUB_OUTPUT}" "publish_required=false"
 assert_contains "${ASSET_CURRENT_GITHUB_OUTPUT}" "reason=current"
 
@@ -470,12 +477,14 @@ export FAKE_REDIRECT_SIGNATURE_URL="https://objects.githubusercontent.com/signat
 export FAKE_FAIL_ON_REDIRECT_AUTH="1"
 GITHUB_OUTPUT="${ASSET_REDIRECT_GITHUB_OUTPUT}" \
   bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
     example/repo \
     v1.3.2 \
     "${ARTIFACT_PATH}" \
     "${CHECKSUM_PATH}" \
     "${SIGNATURE_PATH}" > "${ASSET_REDIRECT_OUTPUT}"
-assert_contains "${ASSET_REDIRECT_OUTPUT}" "already contains the current verified release assets"
+assert_contains "${ASSET_REDIRECT_OUTPUT}" "already contains the current verified release assets and metadata"
 assert_contains "${ASSET_REDIRECT_GITHUB_OUTPUT}" "publish_required=false"
 
 ASSET_BAD_REDIRECT_OUTPUT="${TMP_DIR}/assets-bad-redirect.out"
@@ -484,6 +493,8 @@ export FAKE_REDIRECT_CHECKSUM_URL="https://evil.example.invalid/checksum"
 export FAKE_REDIRECT_SIGNATURE_URL="https://evil.example.invalid/signature"
 if GITHUB_OUTPUT="${TMP_DIR}/assets-bad-redirect.github-output" \
   bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
     example/repo \
     v1.3.2 \
     "${ARTIFACT_PATH}" \
@@ -502,6 +513,8 @@ unset FAKE_REDIRECT_SIGNATURE_URL
 export FAKE_REMOTE_ARTIFACT_FILE="${REMOTE_DIR}/artifact-stale"
 GITHUB_OUTPUT="${ASSET_STALE_GITHUB_OUTPUT}" \
   bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
     example/repo \
     v1.3.2 \
     "${ARTIFACT_PATH}" \
@@ -515,6 +528,8 @@ ASSET_REQUIRE_CURRENT_OUTPUT="${TMP_DIR}/assets-require-current.out"
 if GITHUB_OUTPUT="${TMP_DIR}/assets-require-current.github-output" \
   bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
     --require-current \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
     example/repo \
     v1.3.2 \
     "${ARTIFACT_PATH}" \
@@ -530,6 +545,8 @@ ASSET_MISSING_GITHUB_OUTPUT="${TMP_DIR}/assets-missing.github-output"
 export FAKE_RELEASE_STATUS="404"
 GITHUB_OUTPUT="${ASSET_MISSING_GITHUB_OUTPUT}" \
   bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
     example/repo \
     v1.3.2 \
     "${ARTIFACT_PATH}" \
@@ -538,6 +555,66 @@ GITHUB_OUTPUT="${ASSET_MISSING_GITHUB_OUTPUT}" \
 assert_contains "${ASSET_MISSING_OUTPUT}" "does not exist yet"
 assert_contains "${ASSET_MISSING_GITHUB_OUTPUT}" "publish_required=true"
 assert_contains "${ASSET_MISSING_GITHUB_OUTPUT}" "reason=release-missing"
+
+ASSET_STALE_TITLE_FIXTURE="${TMP_DIR}/release-stale-title.json"
+cat > "${ASSET_STALE_TITLE_FIXTURE}" <<'JSON'
+{
+  "name": "wp-core-base v0.0.0",
+  "body": "Fixture release notes.",
+  "assets": [
+    { "name": "wp-core-base-vendor-snapshot.zip", "url": "https://api.github.com/assets/artifact" },
+    { "name": "wp-core-base-vendor-snapshot.zip.sha256", "url": "https://api.github.com/assets/checksum" },
+    { "name": "wp-core-base-vendor-snapshot.zip.sha256.sig", "url": "https://api.github.com/assets/signature" }
+  ]
+}
+JSON
+
+ASSET_STALE_TITLE_OUTPUT="${TMP_DIR}/assets-stale-title.out"
+ASSET_STALE_TITLE_GITHUB_OUTPUT="${TMP_DIR}/assets-stale-title.github-output"
+export FAKE_RELEASE_STATUS="200"
+export FAKE_RELEASE_FIXTURE="${ASSET_STALE_TITLE_FIXTURE}"
+export FAKE_REMOTE_ARTIFACT_FILE="${REMOTE_DIR}/artifact-current"
+GITHUB_OUTPUT="${ASSET_STALE_TITLE_GITHUB_OUTPUT}" \
+  bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
+    example/repo \
+    v1.3.2 \
+    "${ARTIFACT_PATH}" \
+    "${CHECKSUM_PATH}" \
+    "${SIGNATURE_PATH}" > "${ASSET_STALE_TITLE_OUTPUT}"
+assert_contains "${ASSET_STALE_TITLE_OUTPUT}" "title does not match expected metadata"
+assert_contains "${ASSET_STALE_TITLE_GITHUB_OUTPUT}" "publish_required=true"
+assert_contains "${ASSET_STALE_TITLE_GITHUB_OUTPUT}" "reason=title-mismatch"
+
+ASSET_STALE_NOTES_FIXTURE="${TMP_DIR}/release-stale-notes.json"
+cat > "${ASSET_STALE_NOTES_FIXTURE}" <<'JSON'
+{
+  "name": "wp-core-base v1.3.2",
+  "body": "Outdated release notes.",
+  "assets": [
+    { "name": "wp-core-base-vendor-snapshot.zip", "url": "https://api.github.com/assets/artifact" },
+    { "name": "wp-core-base-vendor-snapshot.zip.sha256", "url": "https://api.github.com/assets/checksum" },
+    { "name": "wp-core-base-vendor-snapshot.zip.sha256.sig", "url": "https://api.github.com/assets/signature" }
+  ]
+}
+JSON
+
+ASSET_STALE_NOTES_OUTPUT="${TMP_DIR}/assets-stale-notes.out"
+ASSET_STALE_NOTES_GITHUB_OUTPUT="${TMP_DIR}/assets-stale-notes.github-output"
+export FAKE_RELEASE_FIXTURE="${ASSET_STALE_NOTES_FIXTURE}"
+GITHUB_OUTPUT="${ASSET_STALE_NOTES_GITHUB_OUTPUT}" \
+  bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+    --expected-title "${EXPECTED_RELEASE_TITLE}" \
+    --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
+    example/repo \
+    v1.3.2 \
+    "${ARTIFACT_PATH}" \
+    "${CHECKSUM_PATH}" \
+    "${SIGNATURE_PATH}" > "${ASSET_STALE_NOTES_OUTPUT}"
+assert_contains "${ASSET_STALE_NOTES_OUTPUT}" "notes body does not match expected metadata"
+assert_contains "${ASSET_STALE_NOTES_GITHUB_OUTPUT}" "publish_required=true"
+assert_contains "${ASSET_STALE_NOTES_GITHUB_OUTPUT}" "reason=notes-mismatch"
 
 RERUN_OUTPUT="${TMP_DIR}/finalize-rerun.out"
 RERUN_GITHUB_OUTPUT="${TMP_DIR}/finalize-rerun.github-output"
@@ -552,7 +629,7 @@ unset FAKE_RELEASE_STATUS_SEQUENCE
 : > "${CURL_LOG}"
 : > "${GIT_LOG}"
 run_finalize_preflight "${RERUN_OUTPUT}" "${RERUN_GITHUB_OUTPUT}"
-assert_contains "${RERUN_OUTPUT}" "GitHub Release v1.3.2 already contains the current verified assets; nothing to publish."
+assert_contains "${RERUN_OUTPUT}" "GitHub Release v1.3.2 already contains the current verified assets and metadata; nothing to publish."
 assert_contains "${RERUN_GITHUB_OUTPUT}" "tag_exists=true"
 assert_contains "${RERUN_GITHUB_OUTPUT}" "publish_required=false"
 assert_contains "${RERUN_GITHUB_OUTPUT}" "reason=current"

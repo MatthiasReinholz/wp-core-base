@@ -1,4 +1,6 @@
 {
+  "name": "wp-core-base v1.3.2",
+  "body": "Fixture release notes.",
   "assets": [
     {
       "name": "wp-core-base-vendor-snapshot.zip",

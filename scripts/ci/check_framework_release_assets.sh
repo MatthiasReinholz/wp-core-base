@@ -3,11 +3,40 @@
 set -euo pipefail
 
 REQUIRE_CURRENT='false'
+EXPECTED_TITLE=''
+EXPECTED_NOTES_FILE=''
 
-if [ "${1:-}" = '--require-current' ]; then
-  REQUIRE_CURRENT='true'
-  shift
-fi
+while [ "$#" -gt 0 ]; do
+  case "${1}" in
+    --require-current)
+      REQUIRE_CURRENT='true'
+      shift
+      ;;
+    --expected-title)
+      EXPECTED_TITLE="${2:-}"
+      shift 2
+      ;;
+    --expected-title=*)
+      EXPECTED_TITLE="${1#*=}"
+      shift
+      ;;
+    --expected-notes-file)
+      EXPECTED_NOTES_FILE="${2:-}"
+      shift 2
+      ;;
+    --expected-notes-file=*)
+      EXPECTED_NOTES_FILE="${1#*=}"
+      shift
+      ;;
+    --*)
+      echo "Unknown option: ${1}" >&2
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 REPOSITORY="${1:-}"
 TAG="${2:-}"
@@ -17,7 +46,7 @@ SIGNATURE_PATH="${5:-}"
 API_ROOT="${GITHUB_API_URL:-https://api.github.com}"
 
 if [ -z "$REPOSITORY" ] || [ -z "$TAG" ] || [ -z "$ARTIFACT_PATH" ] || [ -z "$CHECKSUM_PATH" ] || [ -z "$SIGNATURE_PATH" ]; then
-  echo "Usage: $0 [--require-current] owner/repo vX.Y.Z artifact checksum signature" >&2
+  echo "Usage: $0 [--require-current] [--expected-title title] [--expected-notes-file path] owner/repo vX.Y.Z artifact checksum signature" >&2
   exit 1
 fi
 
@@ -37,6 +66,11 @@ for path in "$ARTIFACT_PATH" "$CHECKSUM_PATH" "$SIGNATURE_PATH"; do
     exit 1
   fi
 done
+
+if [ -n "$EXPECTED_NOTES_FILE" ] && [ ! -f "$EXPECTED_NOTES_FILE" ]; then
+  echo "Expected notes file not found: $EXPECTED_NOTES_FILE" >&2
+  exit 1
+fi
 
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
@@ -163,6 +197,19 @@ mark_state() {
   echo "$message"
 }
 
+normalize_text_file() {
+  php -r '
+    $contents = file_get_contents($argv[1]);
+    if (! is_string($contents)) {
+      fwrite(STDERR, "Failed to read text file: " . $argv[1] . PHP_EOL);
+      exit(1);
+    }
+    $contents = str_replace(["\r\n", "\r"], "\n", $contents);
+    $contents = rtrim($contents, "\n");
+    fwrite(STDOUT, $contents);
+  ' "$1"
+}
+
 release_json="$tmp_dir/release.json"
 release_url="${API_ROOT}/repos/${REPOSITORY}/releases/tags/${TAG}"
 status_code="$(api_request "$release_url" "$release_json")"
@@ -246,4 +293,25 @@ if ! cmp -s "$SIGNATURE_PATH" "$remote_signature"; then
   exit 0
 fi
 
-mark_state 'true' 'false' 'current' "GitHub Release ${TAG} already contains the current verified release assets."
+release_title="$(jq -r '.name // ""' "$release_json")"
+
+if [ -n "$EXPECTED_TITLE" ] && [ "$release_title" != "$EXPECTED_TITLE" ]; then
+  mark_state 'true' 'true' 'title-mismatch' "GitHub Release ${TAG} title does not match expected metadata."
+  exit 0
+fi
+
+if [ -n "$EXPECTED_NOTES_FILE" ]; then
+  release_notes_file="$tmp_dir/release-notes.txt"
+  expected_notes_normalized="$tmp_dir/expected-notes-normalized.txt"
+  release_notes_normalized="$tmp_dir/release-notes-normalized.txt"
+  jq -r '.body // ""' "$release_json" > "$release_notes_file"
+  normalize_text_file "$EXPECTED_NOTES_FILE" > "$expected_notes_normalized"
+  normalize_text_file "$release_notes_file" > "$release_notes_normalized"
+
+  if ! cmp -s "$expected_notes_normalized" "$release_notes_normalized"; then
+    mark_state 'true' 'true' 'notes-mismatch' "GitHub Release ${TAG} notes body does not match expected metadata."
+    exit 0
+  fi
+fi
+
+mark_state 'true' 'false' 'current' "GitHub Release ${TAG} already contains the current verified release assets and metadata."
