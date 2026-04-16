@@ -6,6 +6,7 @@ use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
 use WpOrgPluginUpdater\FrameworkReleasePreparer;
 use WpOrgPluginUpdater\FrameworkReleaseSignature;
+use WpOrgPluginUpdater\ReleaseSignatureKeyStore;
 use WpOrgPluginUpdater\FrameworkWriter;
 
 /**
@@ -28,6 +29,26 @@ function run_release_contract_tests(
     $assert($signatureDocument['signed_file'] === 'artifact.zip.sha256', 'Expected release signing to bind the checksum sidecar filename.');
     $verifiedSignatureDocument = FrameworkReleaseSignature::verifyChecksumFile($checksumFixturePath, $signatureFixturePath, $publicFixtureKeyPath);
     $assert($verifiedSignatureDocument['key_id'] === $signatureDocument['key_id'], 'Expected release signature verification to report the same key identifier.');
+    $defaultFrameworkPublicKeyPath = ReleaseSignatureKeyStore::defaultPublicKeyPath($frameworkConfig);
+    $verifiedWithRotatedSet = FrameworkReleaseSignature::verifyChecksumFileWithKeyPaths(
+        $checksumFixturePath,
+        $signatureFixturePath,
+        [$defaultFrameworkPublicKeyPath, $publicFixtureKeyPath]
+    );
+    $assert($verifiedWithRotatedSet['key_id'] === $signatureDocument['key_id'], 'Expected release signature verification to select the matching key from a multi-path key set.');
+    $nonMatchingKeyRejected = false;
+
+    try {
+        FrameworkReleaseSignature::verifyChecksumFileWithKeyPaths(
+            $checksumFixturePath,
+            $signatureFixturePath,
+            [$defaultFrameworkPublicKeyPath]
+        );
+    } catch (RuntimeException $exception) {
+        $nonMatchingKeyRejected = str_contains($exception->getMessage(), 'not present in configured public keys');
+    }
+
+    $assert($nonMatchingKeyRejected, 'Expected release signature verification to reject key sets that do not contain the signing key id.');
     $signatureTamperRejected = false;
     file_put_contents($checksumFixturePath, str_repeat('b', 64) . "  artifact.zip\n");
 
@@ -38,6 +59,23 @@ function run_release_contract_tests(
     }
 
     $assert($signatureTamperRejected, 'Expected release signature verification to reject tampered checksum sidecars.');
+    $originalEnvPaths = getenv(ReleaseSignatureKeyStore::PUBLIC_KEY_PATHS_ENV);
+    putenv(ReleaseSignatureKeyStore::PUBLIC_KEY_PATHS_ENV . '=relative-key.pem');
+    $relativeKeyPathRejected = false;
+
+    try {
+        ReleaseSignatureKeyStore::publicKeyPaths($frameworkConfig);
+    } catch (RuntimeException $exception) {
+        $relativeKeyPathRejected = str_contains($exception->getMessage(), 'absolute paths');
+    }
+
+    if ($originalEnvPaths === false) {
+        putenv(ReleaseSignatureKeyStore::PUBLIC_KEY_PATHS_ENV);
+    } else {
+        putenv(ReleaseSignatureKeyStore::PUBLIC_KEY_PATHS_ENV . '=' . $originalEnvPaths);
+    }
+
+    $assert($relativeKeyPathRejected, 'Expected release public key environment paths to reject relative entries.');
 
     $releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
     mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);

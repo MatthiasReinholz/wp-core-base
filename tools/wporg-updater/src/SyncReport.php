@@ -36,7 +36,6 @@ final class SyncReport
         }
 
         return [
-            'generated_at' => gmdate(DATE_ATOM),
             'status' => $status,
             'fatal_errors' => array_values($fatalErrors),
             'dependency_warnings' => array_values($dependencyWarnings),
@@ -95,12 +94,15 @@ final class SyncReport
             '## wp-core-base Sync Report',
             '',
             sprintf('- Status: `%s`', $status),
-            sprintf('- Generated at: `%s`', $generatedAt === '' ? 'unknown' : $generatedAt),
             sprintf('- Dependency source warnings: `%d`', count($dependencyWarnings)),
             sprintf('- Fatal errors: `%d`', count($fatalErrors)),
             sprintf('- Trust records: `%d`', count($dependencyTrustStates)),
             '',
         ];
+
+        if ($generatedAt !== '') {
+            array_splice($lines, 3, 0, [sprintf('- Generated at: `%s`', $generatedAt)]);
+        }
 
         if ($dependencyWarnings !== []) {
             $lines[] = '### Dependency Source Warnings';
@@ -220,10 +222,13 @@ final class SyncReport
             'One or more wp-core-base sync failures occurred during the latest run.',
             'Healthy components may still have been updated successfully.',
             '',
-            sprintf('- Generated at: `%s`', $generatedAt === '' ? 'unknown' : $generatedAt),
             sprintf('- Warning count: `%d`', count($warnings)),
             sprintf('- Fatal error count: `%d`', count($fatalErrors)),
         ];
+
+        if ($generatedAt !== '') {
+            array_splice($lines, 5, 0, [sprintf('- Generated at: `%s`', $generatedAt)]);
+        }
 
         if (is_string($runUrl) && $runUrl !== '') {
             $lines[] = sprintf('- Workflow run: [Open](%s)', $runUrl);

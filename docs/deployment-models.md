@@ -53,6 +53,26 @@ Good fit for:
 - platform-managed WordPress core
 - repos that use a custom content root such as `cms/`
 
+## Content-Only Core Loading
+
+`content-only` changes what the framework owns. It stages a runtime payload, but it does not install or bootstrap WordPress core.
+
+Three common loading patterns are:
+
+1. platform-managed core with a separate content mount, where the platform or base image provides WordPress core and the repo only stages the content tree
+2. image-built core with staged content, where CI copies the staged runtime payload into an image that already contains WordPress core
+3. externally mounted core and content, where the web server or orchestrator keeps WordPress core outside the repo and maps the staged content payload into the runtime docroot
+
+The responsibility boundary stays the same in all three cases:
+
+- `wp-core-base` owns the manifest, dependency updates, runtime hygiene, and `stage-runtime`
+- the image, host, or platform owns WordPress core installation and bootstrap
+- the downstream repo owns the content tree, including custom plugins, themes, MU plugins, and other declared runtime paths
+
+For multisite, treat this as a repository-wide posture. Keep the content root, ownership roots, and governance settings aligned across the network instead of trying to vary them site by site.
+
+There is no built-in WordPress `wp-cli` wrapper in this framework. Use the provided PHP entrypoints or your own shell alias around them if you want a convenience command.
+
 ## Common Real-World Architectures
 
 ### GitHub + CI/CD Deployment
@@ -84,6 +104,8 @@ The intended flow is:
 2. CI runs `doctor`
 3. CI runs `stage-runtime`
 4. the image build copies the staged runtime payload into the final image
+
+This still does not bootstrap WordPress core for you. The image or platform layer owns that part of the contract.
 
 ### No GitHub Yet
 

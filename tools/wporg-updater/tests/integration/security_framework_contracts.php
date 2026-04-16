@@ -8,6 +8,7 @@ use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\PrBodyRenderer;
+use WpOrgPluginUpdater\ReleaseSignatureKeyStore;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\WordPressCoreClient;
 
@@ -37,6 +38,62 @@ function run_security_framework_contract_tests(
     }
 
     $assert($checksumRejected, 'Expected framework release verification to reject checksum lines bound to the wrong artifact name.');
+
+    $relativeOverrideRejected = false;
+
+    try {
+        ReleaseSignatureKeyStore::publicKeyPaths($frameworkConfig, './relative-public-key.pem');
+    } catch (RuntimeException $exception) {
+        $relativeOverrideRejected = str_contains($exception->getMessage(), 'must be absolute');
+    }
+
+    $assert($relativeOverrideRejected, 'Expected release public key override paths to reject relative file paths.');
+
+    $unsafeKeyRoot = sys_get_temp_dir() . '/wporg-unsafe-release-key-' . bin2hex(random_bytes(4));
+    mkdir($unsafeKeyRoot, 0777, true);
+    $unsafeKeyPath = $unsafeKeyRoot . '/unsafe.pem';
+    file_put_contents($unsafeKeyPath, "-----BEGIN PUBLIC KEY-----\nunsafe\n-----END PUBLIC KEY-----\n");
+    chmod($unsafeKeyPath, 0666);
+    $unsafeKeyRejected = false;
+
+    try {
+        ReleaseSignatureKeyStore::publicKeyPaths($frameworkConfig, $unsafeKeyPath);
+    } catch (RuntimeException $exception) {
+        $unsafeKeyRejected = str_contains($exception->getMessage(), 'world-writable');
+    }
+
+    $assert($unsafeKeyRejected, 'Expected release public key overrides to reject world-writable files.');
+
+    chmod($unsafeKeyPath, 0644);
+    $symlinkKeyPath = $unsafeKeyRoot . '/unsafe-link.pem';
+    symlink($unsafeKeyPath, $symlinkKeyPath);
+    $symlinkOverrideRejected = false;
+
+    try {
+        ReleaseSignatureKeyStore::publicKeyPaths($frameworkConfig, $symlinkKeyPath);
+    } catch (RuntimeException $exception) {
+        $symlinkOverrideRejected = str_contains($exception->getMessage(), 'symlink');
+    }
+
+    $assert($symlinkOverrideRejected, 'Expected release public key overrides to reject symlinked files.');
+
+    $writableParentRoot = sys_get_temp_dir() . '/wporg-unsafe-release-key-parent-' . bin2hex(random_bytes(4));
+    mkdir($writableParentRoot, 0777, true);
+    $writableParentPath = $writableParentRoot . '/parent';
+    mkdir($writableParentPath, 0777, true);
+    chmod($writableParentPath, 0777);
+    $unsafeParentKeyPath = $writableParentPath . '/parent-unsafe.pem';
+    file_put_contents($unsafeParentKeyPath, "-----BEGIN PUBLIC KEY-----\nunsafe\n-----END PUBLIC KEY-----\n");
+    chmod($unsafeParentKeyPath, 0644);
+    $unsafeParentRejected = false;
+
+    try {
+        ReleaseSignatureKeyStore::publicKeyPaths($frameworkConfig, $unsafeParentKeyPath);
+    } catch (RuntimeException $exception) {
+        $unsafeParentRejected = str_contains($exception->getMessage(), 'parent directory is group/world-writable');
+    }
+
+    $assert($unsafeParentRejected, 'Expected release public key overrides to reject parent directories that are group/world-writable.');
     $checksumFixture = sys_get_temp_dir() . '/wporg-file-checksum-' . bin2hex(random_bytes(4)) . '.txt';
     file_put_contents($checksumFixture, "fixture\n");
     FileChecksum::assertSha256Matches($checksumFixture, 'sha256:' . hash_file('sha256', $checksumFixture), 'checksum fixture');
@@ -83,6 +140,25 @@ function run_security_framework_contract_tests(
     $coreRelease = $coreClient->findReleaseAnnouncementInFeed((string) file_get_contents($fixtureDir . '/wp-release-feed.xml'), '6.9.4');
     $assert($coreRelease['release_url'] === 'https://wordpress.org/news/2026/03/wordpress-6-9-4-release/', 'Expected release feed lookup to find the core announcement URL.');
     $assert(str_contains($coreRelease['release_text'], 'security'), 'Expected release summary to include security context.');
+    $coreClientReflection = new ReflectionClass(\WpOrgPluginUpdater\WordPressCoreClient::class);
+    $assertChecksumsAgainstTree = $coreClientReflection->getMethod('assertChecksumsAgainstTree');
+    $assertChecksumsAgainstTree->setAccessible(true);
+    $coreChecksumRoot = sys_get_temp_dir() . '/wporg-core-checksum-tree-' . bin2hex(random_bytes(4));
+    mkdir($coreChecksumRoot . '/wp-includes', 0777, true);
+    file_put_contents($coreChecksumRoot . '/wp-includes/version.php', "<?php\n");
+    file_put_contents($coreChecksumRoot . '/unexpected.php', "<?php\n");
+    $unexpectedCoreFileRejected = false;
+
+    try {
+        $assertChecksumsAgainstTree->invoke($coreClient, $coreChecksumRoot, [
+            'wp-includes/version.php' => hash('md5', "<?php\n"),
+        ]);
+    } catch (RuntimeException $exception) {
+        $unexpectedCoreFileRejected = str_contains($exception->getMessage(), 'unexpected extracted file');
+    }
+
+    (new RuntimeInspector($config->runtime))->clearPath($coreChecksumRoot);
+    $assert($unexpectedCoreFileRejected, 'Expected WordPress core checksum verification to reject extracted files that are not covered by official checksums.');
 
     $coreMetadata = PrBodyRenderer::extractMetadata($renderer->renderCoreUpdate(
         currentVersion: '6.9.3',

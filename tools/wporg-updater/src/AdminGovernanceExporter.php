@@ -44,8 +44,7 @@ final class AdminGovernanceExporter
 
     private function writeDataFile(Config $config, string $path): void
     {
-        $contents = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($this->payload($config), true) . ";\n";
-        (new AtomicFileWriter())->write($path, $contents);
+        (new PhpArrayFileWriter())->write($path, $this->payload($config));
     }
 
     /**
@@ -84,7 +83,6 @@ final class AdminGovernanceExporter
         ksort($muPlugins);
 
         return [
-            'generated_at' => gmdate(DATE_ATOM),
             'manifest_checksum' => $this->manifestChecksum($config),
             'plugins' => $plugins,
             'mu_plugins' => $muPlugins,

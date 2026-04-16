@@ -240,6 +240,8 @@ Typical command:
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
 
+The `--output` override must stay repo-relative. Absolute paths and traversal-style values are rejected so staging cannot escape the repository boundary.
+
 Use the staged directory as the input to:
 
 - Docker `COPY`

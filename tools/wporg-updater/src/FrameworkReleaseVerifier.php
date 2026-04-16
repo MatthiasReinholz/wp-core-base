@@ -230,28 +230,41 @@ final class FrameworkReleaseVerifier
     {
         $doctorOutput = $this->runVendoredCommand(
             $downstreamRoot,
-            'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --json'
+            ['php', 'vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php', 'doctor', '--repo-root=.', '--json']
         );
         $this->assertSuccessfulJsonResult($doctorOutput, 'doctor');
 
         $stageRuntimeOutput = $this->runVendoredCommand(
             $downstreamRoot,
-            'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/release-verify-runtime --json'
+            [
+                'php',
+                'vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php',
+                'stage-runtime',
+                '--repo-root=.',
+                '--output=.wp-core-base/build/release-verify-runtime',
+                '--json',
+            ]
         );
         $this->assertSuccessfulJsonResult($stageRuntimeOutput, 'stage-runtime');
     }
 
-    private function runVendoredCommand(string $workingDirectory, string $command): string
+    /**
+     * @param list<string> $command
+     */
+    private function runVendoredCommand(string $workingDirectory, array $command): string
     {
         $descriptorSpec = [
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
+        $process = proc_open($command, $descriptorSpec, $pipes, $workingDirectory);
 
         if (! is_resource($process)) {
-            throw new RuntimeException(sprintf('Failed to start vendored release verification command: %s', $command));
+            throw new RuntimeException(sprintf(
+                'Failed to start vendored release verification command: %s',
+                $this->formatCommand($command)
+            ));
         }
 
         $stdout = stream_get_contents($pipes[1]);
@@ -266,7 +279,7 @@ final class FrameworkReleaseVerifier
         if ($status !== 0) {
             throw new RuntimeException(sprintf(
                 "Installed release artifact command failed: %s\n%s",
-                $command,
+                $this->formatCommand($command),
                 $output
             ));
         }
@@ -276,20 +289,26 @@ final class FrameworkReleaseVerifier
 
     private function initializeVerificationGitWorktree(string $downstreamRoot): void
     {
-        $this->runProcess($downstreamRoot, 'git init -q');
+        $this->runProcess($downstreamRoot, ['git', 'init', '-q']);
     }
 
-    private function runProcess(string $workingDirectory, string $command): string
+    /**
+     * @param list<string> $command
+     */
+    private function runProcess(string $workingDirectory, array $command): string
     {
         $descriptorSpec = [
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
+        $process = proc_open($command, $descriptorSpec, $pipes, $workingDirectory);
 
         if (! is_resource($process)) {
-            throw new RuntimeException(sprintf('Failed to start release verification command: %s', $command));
+            throw new RuntimeException(sprintf(
+                'Failed to start release verification command: %s',
+                $this->formatCommand($command)
+            ));
         }
 
         $stdout = stream_get_contents($pipes[1]);
@@ -302,10 +321,22 @@ final class FrameworkReleaseVerifier
         $output = trim((string) $stdout . "\n" . (string) $stderr);
 
         if ($status !== 0) {
-            throw new RuntimeException(sprintf("Command failed during release verification: %s\n%s", $command, $output));
+            throw new RuntimeException(sprintf(
+                "Command failed during release verification: %s\n%s",
+                $this->formatCommand($command),
+                $output
+            ));
         }
 
         return (string) $stdout;
+    }
+
+    /**
+     * @param list<string> $command
+     */
+    private function formatCommand(array $command): string
+    {
+        return implode(' ', array_map(static fn (string $part): string => escapeshellarg($part), $command));
     }
 
     private function assertSuccessfulJsonResult(string $output, string $commandName): void

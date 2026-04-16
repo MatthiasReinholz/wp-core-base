@@ -2,6 +2,8 @@
 
 `wp-core-base` is a reusable WordPress foundation for teams that want their WordPress code, dependency snapshots, and update flow to live in Git.
 
+Requires PHP 8.1 or newer. The framework is tested on PHP 8.1, 8.3, and 8.4.
+
 It supports two downstream styles:
 
 - `full-core`: the downstream repository contains WordPress core
@@ -24,6 +26,7 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 - managed-dependency sanitation during update ingestion when upstream archives contain non-runtime metadata
 - runtime staging for image-first or immutable deployment flows
 - a framework-managed WordPress admin governance MU plugin that marks workflow-managed plugins and suppresses in-dashboard update actions for them
+- no built-in WordPress `wp-cli` wrapper; use the shipped PHP entrypoints or your own shell alias around them
 
 ## Why This Is Valuable
 
@@ -55,6 +58,8 @@ Choose the path that matches your project:
 
 If you need help choosing an architecture first, read [docs/deployment-models.md](docs/deployment-models.md).
 
+If you want the content-only core-loading patterns, read [docs/deployment-models.md#content-only-core-loading](docs/deployment-models.md#content-only-core-loading).
+
 If you want the framework vocabulary first, read [docs/concepts.md](docs/concepts.md).
 
 If you want the day-to-day dependency authoring workflow, read [docs/managing-dependencies.md](docs/managing-dependencies.md).
@@ -81,6 +86,8 @@ bin/wp-core-base list-dependencies
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
+
+`stage-runtime --output` must stay repo-relative to the current repository. Absolute paths and traversal-style overrides are rejected.
 
 If you are onboarding a downstream repository and want the framework to generate the initial manifest and workflows:
 

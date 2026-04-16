@@ -7,8 +7,9 @@ This document lists what `wp-core-base` supports today, what it supports with co
 | Area | Status | Notes |
 | --- | --- | --- |
 | `full-core` downstreams | Supported | WordPress core is committed in the downstream repo. |
-| `content-only` downstreams | Supported | WordPress core is external to the downstream repo. |
-| image-first downstreams | Supported | `stage-runtime` is the intended build contract. |
+| `content-only` downstreams | Supported | WordPress core is external to the downstream repo, and the framework stages content/runtime payloads rather than installing or bootstrapping core. |
+| image-first downstreams | Supported | `stage-runtime` is the intended build contract, and the image or platform layer still owns WordPress core bootstrap. |
+| multisite downstreams | Supported with constraints | Treat the repo-wide content roots, governance, and runtime rules as one network-wide posture. |
 
 ## Deployment Models
 

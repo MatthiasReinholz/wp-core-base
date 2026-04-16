@@ -91,27 +91,58 @@ jobs:
             --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256 \
             --signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig
 
-      - name: Ensure tag does not already exist
+      - name: Assess published release state
+        id: release_state
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
+          set -euo pipefail
+
+          tag_exists='false'
+
           if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
-            echo "Tag ${VERSION} already exists." >&2
+            tag_exists='true'
+          fi
+
+          echo "tag_exists=${tag_exists}" >> "$GITHUB_OUTPUT"
+
+          bash scripts/ci/check_framework_release_assets.sh \
+            "${GITHUB_REPOSITORY}" \
+            "${VERSION}" \
+            dist/wp-core-base-vendor-snapshot.zip \
+            dist/wp-core-base-vendor-snapshot.zip.sha256 \
+            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
+
+          publish_required="$(grep '^publish_required=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2-)"
+          release_state_reason="$(grep '^reason=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2-)"
+
+          if [ "${tag_exists}" = 'true' ] && [ "${publish_required}" = 'true' ]; then
+            echo "Remote tag ${VERSION} already exists, but the published release is not current (${release_state_reason})." >&2
             exit 1
           fi
 
+      - name: Report existing verified release
+        if: ${{ steps.release_state.outputs.publish_required != 'true' && steps.release_state.outputs.tag_exists == 'true' }}
+        run: echo "GitHub Release ${{ steps.release.outputs.version }} already contains the current verified assets; nothing to publish."
+
       - name: Configure git identity
+        if: ${{ steps.release_state.outputs.tag_exists != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Create annotated tag
+        if: ${{ steps.release_state.outputs.tag_exists != 'true' }}
         run: git -c tag.gpgsign=false tag -a "${{ steps.release.outputs.version }}" -m "wp-core-base ${{ steps.release.outputs.version }}"
 
       - name: Push tag
+        if: ${{ steps.release_state.outputs.tag_exists != 'true' }}
         run: git push origin "${{ steps.release.outputs.version }}"
 
       - name: Create GitHub release
+        if: ${{ steps.release_state.outputs.publish_required == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -124,6 +155,7 @@ jobs:
             --notes-file "docs/releases/${{ steps.release.outputs.plain }}.md"
 
       - name: Verify published release assets are current
+        if: ${{ steps.release_state.outputs.publish_required == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
@@ -144,28 +176,78 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
-          release_lookup_status="$(
+          set -euo pipefail
+
+          release_lookup() {
+            local output_file="$1"
+
             curl -sS \
-              -o /tmp/wp-core-base-release-rollback.json \
+              -o "${output_file}" \
               -w "%{http_code}" \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \
               -H "X-GitHub-Api-Version: 2022-11-28" \
               "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}"
-          )"
+          }
+
+          assert_remote_tag_deleted() {
+            local attempt
+
+            for attempt in 1 2 3 4 5; do
+              if ! git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+                return 0
+              fi
+
+              sleep 1
+            done
+
+            echo "Remote tag ${VERSION} still exists after delete attempts." >&2
+            exit 1
+          }
+
+          assert_release_deleted() {
+            local attempt
+            local release_lookup_status
+
+            for attempt in 1 2 3 4 5; do
+              release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
+
+              if [ "${release_lookup_status}" = '404' ]; then
+                return 0
+              fi
+
+              if [ "${release_lookup_status}" != '200' ]; then
+                echo "Failed to verify GitHub Release ${VERSION} deletion (status ${release_lookup_status})." >&2
+                exit 1
+              fi
+
+              sleep 1
+            done
+
+            echo "GitHub Release ${VERSION} still exists after delete attempts." >&2
+            exit 1
+          }
+
+          release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
 
           if [ "${release_lookup_status}" = '200' ]; then
             release_id="$(jq -r '.id' /tmp/wp-core-base-release-rollback.json)"
 
-            if [ -n "${release_id}" ] && [ "${release_id}" != 'null' ]; then
-              curl -fsSL \
-                -X DELETE \
-                -H "Accept: application/vnd.github+json" \
-                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-                -H "X-GitHub-Api-Version: 2022-11-28" \
-                "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}" >/dev/null
+            if [ -z "${release_id}" ] || [ "${release_id}" = 'null' ]; then
+              echo "GitHub Release ${VERSION} lookup succeeded but did not return a usable release id." >&2
+              exit 1
             fi
+
+            curl -fsSL \
+              -X DELETE \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}" >/dev/null
           fi
 
           git tag -d "$VERSION" || true
           git push --delete origin "$VERSION" || true
+
+          assert_remote_tag_deleted
+          assert_release_deleted

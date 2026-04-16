@@ -80,7 +80,15 @@ final class WordPressCoreClient
             throw new RuntimeException(sprintf('WordPress core extraction path does not exist for checksum verification: %s', $coreRoot));
         }
 
-        $checksums = $this->fetchOfficialChecksums($version);
+        $this->assertChecksumsAgainstTree($coreRoot, $this->fetchOfficialChecksums($version));
+    }
+
+    /**
+     * @param array<string, string> $checksums
+     */
+    private function assertChecksumsAgainstTree(string $coreRoot, array $checksums): void
+    {
+        $expectedFiles = array_fill_keys(array_keys($checksums), true);
 
         foreach ($checksums as $relativePath => $expectedChecksum) {
             $absolutePath = $coreRoot . '/' . $relativePath;
@@ -106,6 +114,26 @@ final class WordPressCoreClient
         }
 
         $this->assertNoUnexpectedSymlinks($coreRoot);
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($coreRoot, \FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            if (! $item->isFile()) {
+                continue;
+            }
+
+            $relativePath = ltrim(str_replace('\\', '/', substr($item->getPathname(), strlen($coreRoot))), '/');
+
+            if (! isset($expectedFiles[$relativePath])) {
+                throw new RuntimeException(sprintf(
+                    'WordPress core checksum verification failed: unexpected extracted file %s is not covered by official checksums.',
+                    $relativePath
+                ));
+            }
+        }
     }
 
     /**

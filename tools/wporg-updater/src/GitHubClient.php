@@ -51,31 +51,8 @@ final class GitHubClient implements GitHubAutomationClient
      */
     public function ensureLabels(array $definitions): void
     {
-        $definitions = LabelHelper::normalizeDefinitions($definitions);
-
-        if ($this->dryRun) {
-            fwrite(STDOUT, "[dry-run] Ensuring GitHub labels\n");
-            return;
-        }
-
-        foreach ($definitions as $name => $definition) {
-            $encodedName = rawurlencode($name);
-
-            try {
-                $this->requestJson('GET', '/repos/' . $this->repository . '/labels/' . $encodedName);
-                $this->requestJson('PATCH', '/repos/' . $this->repository . '/labels/' . $encodedName, [
-                    'new_name' => $name,
-                    'color' => $definition['color'],
-                    'description' => $definition['description'],
-                ]);
-            } catch (RuntimeException) {
-                $this->requestJson('POST', '/repos/' . $this->repository . '/labels', [
-                    'name' => $name,
-                    'color' => $definition['color'],
-                    'description' => $definition['description'],
-                ]);
-            }
-        }
+        (new GitHubLabelSynchronizer($this->repository, $this->dryRun))
+            ->ensureLabels($definitions, fn (string $method, string $path, ?array $payload = null): array => $this->requestJson($method, $path, $payload));
     }
 
     /**
@@ -410,15 +387,43 @@ final class GitHubClient implements GitHubAutomationClient
      */
     private function requestJson(string $method, string $path, ?array $payload = null, bool $graphql = false): array
     {
-        $response = $this->httpClient->request(
-            $method,
-            rtrim($this->apiBase, '/') . $path,
-            $this->headers($graphql),
-            $payload,
-        );
+        try {
+            $response = $this->httpClient->requestWithOptions(
+                $method,
+                rtrim($this->apiBase, '/') . $path,
+                $this->headers($graphql),
+                $payload,
+                null,
+                false,
+                ['max_body_bytes' => HttpClient::DEFAULT_MAX_JSON_BODY_BYTES],
+            );
+        } catch (RuntimeException $exception) {
+            if (str_contains($exception->getMessage(), 'exceeded the configured byte limit')) {
+                throw new RuntimeException(sprintf(
+                    'GitHub API %s %s exceeded the maximum JSON response size of %d bytes.',
+                    $method,
+                    $path,
+                    HttpClient::DEFAULT_MAX_JSON_BODY_BYTES
+                ), previous: $exception);
+            }
+
+            throw $exception;
+        }
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
-            throw new RuntimeException(sprintf('GitHub API %s %s failed with status %d: %s', $method, $path, $response['status'], $response['body']));
+            throw new HttpStatusRuntimeException(
+                $response['status'],
+                sprintf('GitHub API %s %s failed with status %d: %s', $method, $path, $response['status'], $response['body'])
+            );
+        }
+
+        if (strlen($response['body']) > HttpClient::DEFAULT_MAX_JSON_BODY_BYTES) {
+            throw new RuntimeException(sprintf(
+                'GitHub API %s %s exceeded the maximum JSON response size of %d bytes.',
+                $method,
+                $path,
+                HttpClient::DEFAULT_MAX_JSON_BODY_BYTES
+            ));
         }
 
         $decoded = json_decode($response['body'], true);

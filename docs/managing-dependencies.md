@@ -92,6 +92,8 @@ Optional flags:
 
 Use `--archive-subdir` only when the extracted payload is not resolved correctly by default. Standard WordPress.org plugin ZIPs should not need it.
 
+The authoring locator first checks the archive root and then each direct child directory. For directory payloads it prefers a candidate whose basename matches the slug and whose resolved main file is shallower; for file payloads it prefers a basename match. Use `--archive-subdir` when the upstream archive wraps the real payload in one stable subdirectory and the default locator would otherwise pick the wrong layer.
+
 If the upstream project also publishes a checksum sidecar for the ZIP, add the matching manifest fields after creation:
 
 - `source_config.checksum_asset_pattern`

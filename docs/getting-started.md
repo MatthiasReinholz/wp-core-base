@@ -2,9 +2,12 @@
 
 This guide is for downstream users of `wp-core-base`.
 
+Requires PHP 8.1 or newer. The framework is tested on PHP 8.1, 8.3, and 8.4.
+
 If you are contributing to `wp-core-base` itself, use [contributing.md](contributing.md).
 If you want the vocabulary before the setup steps, read [concepts.md](concepts.md).
 If you want the routine add/remove dependency workflow, read [managing-dependencies.md](managing-dependencies.md).
+If you want the content-only loading patterns, read [deployment-models.md#content-only-core-loading](deployment-models.md#content-only-core-loading).
 
 ## Choose Your Starting Point
 
@@ -30,6 +33,7 @@ If you want the routine add/remove dependency workflow, read [managing-dependenc
 - a specific deployment method
 - Composer as your source of truth
 - your custom code to become updater-managed
+- a built-in WordPress `wp-cli` wrapper
 
 Project-owned plugins, themes, MU plugins, and runtime files can stay downstream-owned as `local` entries.
 
@@ -52,6 +56,8 @@ Typical steps:
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
+
+Keep `stage-runtime --output` repo-relative. The command rejects absolute paths and traversal-style overrides.
 
 7. if you want automated PRs, enable the GitHub workflows
 
@@ -107,6 +113,8 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 ```
 
 9. point your image build at the staged runtime directory instead of the raw working tree
+
+If the repo is multisite, treat the manifest, runtime roots, and governance settings as repo-wide decisions. Do not split them per site.
 
 If you want ongoing upstream framework maintenance, keep the scaffolded `.wp-core-base/framework.php` file and the `wp-core-base` self-update workflow enabled.
 
@@ -193,6 +201,8 @@ GitHub is optional for the code base itself. It becomes required only if you wan
 ## Local Development
 
 Local development is normal WordPress development.
+
+The framework commands are exposed through the PHP entrypoints in this repository. There is no separate built-in `wp-cli` wrapper.
 
 Use whichever local stack your team already prefers, such as:
 

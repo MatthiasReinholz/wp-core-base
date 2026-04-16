@@ -8,6 +8,8 @@ use RuntimeException;
 
 final class HttpClient implements ArchiveDownloader
 {
+    public const DEFAULT_MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
+
     private const RETRYABLE_STATUSES = [429, 500, 502, 503, 504];
     private const REDIRECT_STATUSES = [301, 302, 303, 307, 308];
     private const MAX_RETRY_DELAY_SECONDS = 900;
@@ -74,7 +76,7 @@ final class HttpClient implements ArchiveDownloader
      */
     public function getJsonWithOptions(string $url, array $headers = [], array $options = []): array
     {
-        $options['max_body_bytes'] ??= 5 * 1024 * 1024;
+        $options['max_body_bytes'] ??= self::DEFAULT_MAX_JSON_BODY_BYTES;
         $response = $this->requestWithRetry('GET', $url, $headers, $options);
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
@@ -104,7 +106,7 @@ final class HttpClient implements ArchiveDownloader
      */
     public function getWithOptions(string $url, array $headers = [], array $options = []): string
     {
-        $options['max_body_bytes'] ??= 5 * 1024 * 1024;
+        $options['max_body_bytes'] ??= self::DEFAULT_MAX_JSON_BODY_BYTES;
         $response = $this->requestWithRetry('GET', $url, $headers, $options);
 
         if ($response['status'] < 200 || $response['status'] >= 300) {

@@ -1139,48 +1139,52 @@ final class EnvironmentDoctor
 
     private function ok(string $message): void
     {
-        $this->messages[] = ['level' => 'ok', 'message' => $message];
+        $redacted = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'ok', 'message' => $redacted];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[ok] " . $message . "\n");
+        fwrite(STDOUT, "[ok] " . $redacted . "\n");
     }
 
     private function warn(string $message): void
     {
         $this->warnings++;
-        $this->messages[] = ['level' => 'warn', 'message' => $message];
+        $redacted = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'warn', 'message' => $redacted];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[warn] " . $message . "\n");
+        fwrite(STDOUT, "[warn] " . $redacted . "\n");
     }
 
     private function error(string $message): void
     {
         $this->errors++;
-        $this->messages[] = ['level' => 'error', 'message' => $message];
+        $redacted = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'error', 'message' => $redacted];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[error] " . $message . "\n");
+        fwrite(STDOUT, "[error] " . $redacted . "\n");
     }
 
     private function note(string $message): void
     {
-        $this->messages[] = ['level' => 'note', 'message' => $message];
+        $redacted = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'note', 'message' => $redacted];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[note] " . $message . "\n");
+        fwrite(STDOUT, "[note] " . $redacted . "\n");
     }
 
     private function okIf(bool $condition, string $okMessage, string $errorMessage): void

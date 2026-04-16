@@ -169,6 +169,7 @@ Scaffolded manifests include:
 - `runtime.managed_sanitize_files`
 
 The governance data file is also refreshed automatically after dependency authoring commands and framework self-updates so wp-admin can keep reflecting the manifest’s ownership model without reading `.wp-core-base/manifest.php` at runtime.
+When the manifest contents are unchanged, governance refreshes are deterministic and byte-stable.
 
 ## Managed Dependency Packaging Contract
 

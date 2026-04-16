@@ -200,6 +200,10 @@ final class RuntimeInspector
         }
 
         if (is_file($source)) {
+            if ($this->isExcluded(basename($source), $excludedPaths)) {
+                return;
+            }
+
             $targetDir = dirname($destination);
 
             if (! is_dir($targetDir) && ! mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {

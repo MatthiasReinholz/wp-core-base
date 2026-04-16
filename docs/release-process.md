@@ -52,6 +52,8 @@ php scripts/ci/verify_downstream_fixture.php --profile=full-core
 php scripts/ci/verify_downstream_fixture.php --profile=content-only
 ```
 
+Keep `stage-runtime --output` repo-relative. Absolute paths and traversal-style overrides are rejected.
+
 `release-verify` checks:
 
 - `.wp-core-base/framework.php` exists and is coherent
@@ -60,7 +62,7 @@ php scripts/ci/verify_downstream_fixture.php --profile=content-only
 - required release-note sections are present
 - the bundled WordPress baseline is mentioned in the release notes
 - the public contract is coherent across README, framework metadata, manifest-managed dependency versions, and the current release notes
-- when `--artifact`, `--checksum-file`, and `--signature-file` are provided, the checksum sidecar signature verifies against the framework release public key before the artifact checksum is trusted
+- when `--artifact`, `--checksum-file`, and `--signature-file` are provided, the JSON checksum sidecar signature is verified with OpenSSL against the framework release public key before the artifact checksum is trusted
 - the built vendored snapshot checksum matches and the artifact installs into a temporary downstream copy
 
 ## GitHub Flow
@@ -72,6 +74,8 @@ The release flow is intentionally staged:
 - `finalize-wp-core-base-release` also signs the checksum sidecar and publishes the detached signature `wp-core-base-vendor-snapshot.zip.sha256.sig`
 - both publish workflows verify that the GitHub Release assets match the freshly built local snapshot after publication
 - `release-wp-core-base` is the manual recovery workflow for publishing a GitHub Release from an already existing tag after a failed finalize run, including checksum-sidecar signing and asset freshness checks against the current tag build
+
+The detached signature sidecar is a JSON document that records the checksum filename, its SHA-256 digest, the signature context, the `sha256` algorithm, and the base64 signature. The verification flow uses OpenSSL and the configured public key search path; it does not assume a specific key type in the docs contract.
 
 This keeps release intent reviewable in a PR instead of bundling version bumps, tagging, and publishing into one manual step.
 
@@ -109,7 +113,7 @@ Key selection order during verification:
 - `--public-key` CLI override (if passed)
 - `tools/wporg-updater/keys/framework-release-public.pem`
 - `tools/wporg-updater/keys/framework-release-public-*.pem`
-- absolute paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated)
+- absolute paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated; relative paths are rejected)
 
 Emergency rotation (suspected compromise):
 

@@ -10,7 +10,7 @@ final class DependencyScanner
 {
     /**
      * @param array<string, mixed> $dependency
-     * @return array{name:string, version:?string, path:string, absolute_path:string, main_file:string, kind:string}
+     * @return array{name:string, version:?string, path:string, absolute_path:string, main_file:?string, kind:string}
      */
     public function inspect(string $repoRoot, array $dependency): array
     {
@@ -37,7 +37,7 @@ final class DependencyScanner
                     'version' => ($dependency['version'] ?? null) !== null ? (string) $dependency['version'] : null,
                     'path' => $relativePath,
                     'absolute_path' => $absolutePath,
-                    'main_file' => '',
+                    'main_file' => null,
                     'kind' => $kind,
                 ];
             }

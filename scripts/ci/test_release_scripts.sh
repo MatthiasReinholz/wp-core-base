@@ -12,6 +12,8 @@ LOCAL_DIR="${TMP_DIR}/local"
 REMOTE_DIR="${TMP_DIR}/remote"
 FAKE_BIN="${TMP_DIR}/fake-bin"
 mkdir -p "${LOCAL_DIR}" "${REMOTE_DIR}" "${FAKE_BIN}"
+CURL_LOG="${TMP_DIR}/curl.log"
+GIT_LOG="${TMP_DIR}/git.log"
 
 ARTIFACT_PATH="${LOCAL_DIR}/wp-core-base-vendor-snapshot.zip"
 CHECKSUM_PATH="${LOCAL_DIR}/wp-core-base-vendor-snapshot.zip.sha256"
@@ -36,6 +38,7 @@ write_format=""
 url=""
 redirect_url=""
 auth_header_present="false"
+method="GET"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -54,6 +57,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     -X)
+      method="$2"
       shift 2
       ;;
     --proto)
@@ -69,13 +73,15 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+printf '%s %s\n' "${method}" "${url}" >> "${FAKE_CURL_LOG:-/dev/null}"
+
 status="200"
 body_file=""
 
-case "$url" in
-  */commits/*/pulls)
-    body_file="${FAKE_PULLS_FIXTURE:?}"
-    ;;
+  case "$url" in
+    */commits/*/pulls)
+      body_file="${FAKE_PULLS_FIXTURE:?}"
+      ;;
   */actions/workflows/*/runs\?head_sha=*)
     if [ -n "${FAKE_RUNS_FIXTURE_SEQUENCE:-}" ]; then
       sequence_index_file="${FAKE_RUNS_SEQUENCE_INDEX_FILE:?}"
@@ -91,15 +97,37 @@ case "$url" in
         sequence_index=$((${#run_fixtures[@]} - 1))
       fi
 
-      body_file="${run_fixtures[${sequence_index}]}"
+      body_file="${run_fixtures[$sequence_index]}"
       printf '%s' "$((sequence_index + 1))" > "${sequence_index_file}"
     else
       body_file="${FAKE_RUNS_FIXTURE:?}"
     fi
     ;;
-  */releases/tags/*)
-    status="${FAKE_RELEASE_STATUS:-200}"
+    */releases/tags/*)
+    if [ -n "${FAKE_RELEASE_STATUS_SEQUENCE:-}" ]; then
+      sequence_index_file="${FAKE_RELEASE_SEQUENCE_INDEX_FILE:?}"
+      sequence_index=0
+
+      if [ -f "${sequence_index_file}" ]; then
+        sequence_index="$(cat "${sequence_index_file}")"
+      fi
+
+      IFS=':' read -r -a release_statuses <<< "${FAKE_RELEASE_STATUS_SEQUENCE}"
+
+      if [ "${sequence_index}" -ge "${#release_statuses[@]}" ]; then
+        sequence_index=$((${#release_statuses[@]} - 1))
+      fi
+
+      status="${release_statuses[$sequence_index]}"
+      printf '%s' "$((sequence_index + 1))" > "${sequence_index_file}"
+    else
+      status="${FAKE_RELEASE_STATUS:-200}"
+    fi
+
     body_file="${FAKE_RELEASE_FIXTURE:-}"
+    ;;
+  */releases/*)
+    status="204"
     ;;
   https://api.github.com/assets/artifact)
     if [ -n "${FAKE_REDIRECT_ARTIFACT_URL:-}" ]; then
@@ -179,6 +207,63 @@ EOF
 
 chmod +x "${FAKE_BIN}/curl"
 
+cat > "${FAKE_BIN}/git" <<'EOF'
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+printf '%s\n' "$*" >> "${FAKE_GIT_LOG:-/dev/null}"
+
+if [ "${1:-}" = "push" ] && [ "${2:-}" = "--delete" ]; then
+  exit 0
+fi
+
+if [ "${1:-}" = "tag" ] && [ "${2:-}" = "-d" ]; then
+  exit 0
+fi
+
+if [ "${1:-}" = "ls-remote" ] && [ "${2:-}" = "--exit-code" ] && [ "${3:-}" = "--tags" ] && [ "${4:-}" = "origin" ]; then
+  ref="${5:-}"
+  state="${FAKE_GIT_LS_REMOTE_STATE:-absent}"
+
+  if [ -n "${FAKE_GIT_LS_REMOTE_SEQUENCE:-}" ]; then
+    sequence_index_file="${FAKE_GIT_LS_REMOTE_SEQUENCE_INDEX_FILE:?}"
+    sequence_index=0
+
+    if [ -f "${sequence_index_file}" ]; then
+      sequence_index="$(cat "${sequence_index_file}")"
+    fi
+
+    IFS=':' read -r -a ls_remote_states <<< "${FAKE_GIT_LS_REMOTE_SEQUENCE}"
+
+    if [ "${sequence_index}" -ge "${#ls_remote_states[@]}" ]; then
+      sequence_index=$((${#ls_remote_states[@]} - 1))
+    fi
+
+    state="${ls_remote_states[$sequence_index]}"
+    printf '%s' "$((sequence_index + 1))" > "${sequence_index_file}"
+  fi
+
+  case "${state}" in
+    present|exists|true|1)
+      printf '0000000000000000000000000000000000000000\t%s\n' "${ref}"
+      exit 0
+      ;;
+    absent|missing|false|0)
+      exit 2
+      ;;
+    *)
+      echo "Unexpected fake ls-remote state: ${state}" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+echo "Unexpected git invocation in release script test: $*" >&2
+exit 1
+EOF
+chmod +x "${FAKE_BIN}/git"
+
 assert_contains() {
   local file="$1"
   local expected="$2"
@@ -189,8 +274,146 @@ assert_contains() {
   fi
 }
 
+assert_count() {
+  local file="$1"
+  local pattern="$2"
+  local expected="$3"
+  local count
+
+  count="$(grep -F "$pattern" "$file" | wc -l | tr -d ' ')"
+
+  if [ "$count" != "$expected" ]; then
+    echo "Expected ${expected} occurrence(s) of '${pattern}' in ${file}, found ${count}." >&2
+    exit 1
+  fi
+}
+
+run_finalize_preflight() {
+  local output_file="$1"
+  local github_output_file="$2"
+
+  (
+    set -euo pipefail
+    version="v1.3.2"
+    tag_exists="false"
+    publish_required=""
+    reason=""
+
+    if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+      tag_exists="true"
+    fi
+
+    echo "tag_exists=${tag_exists}" >> "${github_output_file}"
+
+    GITHUB_OUTPUT="${github_output_file}" \
+      bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
+        example/repo \
+        "${version}" \
+        "${ARTIFACT_PATH}" \
+        "${CHECKSUM_PATH}" \
+        "${SIGNATURE_PATH}"
+
+    publish_required="$(grep '^publish_required=' "${github_output_file}" | tail -n1 | cut -d= -f2-)"
+    reason="$(grep '^reason=' "${github_output_file}" | tail -n1 | cut -d= -f2-)"
+
+    if [ "${tag_exists}" = "true" ] && [ "${publish_required}" = "true" ]; then
+      echo "Remote tag ${version} already exists, but the published release is not current (${reason})." >&2
+      exit 1
+    fi
+
+    if [ "${tag_exists}" = "true" ] && [ "${publish_required}" = "false" ]; then
+      echo "GitHub Release ${version} already contains the current verified assets; nothing to publish."
+    fi
+  ) > "${output_file}" 2>&1
+}
+
+run_finalize_rollback() {
+  local output_file="$1"
+
+  (
+    set -euo pipefail
+    version="v1.3.2"
+
+    release_lookup() {
+      local output_file="$1"
+
+      curl -sS \
+        -o "${output_file}" \
+        -w "%{http_code}" \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${version}"
+    }
+
+    assert_remote_tag_deleted() {
+      local attempt
+
+      for attempt in 1 2 3 4 5; do
+        if ! git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+          return 0
+        fi
+
+        sleep 1
+      done
+
+      echo "Remote tag ${version} still exists after delete attempts." >&2
+      exit 1
+    }
+
+    assert_release_deleted() {
+      local attempt
+      local release_lookup_status
+
+      for attempt in 1 2 3 4 5; do
+        release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
+
+        if [ "${release_lookup_status}" = '404' ]; then
+          return 0
+        fi
+
+        if [ "${release_lookup_status}" != '200' ]; then
+          echo "Failed to verify GitHub Release ${version} deletion (status ${release_lookup_status})." >&2
+          exit 1
+        fi
+
+        sleep 1
+      done
+
+      echo "GitHub Release ${version} still exists after delete attempts." >&2
+      exit 1
+    }
+
+    release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
+
+    if [ "${release_lookup_status}" = '200' ]; then
+      release_id="$(jq -r '.id' /tmp/wp-core-base-release-rollback.json)"
+
+      if [ -z "${release_id}" ] || [ "${release_id}" = 'null' ]; then
+        echo "GitHub Release ${version} lookup succeeded but did not return a usable release id." >&2
+        exit 1
+      fi
+
+      curl -fsSL \
+        -X DELETE \
+        -H "Accept: application/vnd.github+json" \
+        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}" >/dev/null
+    fi
+
+    git tag -d "$version" || true
+    git push --delete origin "$version" || true
+
+    assert_remote_tag_deleted
+    assert_release_deleted
+  ) > "${output_file}" 2>&1
+}
+
 export PATH="${FAKE_BIN}:${PATH}"
 export GITHUB_TOKEN="fixture-token"
+export FAKE_CURL_LOG="${CURL_LOG}"
+export FAKE_GIT_LOG="${GIT_LOG}"
 export FAKE_PULLS_FIXTURE="${FIXTURE_ROOT}/pulls-success.json"
 export FAKE_RELEASE_FIXTURE="${FIXTURE_ROOT}/release-current.json"
 export FAKE_REMOTE_CHECKSUM_FILE="${REMOTE_DIR}/checksum-current"
@@ -315,5 +538,56 @@ GITHUB_OUTPUT="${ASSET_MISSING_GITHUB_OUTPUT}" \
 assert_contains "${ASSET_MISSING_OUTPUT}" "does not exist yet"
 assert_contains "${ASSET_MISSING_GITHUB_OUTPUT}" "publish_required=true"
 assert_contains "${ASSET_MISSING_GITHUB_OUTPUT}" "reason=release-missing"
+
+RERUN_OUTPUT="${TMP_DIR}/finalize-rerun.out"
+RERUN_GITHUB_OUTPUT="${TMP_DIR}/finalize-rerun.github-output"
+export FAKE_GIT_LS_REMOTE_STATE="present"
+export FAKE_RELEASE_STATUS="200"
+export FAKE_RELEASE_FIXTURE="${FIXTURE_ROOT}/release-current.json"
+export FAKE_REMOTE_ARTIFACT_FILE="${REMOTE_DIR}/artifact-current"
+export FAKE_REMOTE_CHECKSUM_FILE="${REMOTE_DIR}/checksum-current"
+export FAKE_REMOTE_SIGNATURE_FILE="${REMOTE_DIR}/signature-current"
+unset FAKE_GIT_LS_REMOTE_SEQUENCE
+unset FAKE_RELEASE_STATUS_SEQUENCE
+: > "${CURL_LOG}"
+: > "${GIT_LOG}"
+run_finalize_preflight "${RERUN_OUTPUT}" "${RERUN_GITHUB_OUTPUT}"
+assert_contains "${RERUN_OUTPUT}" "GitHub Release v1.3.2 already contains the current verified assets; nothing to publish."
+assert_contains "${RERUN_GITHUB_OUTPUT}" "tag_exists=true"
+assert_contains "${RERUN_GITHUB_OUTPUT}" "publish_required=false"
+assert_contains "${RERUN_GITHUB_OUTPUT}" "reason=current"
+
+ROLLBACK_TAG_FAILURE_OUTPUT="${TMP_DIR}/rollback-tag-failure.out"
+ROLLBACK_RELEASE_FIXTURE="${TMP_DIR}/rollback-release-fixture.json"
+printf '{ "id": 123 }\n' > "${ROLLBACK_RELEASE_FIXTURE}"
+export FAKE_GIT_LS_REMOTE_STATE="present"
+export FAKE_RELEASE_STATUS="404"
+export FAKE_RELEASE_FIXTURE="${ROLLBACK_RELEASE_FIXTURE}"
+: > "${CURL_LOG}"
+: > "${GIT_LOG}"
+if GITHUB_API_URL="https://api.github.com" \
+  GITHUB_REPOSITORY="example/repo" \
+  run_finalize_rollback "${ROLLBACK_TAG_FAILURE_OUTPUT}"; then
+  echo "Expected rollback to fail when the remote tag still exists after delete attempts." >&2
+  exit 1
+fi
+assert_contains "${ROLLBACK_TAG_FAILURE_OUTPUT}" "Remote tag v1.3.2 still exists after delete attempts."
+assert_count "${GIT_LOG}" "ls-remote --exit-code --tags origin refs/tags/v1.3.2" "5"
+
+ROLLBACK_RELEASE_FAILURE_OUTPUT="${TMP_DIR}/rollback-release-failure.out"
+export FAKE_GIT_LS_REMOTE_STATE="absent"
+export FAKE_RELEASE_STATUS="200"
+export FAKE_RELEASE_FIXTURE="${ROLLBACK_RELEASE_FIXTURE}"
+: > "${CURL_LOG}"
+: > "${GIT_LOG}"
+if GITHUB_API_URL="https://api.github.com" \
+  GITHUB_REPOSITORY="example/repo" \
+  run_finalize_rollback "${ROLLBACK_RELEASE_FAILURE_OUTPUT}"; then
+  echo "Expected rollback to fail when the GitHub Release still exists after delete attempts." >&2
+  exit 1
+fi
+assert_contains "${ROLLBACK_RELEASE_FAILURE_OUTPUT}" "GitHub Release v1.3.2 still exists after delete attempts."
+assert_contains "${CURL_LOG}" "DELETE https://api.github.com/repos/example/repo/releases/123"
+assert_count "${CURL_LOG}" "GET https://api.github.com/repos/example/repo/releases/tags/v1.3.2" "6"
 
 echo "Release helper scripts verified."

@@ -72,6 +72,21 @@ function run_cli_json_contract_tests(
     $assert(in_array('wp-content/plugins/woocommerce', (array) ($stageRuntimeJson['staged_paths'] ?? []), true), 'Expected stage-runtime --json to include staged runtime paths.');
     $runtimeInspector->clearPath($repoRoot . '/' . $stageRuntimeJsonOutput);
 
+    $unsafeStageRuntimeJson = run_command_json_allow_failure($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'stage-runtime',
+        '--repo-root=.',
+        '--output=../outside-runtime',
+        '--json',
+    ]);
+    $assert($unsafeStageRuntimeJson['exit_code'] === 1, 'Expected stage-runtime --json to fail for traversal output overrides.');
+    $assert(
+        str_contains((string) ($unsafeStageRuntimeJson['payload']['error'] ?? ''), 'repo-relative')
+        || str_contains((string) ($unsafeStageRuntimeJson['payload']['error'] ?? ''), 'traversal'),
+        'Expected stage-runtime --json to explain that output overrides must remain repo-relative.'
+    );
+
     $releaseVerifyJson = run_command_json($repoRoot, [
         'php',
         'tools/wporg-updater/bin/wporg-updater.php',
@@ -90,6 +105,47 @@ function run_cli_json_contract_tests(
     ]);
     $assert($unknownModeJson['exit_code'] === 2, 'Expected unknown CLI modes to preserve the dispatch failure exit code under --json.');
     $assert(str_contains((string) ($unknownModeJson['payload']['error'] ?? ''), 'Unknown mode:'), 'Expected unknown CLI modes to return structured JSON errors.');
+
+    $unknownFlagJson = run_command_json_allow_failure($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'sync',
+        '--report-json=.wp-core-base/build/sync-report.json',
+        '--typoed-flag',
+        '--json',
+    ]);
+    $assert($unknownFlagJson['exit_code'] === 2, 'Expected unknown CLI flags to fail with exit code 2 in JSON mode.');
+    $assert(str_contains((string) ($unknownFlagJson['payload']['error'] ?? ''), '--typoed-flag'), 'Expected unknown CLI flag errors to include the offending flag name.');
+
+    $unknownFlagPlain = run_command_allow_failure($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'sync',
+        '--typoed-flag',
+    ]);
+    $assert($unknownFlagPlain['exit_code'] === 2, 'Expected unknown CLI flags to fail with exit code 2 in plain mode.');
+    $assert(str_contains($unknownFlagPlain['stderr'], '--typoed-flag'), 'Expected plain unknown-flag errors to include the offending flag name.');
+    $assert(str_contains($unknownFlagPlain['stderr'], 'help'), 'Expected plain unknown-flag errors to point users to grouped help.');
+
+    $helpWithOptionBeforeTopic = run_command_allow_failure($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'help',
+        '--json',
+        'sync',
+    ]);
+    $assert($helpWithOptionBeforeTopic['exit_code'] === 0, 'Expected help mode to succeed when options precede a topic token.');
+    $assert(str_contains($helpWithOptionBeforeTopic['stdout'], "sync\n\nPurpose:"), 'Expected help mode to preserve the topic token when boolean options are present.');
+
+    $doctorJsonSplitRepoRoot = run_command_json($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'doctor',
+        '--repo-root',
+        '.',
+        '--json',
+    ]);
+    $assert(($doctorJsonSplitRepoRoot['status'] ?? null) === 'success', 'Expected split-form --repo-root value parsing to work in JSON mode.');
 
     $managedPlanJsonRoot = sys_get_temp_dir() . '/wporg-authoring-plan-json-' . bin2hex(random_bytes(4));
     mkdir($managedPlanJsonRoot . '/cms/plugins', 0777, true);
@@ -183,6 +239,73 @@ function run_cli_json_contract_tests(
     $zipBombReader->close();
     $assert($zipBombRejected, 'Expected ZipExtractor to reject suspicious compression ratios.');
 
+    $zipSymlinkPath = sys_get_temp_dir() . '/wporg-zip-symlink-' . bin2hex(random_bytes(4)) . '.zip';
+    $zipSymlink = new ZipArchive();
+    $assert($zipSymlink->open($zipSymlinkPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true, 'Expected to create symlink ZIP fixture.');
+    $zipSymlink->addFromString('symlink-entry', 'target');
+    $zipSymlink->setExternalAttributesName('symlink-entry', ZipArchive::OPSYS_UNIX, 0120777 << 16);
+    $zipSymlink->close();
+    $zipSymlinkRejected = false;
+    $zipSymlinkReader = new ZipArchive();
+    $assert($zipSymlinkReader->open($zipSymlinkPath) === true, 'Expected to reopen symlink ZIP fixture.');
+
+    try {
+        ZipExtractor::extractValidated($zipSymlinkReader, sys_get_temp_dir() . '/wporg-zip-symlink-extract-' . bin2hex(random_bytes(4)));
+    } catch (RuntimeException $exception) {
+        $zipSymlinkRejected = str_contains($exception->getMessage(), 'symlink');
+    }
+
+    $zipSymlinkReader->close();
+    $assert($zipSymlinkRejected, 'Expected ZipExtractor to reject extracted archive symlink entries.');
+
+    $oldGitHubRepository = getenv('GITHUB_REPOSITORY');
+    $oldGitHubToken = getenv('GITHUB_TOKEN');
+    $oldGitHubApiUrl = getenv('GITHUB_API_URL');
+    putenv('GITHUB_REPOSITORY=example/repo');
+    putenv('GITHUB_TOKEN=super-secret-token');
+    putenv('GITHUB_API_URL=https://user:pass@example.invalid/api?token=secret-token');
+
+    $doctorRedactedJson = run_command_json($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'doctor',
+        '--repo-root=.',
+        '--json',
+    ]);
+    $doctorMessages = json_encode($doctorRedactedJson['messages'] ?? [], JSON_THROW_ON_ERROR);
+    $assert(! str_contains((string) $doctorMessages, 'super-secret-token'), 'Expected doctor --json to redact secret environment values.');
+    $assert(! str_contains((string) $doctorMessages, 'user:pass@'), 'Expected doctor --json to redact credential-bearing URLs.');
+    $assert(str_contains((string) $doctorMessages, '[REDACTED]'), 'Expected doctor --json redaction markers in sanitized messages.');
+
+    $doctorRedactedPlain = run_command_allow_failure($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'doctor',
+        '--repo-root=.',
+    ]);
+    $assert($doctorRedactedPlain['exit_code'] === 0, 'Expected doctor plain output run to succeed in redaction regression test.');
+    $assert(! str_contains($doctorRedactedPlain['stdout'], 'super-secret-token'), 'Expected doctor plain output to redact secret environment values.');
+    $assert(! str_contains($doctorRedactedPlain['stdout'], 'user:pass@'), 'Expected doctor plain output to redact credential-bearing URLs.');
+    $assert(str_contains($doctorRedactedPlain['stdout'], '[REDACTED]'), 'Expected doctor plain output to include redaction markers.');
+
+    if ($oldGitHubRepository === false) {
+        putenv('GITHUB_REPOSITORY');
+    } else {
+        putenv('GITHUB_REPOSITORY=' . $oldGitHubRepository);
+    }
+
+    if ($oldGitHubToken === false) {
+        putenv('GITHUB_TOKEN');
+    } else {
+        putenv('GITHUB_TOKEN=' . $oldGitHubToken);
+    }
+
+    if ($oldGitHubApiUrl === false) {
+        putenv('GITHUB_API_URL');
+    } else {
+        putenv('GITHUB_API_URL=' . $oldGitHubApiUrl);
+    }
+
     $tempCoreRoot = sys_get_temp_dir() . '/wporg-core-scanner-' . bin2hex(random_bytes(4));
     mkdir($tempCoreRoot . '/wp-includes', 0777, true);
     file_put_contents($tempCoreRoot . '/wp-includes/version.php', "<?php\n\$wp_version = '6.9.4';\n");
@@ -207,6 +330,37 @@ function run_command_json(string $cwd, array $command): array
     }
 
     return $result['payload'];
+}
+
+/**
+ * @param list<string> $command
+ * @return array{exit_code:int,stdout:string,stderr:string}
+ */
+function run_command_allow_failure(string $cwd, array $command): array
+{
+    $descriptor = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+    $process = proc_open($command, $descriptor, $pipes, $cwd);
+
+    if (! is_resource($process)) {
+        throw new RuntimeException(sprintf('Unable to start command: %s', implode(' ', $command)));
+    }
+
+    fclose($pipes[0]);
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $status = proc_close($process);
+
+    return [
+        'exit_code' => $status,
+        'stdout' => is_string($stdout) ? $stdout : '',
+        'stderr' => is_string($stderr) ? $stderr : '',
+    ];
 }
 
 /**
