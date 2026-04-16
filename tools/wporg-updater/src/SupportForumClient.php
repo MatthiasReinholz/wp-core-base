@@ -261,11 +261,15 @@ final class SupportForumClient
 
     private function supportUrl(string $slug): string
     {
+        WordPressOrgSlugValidator::assertValid($slug);
+
         return sprintf('https://wordpress.org/support/plugin/%s/', rawurlencode($slug));
     }
 
     private function feedUrl(string $slug): string
     {
+        WordPressOrgSlugValidator::assertValid($slug);
+
         return sprintf('https://wordpress.org/support/plugin/%s/feed/', rawurlencode($slug));
     }
 

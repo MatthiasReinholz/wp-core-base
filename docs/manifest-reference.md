@@ -29,6 +29,10 @@ Allowed values:
 - `full-core`
 - `content-only`
 
+Normalized parser default:
+
+- `full-core`
+
 ## `paths`
 
 Required keys:
@@ -38,19 +42,54 @@ Required keys:
 - `themes_root`
 - `mu_plugins_root`
 
-Defaults for `full-core`:
+### Normalized parser defaults
+
+When `profile` is `full-core`, omitted path keys default to:
 
 - `wp-content`
 - `wp-content/plugins`
 - `wp-content/themes`
 - `wp-content/mu-plugins`
 
-Defaults for `content-only`:
+When `profile` is `content-only`, omitted path keys default to:
 
 - `cms`
 - `cms/plugins`
 - `cms/themes`
 - `cms/mu-plugins`
+
+The generated admin-governance loader and data file follow `mu_plugins_root`. If you migrate any of the path roots, rerun `refresh-admin-governance` after updating the manifest so runtime governance metadata moves with the repo.
+
+### Scaffold And Example Defaults
+
+The scaffold templates and example manifests use the same path family, but they also set profile-specific runtime defaults.
+
+The committed example manifest in `docs/examples/downstream-manifest.php` follows the `content-only` path family and the strict/source-clean baseline.
+
+Scaffold defaults for `full-core`:
+
+- `core.mode`: `managed`
+- `core.enabled`: `true`
+- `runtime.manifest_mode`: `strict`
+- `runtime.validation_mode`: `source-clean`
+- `runtime.ownership_roots`: `plugins_root`, `themes_root`, `mu_plugins_root`
+- `automation.managed_kinds`: `plugin`, `theme`, `mu-plugin-package`
+- `runtime.staged_kinds`: all runtime kinds
+- `runtime.validated_kinds`: all runtime kinds
+
+Scaffold defaults for `content-only`:
+
+- `core.mode`: `external`
+- `core.enabled`: `false`
+- `runtime.manifest_mode`: `strict`
+- `runtime.validation_mode`: `source-clean`
+- `runtime.ownership_roots`: `plugins_root`, `themes_root`, `mu_plugins_root`
+- `automation.managed_kinds`: `plugin`, `theme`
+- `runtime.staged_kinds`: all runtime kinds
+- `runtime.validated_kinds`: all runtime kinds
+
+The `content-only-migration` scaffold preset keeps the same path family but switches `runtime.manifest_mode` to `relaxed` during migration.
+The `content-only-image-first` and `content-only-image-first-compact` presets keep `runtime.manifest_mode: strict`, switch `runtime.validation_mode` to `staged-clean`, and add `__CONTENT_ROOT__/languages` to `runtime.ownership_roots`.
 
 ## `core`
 
@@ -60,6 +99,11 @@ Keys:
 - `enabled`: `true` or `false`
 
 Use `managed` only when the repo actually contains WordPress core.
+
+Normalized parser defaults:
+
+- `core.mode`: `managed` when `profile` is `full-core`, `external` when `profile` is `content-only`
+- `core.enabled`: `true` when `core.mode` is `managed`, otherwise `false`
 
 ## `runtime`
 
@@ -81,6 +125,15 @@ Keys:
 
 These define the runtime hygiene contract for staging and validation.
 
+Normalized parser defaults:
+
+- `stage_dir`: `.wp-core-base/build/runtime`
+- `manifest_mode`: `strict`
+- `validation_mode`: `source-clean`
+- `ownership_roots`: `plugins_root`, `themes_root`, `mu_plugins_root`
+- `staged_kinds`: all runtime kinds
+- `validated_kinds`: all runtime kinds
+
 `manifest_mode` may be:
 
 - `strict`: undeclared runtime paths under the managed roots are validation errors and are not staged
@@ -101,6 +154,10 @@ Keys:
 
 Use `getenv('GITHUB_API_URL') ?: 'https://api.github.com'` if you want GitHub Enterprise compatibility.
 
+Normalized parser default:
+
+- `api_base`: `getenv('GITHUB_API_URL') ?: 'https://api.github.com'`
+
 ## `automation`
 
 Keys:
@@ -111,6 +168,10 @@ Keys:
 
 `managed_kinds` limits what `sync` may update. A dependency must be both `management: managed` and listed in `automation.managed_kinds` before the updater will touch it.
 
+Normalized parser default:
+
+- `managed_kinds`: `plugin`, `theme`, `mu-plugin-package`
+
 ## `security`
 
 Keys:
@@ -119,6 +180,8 @@ Keys:
 - `github_release_verification`
 
 `managed_release_min_age_hours` defaults to `0`. Set it when you want `sync` to ignore very fresh upstream releases until they have aged for the configured number of hours.
+
+`github_release_verification` defaults to `checksum-sidecar-optional`. Set it to `none` if you do not want repo-level verification, or to `checksum-sidecar-required` if you want mandatory detached checksum sidecars for inherited `github-release` dependencies.
 
 `github_release_verification` may be:
 

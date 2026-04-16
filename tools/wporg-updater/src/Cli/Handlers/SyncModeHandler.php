@@ -29,7 +29,6 @@ use WpOrgPluginUpdater\TempDirectoryJanitor;
 use WpOrgPluginUpdater\SyncReport;
 use WpOrgPluginUpdater\Updater;
 use WpOrgPluginUpdater\WordPressCoreClient;
-use WpOrgPluginUpdater\WordPressOrgClient;
 
 final class SyncModeHandler implements CliModeHandler
 {
@@ -62,7 +61,6 @@ final class SyncModeHandler implements CliModeHandler
         $dependencyUpdater = new Updater(
             config: $this->config,
             dependencyScanner: new DependencyScanner(),
-            wordPressOrgClient: new WordPressOrgClient($this->httpClient),
             gitHubReleaseClient: new GitHubReleaseClient($this->httpClient, $this->config->githubApiBase()),
             managedSourceRegistry: $this->managedSourceRegistry,
             supportForumClient: new SupportForumClient($this->httpClient, 100),
@@ -72,7 +70,6 @@ final class SyncModeHandler implements CliModeHandler
             gitRunner: new GitCommandRunner($this->repoRoot, $this->config->dryRun()),
             runtimeInspector: $runtimeInspector,
             manifestWriter: new ManifestWriter(),
-            httpClient: $this->httpClient,
             adminGovernanceExporter: $this->adminGovernanceExporter,
         );
         $coreUpdater = new CoreUpdater(

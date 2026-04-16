@@ -2,6 +2,8 @@
 
 Most framework commands run through PHP.
 
+Requires PHP 8.1 or newer. The framework is tested on PHP 8.1, 8.3, and 8.4.
+
 That includes:
 
 - `doctor`
@@ -13,6 +15,8 @@ That includes:
 - `list-dependencies`
 
 If you use the shell launcher at `bin/wp-core-base`, it will check for a local PHP CLI first and print install help if PHP is missing.
+
+There is no separate built-in WordPress `wp-cli` wrapper. Use the shipped PHP entrypoints directly or add your own alias if you want a shorter command name.
 
 ## Install PHP CLI
 

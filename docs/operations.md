@@ -15,6 +15,8 @@ php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only
 php tools/wporg-updater/tests/run.php
 ```
 
+`stage-runtime --output` must be repo-relative. Absolute paths and `..` traversal are rejected.
+
 If `wp-core-base` is vendored, run these commands from the vendored path and pass `--repo-root=.`
 
 ## Recommended Operating Routine
@@ -74,7 +76,9 @@ The intended CI contract is:
 
 If your project is image-first, treat the staged runtime directory as the build input.
 
-## Common Failure Modes
+## Troubleshooting
+
+If you are still onboarding, start with [getting-started.md](getting-started.md) and [managing-dependencies.md](managing-dependencies.md) before chasing operational errors.
 
 ### `doctor` reports checksum drift
 

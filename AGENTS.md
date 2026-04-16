@@ -81,13 +81,16 @@ Do not blur those contracts when reasoning about the system.
 
 ## Safe Assumptions
 
+- The framework requires PHP 8.1 or newer and is tested on PHP 8.1, 8.3, and 8.4.
 - `local` is a first-class long-term ownership model.
 - `managed` means overwrite-by-automation is acceptable.
 - `ignored` means documented but out of scope.
 - `full-core` and `content-only` are both first-class.
+- multisite is a repo-wide posture; keep content roots, ownership roots, and governance aligned across the network.
 - GitHub is required only for automated PR flows, not for using the code base itself.
 - `stage-runtime` is the deployment contract whenever staged runtime is part of the architecture.
 - `framework-sync` updates the vendored `wp-core-base` framework snapshot, not the runtime manifest.
+- there is no built-in WordPress `wp-cli` wrapper; use the PHP entrypoints or your own shell alias around them.
 - premium plugin credentials live in `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`, not in the manifest.
 - downstream-owned premium provider registrations live in `.wp-core-base/premium-providers.php`.
 - workflow-managed plugins may intentionally look non-updateable inside wp-admin because the governance MU plugin suppresses misleading in-dashboard update actions for them.

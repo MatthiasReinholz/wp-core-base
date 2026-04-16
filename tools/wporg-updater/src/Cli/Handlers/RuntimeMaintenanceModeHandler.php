@@ -41,7 +41,7 @@ final class RuntimeMaintenanceModeHandler implements CliModeHandler
         if ($mode === 'stage-runtime') {
             $runtimeInspector = new RuntimeInspector($this->config->runtime);
             $stager = new RuntimeStager($this->config, $runtimeInspector, $adminGovernanceExporter);
-            $stagedPaths = $stager->stage((string) ($options['output'] ?? $this->config->runtime['stage_dir']));
+            $stagedPaths = $stager->stage((string) ($options['output'] ?? ''));
 
             if ($this->jsonOutput) {
                 ($this->emitJson)([

@@ -23,26 +23,29 @@ final class CommandHelp
     {
         return <<<TEXT
 Usage:
+  Routine downstream commands (most users):
   {$commandPrefix} add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
   {$commandPrefix} adopt-dependency --kind=plugin --slug=woocommerce --source=wordpress.org --preserve-version
-  {$phpCommandPrefix} sync
-  {$phpCommandPrefix} render-sync-report --report-json=.wp-core-base/build/sync-report.json [--summary-path=/tmp/summary.md]
-  {$phpCommandPrefix} sync-report-issue --report-json=.wp-core-base/build/sync-report.json
   {$phpCommandPrefix} doctor [--repo-root=/path] [--github] [--json]
   {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime] [--json]
   {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
-  {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force] [--adopt-existing-managed-files]
-  {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only]
-  {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
-  {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--json]
-  {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
-  {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0] [--artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig [--public-key-file=/path/to/framework-release-public.pem]] [--json]
   {$phpCommandPrefix} suggest-manifest [--repo-root=/path]
   {$phpCommandPrefix} format-manifest [--repo-root=/path]
   {$phpCommandPrefix} add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
   {$phpCommandPrefix} adopt-dependency [--repo-root=/path] --source=wordpress.org|github-release|premium --kind=... --slug=... [--preserve-version]
   {$phpCommandPrefix} remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
   {$phpCommandPrefix} list-dependencies [--repo-root=/path]
+  {$phpCommandPrefix} sync [--repo-root=/path] [--report-json=...] [--fail-on-source-errors]
+
+  Maintainer/workflow commands:
+  {$phpCommandPrefix} render-sync-report --report-json=.wp-core-base/build/sync-report.json [--summary-path=/tmp/summary.md]
+  {$phpCommandPrefix} sync-report-issue --report-json=.wp-core-base/build/sync-report.json
+  {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force] [--adopt-existing-managed-files]
+  {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only]
+  {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
+  {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--json]
+  {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
+  {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0] [--artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig [--public-key-file=/path/to/framework-release-public.pem]] [--json]
   {$phpCommandPrefix} scaffold-premium-provider [--repo-root=/path] --provider=your-provider [--class=Project\\WpCoreBase\\Premium\\YourProviderManagedSource] [--path=.wp-core-base/premium-providers/your-provider.php]
   {$phpCommandPrefix} pr-blocker [--pr-number=123] [--json]
   {$phpCommandPrefix} pr-blocker-reconcile [--json]
@@ -53,6 +56,11 @@ Use:
   {$commandPrefix} help remove-dependency
   {$commandPrefix} help scaffold-premium-provider
   {$commandPrefix} help sync
+
+Notes:
+  - Most downstream users only need the routine command group above.
+  - `stage-runtime --output` must stay repo-relative; absolute paths and traversal are rejected.
+  - `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` accepts comma-separated absolute paths only.
 
 TEXT;
     }

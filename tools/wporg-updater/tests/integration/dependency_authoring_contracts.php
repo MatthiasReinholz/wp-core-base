@@ -55,6 +55,53 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
     /** @var SupportForumClient $supportClient */
     $supportClient = $context['supportClient'];
 
+    $invalidSlugRejected = false;
+
+    try {
+        $wpClient->componentUrl('plugin', 'Foo');
+    } catch (RuntimeException $exception) {
+        $invalidSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
+    }
+
+    $assert($invalidSlugRejected, 'Expected WordPress.org client URL composition to reject uppercase slugs.');
+
+    $traversalSlugRejected = false;
+
+    try {
+        $wpClient->componentUrl('plugin', 'foo/../bar');
+    } catch (RuntimeException $exception) {
+        $traversalSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
+    }
+
+    $assert($traversalSlugRejected, 'Expected WordPress.org client URL composition to reject traversal slugs.');
+
+    $leadingHyphenSlugRejected = false;
+
+    try {
+        $wpClient->componentUrl('plugin', '-foo');
+    } catch (RuntimeException $exception) {
+        $leadingHyphenSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
+    }
+
+    $assert($leadingHyphenSlugRejected, 'Expected WordPress.org client URL composition to reject leading hyphen slugs.');
+    $assert(
+        $wpClient->componentUrl('plugin', 'valid-lowercase-slug') === 'https://wordpress.org/plugins/valid-lowercase-slug/',
+        'Expected WordPress.org client URL composition to accept valid lowercase slugs.'
+    );
+
+    $supportClientReflection = new ReflectionClass(SupportForumClient::class);
+    $supportUrlMethod = $supportClientReflection->getMethod('supportUrl');
+    $supportUrlMethod->setAccessible(true);
+    $supportClientSlugRejected = false;
+
+    try {
+        $supportUrlMethod->invoke($supportClient, 'Foo');
+    } catch (RuntimeException $exception) {
+        $supportClientSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
+    }
+
+    $assert($supportClientSlugRejected, 'Expected support forum URL composition to reject invalid slugs.');
+
     $authoringRoot = sys_get_temp_dir() . '/wporg-authoring-' . bin2hex(random_bytes(4));
     mkdir($authoringRoot . '/cms/plugins/project-plugin', 0777, true);
     mkdir($authoringRoot . '/cms/themes/project-theme', 0777, true);
@@ -154,6 +201,8 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php'
     );
     $assert(str_contains($generalHelp, '--signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected general help to document signature-backed artifact verification.');
+    $assert(str_contains($generalHelp, 'Routine downstream commands'), 'Expected general help to group routine downstream commands explicitly.');
+    $assert(str_contains($generalHelp, 'Maintainer/workflow commands'), 'Expected general help to group maintainer and workflow commands explicitly.');
 
     $premiumScaffoldHelp = CommandHelp::render(
         'scaffold-premium-provider',
@@ -189,6 +238,43 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         str_replace('\\', '/', $locatedPayload) === str_replace('\\', '/', $locatorRoot . '/example-companion'),
         'Expected archive payload selection to prefer the slug directory over the broader extract root when both are technically valid.'
     );
+
+    $locatorByEntryRoot = sys_get_temp_dir() . '/wporg-authoring-locator-entry-' . bin2hex(random_bytes(4));
+    mkdir($locatorByEntryRoot . '/example-companion', 0777, true);
+    file_put_contents($locatorByEntryRoot . '/example-companion/example-companion.php', "<?php\n");
+    file_put_contents($locatorByEntryRoot . '/example-companion.php', "<?php\n");
+    $locatedByExpectedEntry = ExtractedPayloadLocator::locateByExpectedEntry(
+        $locatorByEntryRoot,
+        '',
+        'example-companion.php',
+        'example-companion',
+        false
+    );
+    $assert(
+        str_replace('\\', '/', $locatedByExpectedEntry) === str_replace('\\', '/', $locatorByEntryRoot . '/example-companion'),
+        'Expected extracted payload locator to deterministically pick the better-scored candidate.'
+    );
+
+    $locatorAmbiguousRoot = sys_get_temp_dir() . '/wporg-authoring-locator-ambiguous-' . bin2hex(random_bytes(4));
+    mkdir($locatorAmbiguousRoot . '/package-a', 0777, true);
+    mkdir($locatorAmbiguousRoot . '/package-b', 0777, true);
+    file_put_contents($locatorAmbiguousRoot . '/package-a/main.php', "<?php\n");
+    file_put_contents($locatorAmbiguousRoot . '/package-b/main.php', "<?php\n");
+    $ambiguousLocatorRejected = false;
+
+    try {
+        ExtractedPayloadLocator::locateByExpectedEntry(
+            $locatorAmbiguousRoot,
+            '',
+            'main.php',
+            'example-companion',
+            false
+        );
+    } catch (RuntimeException $exception) {
+        $ambiguousLocatorRejected = str_contains($exception->getMessage(), 'multiple candidate dependency payloads');
+    }
+
+    $assert($ambiguousLocatorRejected, 'Expected extracted payload locator to reject exact top-score ties as ambiguous.');
 
     $managedArchivePath = sys_get_temp_dir() . '/wporg-authoring-managed-' . bin2hex(random_bytes(4)) . '.zip';
     $createPluginArchive($managedArchivePath, 'release-package', 'adopt-me', '2.3.4');

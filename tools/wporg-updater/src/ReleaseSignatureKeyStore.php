@@ -29,15 +29,28 @@ final class ReleaseSignatureKeyStore
     {
         $paths = [];
 
-        if (is_string($preferredPublicKeyPath) && trim($preferredPublicKeyPath) !== '') {
-            $paths[] = trim($preferredPublicKeyPath);
-        }
-
         $defaultPath = self::defaultPublicKeyPath($framework);
-        $paths[] = $defaultPath;
-
         $keyDirectory = dirname($defaultPath);
         $rotatedKeys = glob($keyDirectory . '/' . self::PUBLIC_KEY_ROTATED_GLOB) ?: [];
+        $keyringPaths = [$defaultPath];
+
+        foreach ($rotatedKeys as $rotatedKeyPath) {
+            if (is_string($rotatedKeyPath) && trim($rotatedKeyPath) !== '') {
+                $keyringPaths[] = $rotatedKeyPath;
+            }
+        }
+
+        if (is_string($preferredPublicKeyPath) && trim($preferredPublicKeyPath) !== '') {
+            $resolvedPreferredPath = trim($preferredPublicKeyPath);
+
+            if (! in_array($resolvedPreferredPath, $keyringPaths, true)) {
+                self::assertSafeExternalPublicKeyPath($resolvedPreferredPath);
+            }
+
+            $paths[] = $resolvedPreferredPath;
+        }
+
+        $paths[] = $defaultPath;
 
         foreach ($rotatedKeys as $rotatedKeyPath) {
             if (is_string($rotatedKeyPath) && trim($rotatedKeyPath) !== '') {
@@ -50,6 +63,15 @@ final class ReleaseSignatureKeyStore
         if (is_string($envPaths) && trim($envPaths) !== '') {
             foreach (preg_split('/\s*,\s*/', trim($envPaths)) ?: [] as $envPath) {
                 if ($envPath !== '') {
+                    if (! self::isAbsolutePath($envPath)) {
+                        throw new RuntimeException(sprintf(
+                            '%s entries must be absolute paths: %s',
+                            self::PUBLIC_KEY_PATHS_ENV,
+                            $envPath
+                        ));
+                    }
+
+                    self::assertSafeExternalPublicKeyPath($envPath);
                     $paths[] = $envPath;
                 }
             }
@@ -85,5 +107,101 @@ final class ReleaseSignatureKeyStore
         }
 
         return (string) $value;
+    }
+
+    private static function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/')
+            || str_starts_with($path, '\\\\')
+            || preg_match('/^[A-Za-z]:[\\\\\\/]/', $path) === 1;
+    }
+
+    private static function assertSafeExternalPublicKeyPath(string $path): void
+    {
+        if (! self::isAbsolutePath($path)) {
+            throw new RuntimeException(sprintf(
+                'Release public key override path must be absolute: %s',
+                $path
+            ));
+        }
+
+        if (is_link($path)) {
+            throw new RuntimeException(sprintf(
+                'Release public key override path is a symlink and is not trusted: %s',
+                $path
+            ));
+        }
+
+        if (! is_file($path)) {
+            throw new RuntimeException(sprintf(
+                'Release public key override path must be a regular file: %s',
+                $path
+            ));
+        }
+
+        self::assertNotWorldWritable($path, 'Release public key override file is world-writable');
+        self::assertParentsNotGroupOrWorldWritable($path);
+    }
+
+    private static function assertNotWorldWritable(string $path, string $message): void
+    {
+        $permissions = @fileperms($path);
+
+        if (! is_int($permissions)) {
+            throw new RuntimeException(sprintf('Unable to inspect permissions for release public key path: %s', $path));
+        }
+
+        if (($permissions & 0x0002) !== 0) {
+            throw new RuntimeException(sprintf('%s: %s', $message, $path));
+        }
+    }
+
+    private static function assertParentsNotGroupOrWorldWritable(string $path): void
+    {
+        if (DIRECTORY_SEPARATOR !== '/') {
+            return;
+        }
+
+        $current = dirname($path);
+
+        while ($current !== '' && $current !== '.' && $current !== DIRECTORY_SEPARATOR) {
+            if (! is_dir($current)) {
+                throw new RuntimeException(sprintf(
+                    'Release public key override parent directory does not exist: %s',
+                    $current
+                ));
+            }
+
+            if (is_link($current)) {
+                throw new RuntimeException(sprintf(
+                    'Release public key override parent directory is a symlink and is not trusted: %s',
+                    $current
+                ));
+            }
+
+            $permissions = @fileperms($current);
+
+            if (! is_int($permissions)) {
+                throw new RuntimeException(sprintf(
+                    'Unable to inspect permissions for release public key parent directory: %s',
+                    $current
+                ));
+            }
+
+            if (($permissions & 0x0012) !== 0) {
+                throw new RuntimeException(sprintf(
+                    'Release public key override parent directory is group/world-writable: %s',
+                    $current
+                ));
+            }
+
+            $parent = dirname($current);
+
+            if ($parent === $current) {
+                break;
+            }
+
+            $current = $parent;
+        }
     }
 }

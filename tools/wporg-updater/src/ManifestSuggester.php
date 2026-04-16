@@ -36,6 +36,10 @@ final class ManifestSuggester
                 $entry['path']
             );
 
+            if (is_string($suggestion['main_file'] ?? null) && trim((string) $suggestion['main_file']) !== '') {
+                $lines[count($lines) - 1] .= ' --main-file=' . $suggestion['main_file'];
+            }
+
             if ($entry['is_symlink']) {
                 $lines[] = '# This path is a symlink. Prefer converting it into local code, a release-backed managed dependency, or an ignored path.';
             }

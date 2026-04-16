@@ -34,6 +34,7 @@ use WpOrgPluginUpdater\HttpStatusRuntimeException;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManagedDependencySource;
+use WpOrgPluginUpdater\ManagedDependencyReleaseResolver;
 use WpOrgPluginUpdater\ManagedPullRequestCanonicalizer;
 use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\ManifestWriter;
@@ -70,6 +71,7 @@ require __DIR__ . '/integration/security_framework_contracts.php';
 require __DIR__ . '/integration/security_policy_contracts.php';
 require __DIR__ . '/integration/dependency_authoring_contracts.php';
 require __DIR__ . '/integration/cli_json_contracts.php';
+require __DIR__ . '/integration/seam_contracts.php';
 require __DIR__ . '/integration/blocker_states.php';
 require __DIR__ . '/integration/followups.php';
 
@@ -1783,11 +1785,11 @@ $assert(! file_exists($compactScaffoldRoot . '/.github/workflows/wporg-validate-
 $compactReconcileWorkflow = (string) file_get_contents($compactScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
 $assert(str_contains($compactReconcileWorkflow, "automation:framework-update"), 'Expected compact scaffold to keep merged automation PR reconciliation in the dedicated reconciliation workflow.');
 
-$updaterReflection = new ReflectionClass(\WpOrgPluginUpdater\Updater::class);
-$normalizedReleaseData = $updaterReflection->getMethod('normalizedReleaseData');
+$releaseResolverReflection = new ReflectionClass(ManagedDependencyReleaseResolver::class);
+$normalizedReleaseData = $releaseResolverReflection->getMethod('normalizedReleaseData');
 $normalizedReleaseData->setAccessible(true);
-$updaterWithoutConstructor = $updaterReflection->newInstanceWithoutConstructor();
-$normalizedFallback = $normalizedReleaseData->invoke($updaterWithoutConstructor, $premiumSourceDetailsWithoutNotes, '6.3.0');
+$releaseResolverWithoutConstructor = $releaseResolverReflection->newInstanceWithoutConstructor();
+$normalizedFallback = $normalizedReleaseData->invoke($releaseResolverWithoutConstructor, $premiumSourceDetailsWithoutNotes, '6.3.0');
 $assert(
     $normalizedFallback['notes_markup'] === '_Release notes unavailable for version 6.3.0._',
     'Expected the updater to synthesize fallback notes markup when a source omits release notes.'
@@ -1796,20 +1798,20 @@ $assert(
     $normalizedFallback['notes_text'] === 'Release notes unavailable for version 6.3.0.',
     'Expected the updater to synthesize fallback notes text when a source omits release notes.'
 );
-$branchRefreshRequired = $updaterReflection->getMethod('branchRefreshRequired');
-$branchRefreshRequired->setAccessible(true);
 $assert(
-    $branchRefreshRequired->invoke($updaterWithoutConstructor, [], 'abc123') === true,
+    \WpOrgPluginUpdater\AutomationPullRequestGuard::branchRefreshRequired([], 'abc123') === true,
     'Expected updater PR metadata without a recorded base revision to refresh once against the current base branch.'
 );
 $assert(
-    $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'abc123'], 'abc123') === false,
+    \WpOrgPluginUpdater\AutomationPullRequestGuard::branchRefreshRequired(['base_revision' => 'abc123'], 'abc123') === false,
     'Expected updater PR metadata with a matching base revision to avoid unnecessary branch refreshes.'
 );
 $assert(
-    $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'stale456'], 'abc123') === true,
+    \WpOrgPluginUpdater\AutomationPullRequestGuard::branchRefreshRequired(['base_revision' => 'stale456'], 'abc123') === true,
     'Expected updater PR metadata with a stale base revision to require branch refresh.'
 );
+$updaterReflection = new ReflectionClass(\WpOrgPluginUpdater\Updater::class);
+$updaterWithoutConstructor = $updaterReflection->newInstanceWithoutConstructor();
 $partitionPullRequestsByTargetVersion = $updaterReflection->getMethod('partitionPullRequestsByTargetVersion');
 $partitionPullRequestsByTargetVersion->setAccessible(true);
 [$canonicalPrs, $duplicatePrs] = $partitionPullRequestsByTargetVersion->invoke($updaterWithoutConstructor, [
@@ -1969,10 +1971,16 @@ $assert(str_contains($scaffoldedBlockerWorkflow, 'workflow_dispatch:'), 'Expecte
 $assert(str_contains($scaffoldedBlockerWorkflow, 'schedule:'), 'Expected scaffolded blocker workflow to expose scheduled retry coverage.');
 $syncReport = SyncReport::build([], ['plugin:premium:example-vendor:private-plugin: Invalid access credentials.']);
 $assert($syncReport['status'] === SyncReport::STATUS_WARNING, 'Expected sync report builder to mark dependency-source warnings as warning status.');
-$assert(SyncReport::renderSummary($syncReport) !== '', 'Expected sync report renderer to produce summary markdown.');
+$syncSummary = SyncReport::renderSummary($syncReport);
+$assert($syncSummary !== '', 'Expected sync report renderer to produce summary markdown.');
+$assert(! str_contains($syncSummary, 'Generated at'), 'Expected sync report summaries without generated_at to omit the generated-at line.');
 $syncReportPath = sys_get_temp_dir() . '/wporg-sync-report-' . bin2hex(random_bytes(4)) . '.json';
 SyncReport::write($syncReport, $syncReportPath);
 $assert(SyncReport::exists($syncReportPath), 'Expected sync report writer to create the requested report file.');
+$firstSyncReportBytes = (string) file_get_contents($syncReportPath);
+SyncReport::write($syncReport, $syncReportPath);
+$secondSyncReportBytes = (string) file_get_contents($syncReportPath);
+$assert($firstSyncReportBytes === $secondSyncReportBytes, 'Expected sync report writes for the same payload to be byte-stable.');
 $reloadedSyncReport = SyncReport::read($syncReportPath);
 $assert(($reloadedSyncReport['warning_count'] ?? null) === 1, 'Expected sync report reader to reload the written warning count.');
 $fakeIssueClient = new FakeGitHubAutomationClient();
@@ -1982,6 +1990,7 @@ $fakeIssueClient->openIssues = [
 ];
 SyncReport::syncIssue($fakeIssueClient, $syncReport, 'https://example.com/run');
 $assert(count($fakeIssueClient->updatedIssues) === 1, 'Expected sync-report issue sync to update the canonical open issue when warnings exist.');
+$assert(! str_contains((string) ($fakeIssueClient->updatedIssues[0]['body'] ?? ''), 'Generated at'), 'Expected sync-report issue bodies without generated_at to omit the generated-at line.');
 $assert(count($fakeIssueClient->closedIssues) === 1 && (int) $fakeIssueClient->closedIssues[0]['number'] === 9, 'Expected sync-report issue sync to close duplicate open issues.');
 $clearIssueClient = new FakeGitHubAutomationClient();
 $clearIssueClient->openIssues = [['number' => 10, 'title' => 'wp-core-base dependency source failures']];
@@ -2051,6 +2060,26 @@ $assert(
 $assert(
     trim((string) file_get_contents($gitRunnerRoot . '/tracked.txt')) === 'baseline',
     'Expected GitCommandRunner push-failure rollback to restore tracked file contents.'
+);
+
+run_process_or_fail($assert, $gitRunnerRoot, ['git', 'remote', 'set-url', 'origin', '/path/that/does/not/exist'], 'Expected to keep origin invalid for force-push rollback testing.');
+file_put_contents($gitRunnerRoot . '/tracked.txt', "force-changed\n");
+$forcePushRollbackRaised = false;
+
+try {
+    $gitCommandRunner->commitAndPush('main', 'Simulate force push rollback', ['tracked.txt'], true);
+} catch (RuntimeException $exception) {
+    $forcePushRollbackRaised = str_contains($exception->getMessage(), 'branch was reset to ' . $baselineRevision);
+}
+
+$assert($forcePushRollbackRaised, 'Expected GitCommandRunner to report force-push rollback details including the baseline revision.');
+$assert(
+    run_process_or_fail($assert, $gitRunnerRoot, ['git', 'rev-parse', 'HEAD'], 'Expected to resolve post-force-rollback revision.') === $baselineRevision,
+    'Expected GitCommandRunner to reset the local branch back to the baseline revision when force push fails.'
+);
+$assert(
+    trim((string) file_get_contents($gitRunnerRoot . '/tracked.txt')) === 'baseline',
+    'Expected GitCommandRunner force-push rollback to restore tracked file contents.'
 );
 
 $lockRepoRoot = sys_get_temp_dir() . '/wporg-lock-timeout-' . bin2hex(random_bytes(4));
@@ -2225,5 +2254,7 @@ run_cli_json_contract_tests(
     $writeManifest,
     $writePremiumProvider
 );
+
+run_seam_contract_tests($assert, $repoRoot);
 
 fwrite(STDOUT, "All updater tests passed.\n");

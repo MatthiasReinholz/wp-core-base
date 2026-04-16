@@ -141,7 +141,7 @@ final class FrameworkSyncer
             throw new RuntimeException(sprintf('Managed framework pull request #%d has incomplete metadata.', $pullRequest['number']));
         }
 
-        $requiresCodeUpdate = $this->branchRefreshRequired($metadata, $baseRevision);
+        $requiresCodeUpdate = AutomationPullRequestGuard::branchRefreshRequired($metadata, $baseRevision);
 
         if (
             $this->releaseClassifier->samePatchLine($targetVersion, $latestVersion) &&
@@ -181,7 +181,7 @@ final class FrameworkSyncer
             throw new RuntimeException(sprintf('Managed framework pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
-        $this->assertRefreshableAutomationPullRequest($plannedPr, $branch, $defaultBranch);
+        AutomationPullRequestGuard::assertRefreshable($plannedPr, $branch, $defaultBranch, 'Framework automation PR');
 
         $branchGuard = (bool) $plannedPr['requires_code_update'] ? $this->beginBranchRollbackGuard($branch) : null;
 
@@ -506,7 +506,7 @@ final class FrameworkSyncer
         foreach ($pullRequests as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
-            if ($metadata === null || ($metadata['component_key'] ?? null) !== self::COMPONENT_KEY || ! $this->isManagedRepositoryPullRequest($pullRequest)) {
+            if ($metadata === null || ($metadata['component_key'] ?? null) !== self::COMPONENT_KEY || ! AutomationPullRequestGuard::isSameRepositoryAutomationPullRequest($pullRequest)) {
                 continue;
             }
 
@@ -587,58 +587,4 @@ final class FrameworkSyncer
         return $guard;
     }
 
-    /**
-     * @param array<string, mixed> $metadata
-     */
-    private function branchRefreshRequired(array $metadata, string $baseRevision): bool
-    {
-        if ($baseRevision === '') {
-            return false;
-        }
-
-        $recordedBaseRevision = $metadata['base_revision'] ?? null;
-
-        return ! is_string($recordedBaseRevision)
-            || $recordedBaseRevision === ''
-            || ! hash_equals($recordedBaseRevision, $baseRevision);
-    }
-
-    /**
-     * @param array<string, mixed> $pullRequest
-     */
-    private function assertRefreshableAutomationPullRequest(array $pullRequest, string $branch, string $defaultBranch): void
-    {
-        $baseRef = (string) ($pullRequest['base']['ref'] ?? '');
-
-        if ($branch === $defaultBranch || ($baseRef !== '' && $branch === $baseRef)) {
-            throw new RuntimeException(sprintf(
-                'Framework automation PR #%d resolved to protected branch %s and will not be refreshed.',
-                (int) ($pullRequest['number'] ?? 0),
-                $branch
-            ));
-        }
-
-        if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
-            throw new RuntimeException(sprintf(
-                'Framework automation PR #%d does not use a same-repository automation branch and will not be refreshed.',
-                (int) ($pullRequest['number'] ?? 0)
-            ));
-        }
-    }
-
-    /**
-     * @param array<string, mixed> $pullRequest
-     */
-    private function isManagedRepositoryPullRequest(array $pullRequest): bool
-    {
-        $head = is_array($pullRequest['head'] ?? null) ? $pullRequest['head'] : [];
-        $base = is_array($pullRequest['base'] ?? null) ? $pullRequest['base'] : [];
-        $headRef = (string) ($head['ref'] ?? '');
-        $headRepo = is_array($head['repo'] ?? null) ? $head['repo'] : [];
-        $baseRepo = is_array($base['repo'] ?? null) ? $base['repo'] : [];
-        $headFullName = strtolower((string) ($headRepo['full_name'] ?? ''));
-        $baseFullName = strtolower((string) ($baseRepo['full_name'] ?? ''));
-
-        return $headRef !== '' && $headFullName !== '' && $headFullName === $baseFullName;
-    }
 }

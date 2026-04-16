@@ -9,7 +9,7 @@ This document is for maintainers and evaluators of `wp-core-base`.
 - the committed repository state
 - the manifest and framework metadata committed in Git
 - published GitHub Releases used as supported release sources
-- detached signature verification for framework release checksum sidecars
+- detached JSON signature sidecars for framework release checksum files, verified with OpenSSL and `sha256`
 
 It does not trust:
 
@@ -48,6 +48,7 @@ Runtime integrity depends on:
 - runtime hygiene checks
 - symlink rejection
 - sanitized checksums for managed dependencies
+- WordPress core extraction checks that every extracted regular file is covered by the official checksum set before apply
 - staged runtime validation before deployment
 
 ## Framework Release Trust
@@ -57,6 +58,17 @@ Framework releases use:
 - `wp-core-base-vendor-snapshot.zip`
 - `wp-core-base-vendor-snapshot.zip.sha256`
 - `wp-core-base-vendor-snapshot.zip.sha256.sig`
+
+The detached signature sidecar is a JSON document with this contract:
+
+- `context`: the fixed release-signature context string
+- `algorithm`: `sha256`
+- `signed_file`: the checksum filename that was signed
+- `checksum_sha256`: the SHA-256 digest of that checksum file
+- `key_id`: the identifier used to select the matching public key
+- `signature`: the base64-encoded detached signature over the signed payload
+
+Verification uses OpenSSL over the payload `context`, `signed_file`, and `checksum_sha256` joined with newlines, and then checks the signature with `OPENSSL_ALGO_SHA256`.
 
 `release-verify` validates:
 
@@ -78,7 +90,7 @@ Candidate verification keys are resolved from:
 - the explicit key passed to `release-verify --public-key` (when provided)
 - the default key at `tools/wporg-updater/keys/framework-release-public.pem`
 - rotated key files matching `tools/wporg-updater/keys/framework-release-public-*.pem`
-- optional extra paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated absolute paths)
+- optional extra paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated absolute paths; relative paths are rejected)
 
 Rotation procedure:
 

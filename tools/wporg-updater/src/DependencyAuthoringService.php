@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace WpOrgPluginUpdater;
 
 use RuntimeException;
-use ZipArchive;
 
 final class DependencyAuthoringService
 {
@@ -60,7 +59,6 @@ final class DependencyAuthoringService
             ));
         }
 
-        $targetSource = $this->requiredString($options, 'source');
         $targetOptions = $options;
         $targetOptions['kind'] = $existing['kind'];
         $targetOptions['slug'] = $existing['slug'];
@@ -191,7 +189,8 @@ final class DependencyAuthoringService
 
         unset($dependencies[$removedIndex]);
         $nextConfig = $this->config->withDependencies(array_values($dependencies));
-        $trackedFileStates = $this->captureFileStates($this->trackedConfigPaths($this->config, $nextConfig));
+        $stateManager = $this->configMutationStateManager();
+        $trackedFileStates = $stateManager->snapshot($this->config, $nextConfig);
         $removedAbsolutePath = $this->config->repoRoot . '/' . $removed['path'];
         $backupRoot = null;
         $backupPath = null;
@@ -205,14 +204,14 @@ final class DependencyAuthoringService
         }
 
         try {
-            $this->persistConfig($nextConfig);
+            $stateManager->persist($nextConfig, $this->config);
             $this->config = $nextConfig;
         } catch (\Throwable $exception) {
             if ($deletePath && $backupPath !== null && (file_exists($backupPath) || is_link($backupPath))) {
                 $this->runtimeInspector->copyPath($backupPath, $removedAbsolutePath);
             }
 
-            $this->restoreFileStates($trackedFileStates);
+            $stateManager->restore($trackedFileStates);
             $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
 
             throw $exception;
@@ -387,7 +386,8 @@ final class DependencyAuthoringService
         $destinationAbsolutePath = $prepared['destination_absolute_path'];
         $preparedSourcePath = $prepared['prepared_source_path'];
         $nextConfig = $manifestMutation($entry);
-        $trackedFileStates = $this->captureFileStates($this->trackedConfigPaths($this->config, $nextConfig));
+        $stateManager = $this->configMutationStateManager();
+        $trackedFileStates = $stateManager->snapshot($this->config, $nextConfig);
         $backupRoot = null;
         $backupPath = null;
         $hadExistingDestination = file_exists($destinationAbsolutePath) || is_link($destinationAbsolutePath);
@@ -405,7 +405,7 @@ final class DependencyAuthoringService
                 $this->runtimeInspector->copyPath($preparedSourcePath, $destinationAbsolutePath);
             }
 
-            $this->persistConfig($nextConfig);
+            $stateManager->persist($nextConfig, $this->config);
             $this->config = $nextConfig;
 
             $result = $nextConfig->dependencyByKey(PremiumSourceResolver::componentKey(
@@ -426,7 +426,7 @@ final class DependencyAuthoringService
                 }
             }
 
-            $this->restoreFileStates($trackedFileStates);
+            $stateManager->restore($trackedFileStates);
             $this->config = Config::load($this->config->repoRoot, $this->config->manifestPath);
 
             throw $exception;
@@ -458,140 +458,7 @@ final class DependencyAuthoringService
      */
     private function prepareManagedDependency(array $rawEntry, array $options, ?string $requestedVersion, bool $replace, bool $privateGitHub): array
     {
-        $destinationPath = $this->config->repoRoot . '/' . $rawEntry['path'];
-
-        if ((file_exists($destinationPath) || is_link($destinationPath)) && ! $replace) {
-            throw new RuntimeException(sprintf(
-                'Target path already exists: %s. Re-run with --replace to overwrite it.',
-                $rawEntry['path']
-            ));
-        }
-
-        $tempDir = sys_get_temp_dir() . '/wporg-authoring-' . bin2hex(random_bytes(6));
-        mkdir($tempDir, 0775, true);
-        $archivePath = $tempDir . '/payload.zip';
-        $extractPath = $tempDir . '/extract';
-        mkdir($extractPath, 0775, true);
-
-        if ($rawEntry['source'] === 'github-release') {
-            $repository = $this->requiredString($options, 'github-repository');
-            $tokenEnv = $this->nullableString($options['github-token-env'] ?? null);
-            $defaultTokenEnv = self::defaultGitHubTokenEnv((string) $rawEntry['slug'], $repository);
-
-            $rawEntry['source_config']['github_repository'] = $repository;
-            $rawEntry['source_config']['github_release_asset_pattern'] = $this->nullableString($options['github-release-asset-pattern'] ?? null);
-            $rawEntry['source_config']['github_token_env'] = $tokenEnv;
-
-            if ($tokenEnv !== null && getenv($tokenEnv) === false) {
-                throw new RuntimeException(sprintf(
-                    'Environment variable %s is required to add private GitHub dependency %s. Export it locally, then rerun.',
-                    $tokenEnv,
-                    $rawEntry['slug']
-                ));
-            }
-
-            try {
-                $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
-            } catch (RuntimeException $exception) {
-                if ($tokenEnv === null && ($privateGitHub || $this->looksLikeGitHubAuthFailure($exception))) {
-                    $rawEntry['source_config']['github_token_env'] = $defaultTokenEnv;
-                    $envValue = getenv($defaultTokenEnv);
-
-                    if (! is_string($envValue) || $envValue === '') {
-                        throw new RuntimeException(sprintf(
-                            'GitHub release access for %s may require authentication. Export %s locally, or pass --github-token-env=YOUR_TOKEN_ENV. If the repository is public, verify that --github-repository is correct.',
-                            $repository,
-                            $defaultTokenEnv
-                        ), previous: $exception);
-                    }
-
-                    $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
-                } else {
-                    throw $exception;
-                }
-            }
-        } else {
-            $rawEntry['source_config']['credential_key'] = $this->nullableString($options['credential-key'] ?? null);
-            $provider = $this->nullableString($options['provider'] ?? null);
-
-            if ((string) $rawEntry['source'] === 'premium') {
-                if ($provider === null) {
-                    throw new RuntimeException('--provider is required when --source=premium.');
-                }
-
-                $rawEntry['source_config']['provider'] = $provider;
-            }
-
-            $providerProductId = $this->nullableString($options['provider-product-id'] ?? null);
-
-            if ($providerProductId !== null) {
-                $rawEntry['source_config']['provider_product_id'] = (int) $providerProductId;
-            }
-
-            $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
-        }
-
-        $source = $this->managedSourceRegistry->for($rawEntry);
-        $version = $requestedVersion ?? (string) ($catalog['latest_version'] ?? '');
-
-        if ($version === '') {
-            throw new RuntimeException(sprintf('Could not resolve a version for %s.', $rawEntry['slug']));
-        }
-
-        $releaseData = $source->releaseDataForVersion(
-            $rawEntry,
-            $catalog,
-            $version,
-            (string) ($catalog['latest_release_at'] ?? gmdate(DATE_ATOM))
-        );
-        $source->downloadReleaseToFile($rawEntry, $releaseData, $archivePath);
-        $displayName = $rawEntry['name'];
-        $sourceReference = (string) ($releaseData['source_reference'] ?? $rawEntry['source']);
-
-        $zip = new ZipArchive();
-
-        if ($zip->open($archivePath) !== true) {
-            throw new RuntimeException(sprintf('Failed to open dependency archive: %s', $archivePath));
-        }
-
-        ZipExtractor::extractValidated($zip, $extractPath);
-        $zip->close();
-
-        $sourcePath = ExtractedPayloadLocator::locateForAuthoring(
-            $extractPath,
-            (string) $rawEntry['archive_subdir'],
-            (string) $rawEntry['slug'],
-            (string) $rawEntry['kind'],
-            $this->metadataResolver,
-            $this->nullableString($rawEntry['main_file'] ?? null)
-        );
-
-        $resolved = $this->metadataResolver->resolveFromAbsolutePath(
-            $sourcePath,
-            (string) $rawEntry['kind'],
-            is_string($displayName) ? $displayName : (string) $rawEntry['name'],
-            $this->nullableString($rawEntry['main_file'] ?? null),
-            $version
-        );
-
-        $rawEntry['name'] = $resolved['name'];
-        $rawEntry['main_file'] = $resolved['main_file'];
-        $rawEntry['version'] = $resolved['version'] ?? $version;
-
-        [$sanitizePaths, $sanitizeFiles] = $this->config->managedSanitizeRules($rawEntry);
-        $this->runtimeInspector->stripPath($sourcePath, $sanitizePaths, $sanitizeFiles);
-        $this->runtimeInspector->assertPathIsClean($sourcePath, (array) $rawEntry['policy']['allow_runtime_paths'], [], $sanitizePaths, $sanitizeFiles);
-        $rawEntry['checksum'] = $this->runtimeInspector->computeChecksum($sourcePath, [], $sanitizePaths, $sanitizeFiles);
-
-        return [
-            'entry' => $rawEntry,
-            'prepared_source_path' => $sourcePath,
-            'cleanup_root' => $tempDir,
-            'sanitize_paths' => $sanitizePaths,
-            'sanitize_files' => $sanitizeFiles,
-            'source_reference' => $sourceReference,
-            'would_replace' => file_exists($destinationPath) || is_link($destinationPath),
-        ];
+        return $this->preparationService()->prepareManagedDependency($rawEntry, $options, $requestedVersion, $replace, $privateGitHub);
     }
 
     /**
@@ -600,20 +467,7 @@ final class DependencyAuthoringService
      */
     private function resolveLocalDependency(array $rawEntry, ?string $name, ?string $mainFile, ?string $version): array
     {
-        $resolved = $this->metadataResolver->resolveFromExistingPath(
-            $this->config,
-            (string) $rawEntry['path'],
-            (string) $rawEntry['kind'],
-            $name,
-            $mainFile,
-            $version
-        );
-
-        $rawEntry['name'] = $resolved['name'];
-        $rawEntry['main_file'] = $resolved['main_file'];
-        $rawEntry['version'] = $resolved['version'];
-
-        return $rawEntry;
+        return $this->preparationService()->resolveLocalDependency($rawEntry, $name, $mainFile, $version);
     }
 
     /**
@@ -621,23 +475,7 @@ final class DependencyAuthoringService
      */
     private function writeValidatedConfigWithDependency(array $entry): Config
     {
-        $manifest = $this->config->toArray();
-        $replaced = false;
-        $entryProvider = PremiumSourceResolver::providerForDependency($entry);
-
-        foreach ($manifest['dependencies'] as $index => $dependency) {
-            if ($this->dependencyMatchesIdentity($dependency, (string) $entry['kind'], (string) $entry['source'], (string) $entry['slug'], $entryProvider)) {
-                $manifest['dependencies'][$index] = $entry;
-                $replaced = true;
-                break;
-            }
-        }
-
-        if (! $replaced) {
-            $manifest['dependencies'][] = $entry;
-        }
-
-        return Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
+        return $this->manifestMutator()->writeValidatedConfigWithDependency($entry);
     }
 
     /**
@@ -646,40 +484,7 @@ final class DependencyAuthoringService
      */
     private function writeConfigReplacingDependency(array $removedDependency, array $entry): Config
     {
-        $manifest = $this->config->toArray();
-        $dependencies = [];
-        $replaced = false;
-        $entryProvider = PremiumSourceResolver::providerForDependency($entry);
-
-        foreach ($manifest['dependencies'] as $dependency) {
-            if (
-                $this->dependencyMatchesIdentity(
-                    $dependency,
-                    (string) $removedDependency['kind'],
-                    (string) $removedDependency['source'],
-                    (string) $removedDependency['slug'],
-                    PremiumSourceResolver::providerForDependency($removedDependency)
-                )
-            ) {
-                continue;
-            }
-
-            if ($this->dependencyMatchesIdentity($dependency, (string) $entry['kind'], (string) $entry['source'], (string) $entry['slug'], $entryProvider)) {
-                $dependencies[] = $entry;
-                $replaced = true;
-                continue;
-            }
-
-            $dependencies[] = $dependency;
-        }
-
-        if (! $replaced) {
-            $dependencies[] = $entry;
-        }
-
-        $manifest['dependencies'] = array_values($dependencies);
-
-        return Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
+        return $this->manifestMutator()->writeConfigReplacingDependency($removedDependency, $entry);
     }
 
     /**
@@ -688,72 +493,17 @@ final class DependencyAuthoringService
      */
     private function findDependencyForAdoption(array $options): array
     {
-        $componentKey = $this->nullableString($options['component-key'] ?? null);
-        $slug = $this->nullableString($options['slug'] ?? null);
-        $kind = $this->nullableString($options['kind'] ?? null);
-        $fromSource = $this->nullableString($options['from-source'] ?? null) ?? 'local';
-        $matches = [];
-
-        foreach ($this->config->dependencies() as $dependency) {
-            if ($componentKey !== null && PremiumSourceResolver::matchesComponentKey($dependency, $componentKey)) {
-                return $dependency;
-            }
-
-            if (
-                $componentKey === null
-                && $slug !== null
-                && $kind !== null
-                && $dependency['slug'] === $slug
-                && $dependency['kind'] === $kind
-                && $dependency['source'] === $fromSource
-            ) {
-                $matches[] = $dependency;
-            }
-        }
-
-        if ($matches === []) {
-            throw new RuntimeException('No matching dependency entry was found to adopt.');
-        }
-
-        if (count($matches) > 1) {
-            throw new RuntimeException('Multiple dependencies matched that selector. Re-run with --component-key.');
-        }
-
-        return $matches[0];
+        return $this->support()->findDependencyForAdoption($options);
     }
 
     private function assertAddAllowed(string $kind, string $source, string $management): void
     {
-        if ($source === 'wordpress.org' && ! in_array($kind, ['plugin', 'theme'], true)) {
-            throw new RuntimeException('WordPress.org additions are only supported for plugin and theme kinds.');
-        }
-
-        if ($source === 'github-release' && ! in_array($kind, ['plugin', 'theme'], true)) {
-            throw new RuntimeException('GitHub release additions are only supported for plugin and theme kinds.');
-        }
-
-        if (PremiumSourceResolver::isPremiumSource($source) && $kind !== 'plugin') {
-            throw new RuntimeException(sprintf('%s additions are only supported for plugin kind.', $source));
-        }
-
-        if ($management === 'ignored' && $source !== 'local') {
-            throw new RuntimeException('Ignored entries must use source=local.');
-        }
+        $this->support()->assertAddAllowed($kind, $source, $management);
     }
 
     private function assertDoesNotAlreadyExist(string $kind, string $source, string $slug, bool $force, ?string $provider): void
     {
-        foreach ($this->config->dependencies() as $dependency) {
-            if (! $this->dependencyMatchesIdentity($dependency, $kind, $source, $slug, $provider)) {
-                continue;
-            }
-
-            if ($force) {
-                return;
-            }
-
-            throw new RuntimeException(sprintf('Dependency already exists: %s', $dependency['component_key']));
-        }
+        $this->support()->assertDoesNotAlreadyExist($kind, $source, $slug, $force, $provider);
     }
 
     /**
@@ -762,15 +512,7 @@ final class DependencyAuthoringService
      */
     private function resolvedPremiumProviderFromOptions(string $source, array $options): ?string
     {
-        if (! PremiumSourceResolver::isPremiumSource($source)) {
-            return null;
-        }
-
-        if ($source === 'premium') {
-            return $this->nullableString($options['provider'] ?? null);
-        }
-
-        return PremiumSourceResolver::providerFor($source);
+        return $this->support()->resolvedPremiumProviderFromOptions($source, $options);
     }
 
     /**
@@ -778,67 +520,22 @@ final class DependencyAuthoringService
      */
     private function dependencyMatchesIdentity(array $dependency, string $kind, string $source, string $slug, ?string $provider): bool
     {
-        if ((string) ($dependency['kind'] ?? '') !== $kind || (string) ($dependency['slug'] ?? '') !== $slug) {
-            return false;
-        }
-
-        $dependencySource = (string) ($dependency['source'] ?? '');
-
-        if (! PremiumSourceResolver::isPremiumSource($dependencySource) || ! PremiumSourceResolver::isPremiumSource($source)) {
-            return $dependencySource === $source;
-        }
-
-        if ($provider === null) {
-            return false;
-        }
-
-        return PremiumSourceResolver::providerForDependency($dependency) === $provider;
+        return $this->support()->dependencyMatchesIdentity($dependency, $kind, $source, $slug, $provider);
     }
 
     private function resolveManagement(array $options, string $source): string
     {
-        $management = $this->nullableString($options['management'] ?? null);
-
-        if ($management !== null) {
-            return $management;
-        }
-
-        return $source === 'local' ? 'local' : 'managed';
+        return $this->support()->resolveManagement($options, $source);
     }
 
     private function resolveSlug(array $options): string
     {
-        $slug = $this->nullableString($options['slug'] ?? null);
-        $repository = $this->nullableString($options['github-repository'] ?? null);
-        $path = $this->nullableString($options['path'] ?? null);
-
-        if ($slug !== null) {
-            return $slug;
-        }
-
-        if ($repository !== null) {
-            return basename($repository);
-        }
-
-        if ($path !== null) {
-            $basename = basename($path);
-            $stem = pathinfo($basename, PATHINFO_FILENAME);
-
-            return $stem !== '' ? $stem : $basename;
-        }
-
-        throw new RuntimeException('A slug or path is required.');
+        return $this->support()->resolveSlug($options);
     }
 
     private function resolvePath(string $kind, string $slug, mixed $path): string
     {
-        $provided = $this->nullableString($path);
-
-        if ($provided !== null) {
-            return trim(str_replace('\\', '/', $provided), '/');
-        }
-
-        return $this->config->rootForKind($kind) . '/' . $slug;
+        return $this->support()->resolvePath($kind, $slug, $path);
     }
 
     /**
@@ -846,14 +543,7 @@ final class DependencyAuthoringService
      */
     private function defaultExtraLabels(string $kind, string $slug): array
     {
-        $prefix = match ($kind) {
-            'plugin' => 'plugin',
-            'theme' => 'theme',
-            'mu-plugin-package', 'mu-plugin-file' => 'mu-plugin',
-            default => 'runtime',
-        };
-
-        return [LabelHelper::normalize($prefix . ':' . $slug)];
+        return $this->support()->defaultExtraLabels($kind, $slug);
     }
 
     /**
@@ -861,26 +551,7 @@ final class DependencyAuthoringService
      */
     private function defaultPolicy(string $management, string $source): array
     {
-        $policy = [
-            'class' => match (true) {
-                $management === 'managed' && $source === 'wordpress.org' => 'managed-upstream',
-                $management === 'managed' && $source === 'github-release' => 'managed-private',
-                $management === 'managed' && PremiumSourceResolver::isPremiumSource($source) => 'managed-premium',
-                $management === 'ignored' => 'ignored',
-                default => 'local-owned',
-            },
-            'allow_runtime_paths' => [],
-        ];
-
-        if ($management === 'managed') {
-            $policy['sanitize_paths'] = [];
-            $policy['sanitize_files'] = [];
-        } else {
-            $policy['strip_paths'] = [];
-            $policy['strip_files'] = [];
-        }
-
-        return $policy;
+        return $this->support()->defaultPolicy($management, $source);
     }
 
     /**
@@ -889,26 +560,7 @@ final class DependencyAuthoringService
      */
     private function nextStepsForDependency(array $dependency): array
     {
-        $steps = [
-            sprintf('Review the manifest entry for %s in %s.', $dependency['slug'], $this->config->manifestPath),
-        ];
-
-        $tokenEnv = $dependency['source_config']['github_token_env'] ?? null;
-
-        if (is_string($tokenEnv) && $tokenEnv !== '') {
-            $steps[] = sprintf('Export %s locally before running authoring or sync commands.', $tokenEnv);
-            $steps[] = sprintf('Add a GitHub Actions secret named %s in the downstream repository.', $tokenEnv);
-        }
-
-        if (PremiumSourceResolver::isPremiumSource((string) $dependency['source'])) {
-            $steps[] = sprintf(
-                'Provide premium credentials for %s through %s locally and in GitHub Actions.',
-                $dependency['component_key'],
-                PremiumCredentialsStore::envName()
-            );
-        }
-
-        return $steps;
+        return $this->support()->nextStepsForDependency($dependency);
     }
 
     /**
@@ -916,33 +568,12 @@ final class DependencyAuthoringService
      */
     private function requiredString(array $options, string $key): string
     {
-        $value = $this->nullableString($options[$key] ?? null);
-
-        if ($value === null) {
-            throw new RuntimeException(sprintf('--%s is required.', $key));
-        }
-
-        return $value;
+        return $this->support()->requiredString($options, $key);
     }
 
     private function nullableString(mixed $value): ?string
     {
-        if (! is_string($value)) {
-            return null;
-        }
-
-        $trimmed = trim($value);
-
-        return $trimmed === '' ? null : $trimmed;
-    }
-
-    private function looksLikeGitHubAuthFailure(RuntimeException $exception): bool
-    {
-        $message = strtolower($exception->getMessage());
-
-        return str_contains($message, 'status 401')
-            || str_contains($message, 'status 403')
-            || str_contains($message, 'status 404');
+        return $this->support()->nullableString($value);
     }
 
     /**
@@ -950,97 +581,36 @@ final class DependencyAuthoringService
      */
     private function resolveCurrentInstalledVersion(array $dependency): string
     {
-        $currentVersion = $this->nullableString($dependency['version'] ?? null);
-
-        if ($currentVersion === null) {
-            $resolved = $this->resolveLocalDependency(
-                $dependency,
-                $this->nullableString($dependency['name'] ?? null),
-                $this->nullableString($dependency['main_file'] ?? null),
-                null
-            );
-            $currentVersion = $this->nullableString($resolved['version'] ?? null);
-        }
-
-        if ($currentVersion === null) {
-            throw new RuntimeException(sprintf(
-                'Could not determine the current installed version for %s. Re-run with --version explicitly.',
-                $dependency['component_key']
-            ));
-        }
-
-        return $currentVersion;
+        return $this->preparationService()->resolveCurrentInstalledVersion($dependency);
     }
 
-    private function refreshAdminGovernance(Config $config): void
+    private function configMutationStateManager(): ConfigMutationStateManager
     {
-        if ($this->adminGovernanceExporter !== null) {
-            $this->adminGovernanceExporter->refresh($config);
-        }
+        return new ConfigMutationStateManager(
+            $this->manifestWriter,
+            $this->runtimeInspector,
+            $this->adminGovernanceExporter
+        );
     }
 
-    private function persistConfig(Config $config): void
+    private function support(): DependencyAuthoringSupport
     {
-        $this->manifestWriter->write($config);
-        $this->refreshAdminGovernance($config);
+        return new DependencyAuthoringSupport($this->config);
     }
 
-    /**
-     * @return list<string>
-     */
-    private function trackedConfigPaths(Config $currentConfig, Config $nextConfig): array
+    private function preparationService(): DependencyPreparationService
     {
-        $paths = [$currentConfig->manifestPath];
-
-        if ($this->adminGovernanceExporter !== null) {
-            $paths[] = $currentConfig->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($currentConfig);
-            $paths[] = $nextConfig->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($nextConfig);
-        }
-
-        return array_values(array_unique($paths));
+        return new DependencyPreparationService(
+            $this->config,
+            $this->metadataResolver,
+            $this->runtimeInspector,
+            $this->managedSourceRegistry,
+            $this->support(),
+        );
     }
 
-    /**
-     * @param list<string> $paths
-     * @return array<string, array{exists:bool, contents:?string}>
-     */
-    private function captureFileStates(array $paths): array
+    private function manifestMutator(): DependencyManifestMutator
     {
-        $states = [];
-
-        foreach ($paths as $path) {
-            $exists = is_file($path);
-            $contents = $exists ? file_get_contents($path) : null;
-
-            if ($exists && $contents === false) {
-                throw new RuntimeException(sprintf('Unable to capture file state for %s.', $path));
-            }
-
-            $states[$path] = [
-                'exists' => $exists,
-                'contents' => $contents === false ? null : $contents,
-            ];
-        }
-
-        return $states;
-    }
-
-    /**
-     * @param array<string, array{exists:bool, contents:?string}> $states
-     */
-    private function restoreFileStates(array $states): void
-    {
-        $writer = new AtomicFileWriter();
-
-        foreach ($states as $path => $state) {
-            if ($state['exists']) {
-                $writer->write($path, (string) $state['contents']);
-                continue;
-            }
-
-            if (is_file($path) || is_link($path)) {
-                $this->runtimeInspector->clearPath($path);
-            }
-        }
+        return new DependencyManifestMutator($this->config, $this->support());
     }
 }

@@ -120,6 +120,8 @@ final class WordPressOrgClient implements WordPressOrgSource
 
     public function componentUrl(string $kind, string $slug): string
     {
+        WordPressOrgSlugValidator::assertValid($slug);
+
         return match ($kind) {
             'plugin', 'mu-plugin-package' => sprintf('https://wordpress.org/plugins/%s/', rawurlencode($slug)),
             'theme' => sprintf('https://wordpress.org/themes/%s/', rawurlencode($slug)),
@@ -129,6 +131,8 @@ final class WordPressOrgClient implements WordPressOrgSource
 
     public function supportUrl(string $slug): string
     {
+        WordPressOrgSlugValidator::assertValid($slug);
+
         return sprintf('https://wordpress.org/support/plugin/%s/', rawurlencode($slug));
     }
 
@@ -137,6 +141,8 @@ final class WordPressOrgClient implements WordPressOrgSource
      */
     private function fetchPluginInfo(string $slug): array
     {
+        WordPressOrgSlugValidator::assertValid($slug);
+
         $query = http_build_query([
             'action' => 'plugin_information',
             'request' => [
@@ -159,6 +165,8 @@ final class WordPressOrgClient implements WordPressOrgSource
      */
     private function fetchThemeInfo(string $slug): array
     {
+        WordPressOrgSlugValidator::assertValid($slug);
+
         $query = http_build_query([
             'action' => 'theme_information',
             'request' => [
