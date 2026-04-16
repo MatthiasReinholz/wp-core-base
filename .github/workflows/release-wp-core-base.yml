@@ -104,9 +104,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
         run: |
+          release_tag="${{ steps.version.outputs.value }}"
+          release_title="wp-core-base ${release_tag}"
+          release_notes="docs/releases/${{ steps.version.outputs.plain }}.md"
+
           bash scripts/ci/check_framework_release_assets.sh \
+            --expected-title "${release_title}" \
+            --expected-notes-file "${release_notes}" \
             "${GITHUB_REPOSITORY}" \
-            "${{ steps.version.outputs.value }}" \
+            "${release_tag}" \
             dist/wp-core-base-vendor-snapshot.zip \
             dist/wp-core-base-vendor-snapshot.zip.sha256 \
             dist/wp-core-base-vendor-snapshot.zip.sha256.sig
@@ -148,14 +154,20 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
         run: |
+          release_tag="${{ steps.version.outputs.value }}"
+          release_title="wp-core-base ${release_tag}"
+          release_notes="docs/releases/${{ steps.version.outputs.plain }}.md"
+
           bash scripts/ci/check_framework_release_assets.sh \
             --require-current \
+            --expected-title "${release_title}" \
+            --expected-notes-file "${release_notes}" \
             "${GITHUB_REPOSITORY}" \
-            "${{ steps.version.outputs.value }}" \
+            "${release_tag}" \
             dist/wp-core-base-vendor-snapshot.zip \
             dist/wp-core-base-vendor-snapshot.zip.sha256 \
             dist/wp-core-base-vendor-snapshot.zip.sha256.sig
 
       - name: Report existing verified release
         if: steps.release_state.outputs.publish_required != 'true'
-        run: echo "GitHub Release ${{ steps.version.outputs.value }} already contains the current verified assets; nothing to publish."
+        run: echo "GitHub Release ${{ steps.version.outputs.value }} already contains the current verified assets and metadata; nothing to publish."

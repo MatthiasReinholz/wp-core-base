@@ -321,12 +321,13 @@ final class EnvironmentDoctor
 
     private function inspectRuntimeStaging(Config $config): void
     {
-        $stagePath = $config->repoRoot . '/.wp-core-base/build/doctor-runtime';
+        $stageOutput = $this->doctorRuntimeStageOutputPath();
+        $stagePath = $config->repoRoot . '/' . $stageOutput;
         $runtimeInspector = new RuntimeInspector($config->runtime);
         $stager = new RuntimeStager($config, $runtimeInspector, new AdminGovernanceExporter($runtimeInspector));
 
         try {
-            $stagedPaths = $stager->stage('.wp-core-base/build/doctor-runtime');
+            $stagedPaths = $stager->stage($stageOutput);
             $this->ok(sprintf(
                 'Runtime staging succeeded at %s (%s).',
                 $stagePath,
@@ -337,6 +338,18 @@ final class EnvironmentDoctor
         } finally {
             $runtimeInspector->clearPath($stagePath);
         }
+    }
+
+    private function doctorRuntimeStageOutputPath(): string
+    {
+        $pid = getmypid();
+        try {
+            $suffix = bin2hex(random_bytes(6));
+        } catch (\Throwable) {
+            $suffix = str_replace('.', '', uniqid('', true));
+        }
+
+        return sprintf('.wp-core-base/build/doctor-runtime-%d-%s', is_int($pid) ? $pid : 0, $suffix);
     }
 
     private function inspectGitHubEnvironment(?Config $config, bool $requireGitHub): void
