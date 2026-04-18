@@ -283,7 +283,7 @@ assert_count() {
   local expected="$3"
   local count
 
-  count="$(grep -F "$pattern" "$file" | wc -l | tr -d ' ')"
+  count="$(grep -F -c "$pattern" "$file" || true)"
 
   if [ "$count" != "$expected" ]; then
     echo "Expected ${expected} occurrence(s) of '${pattern}' in ${file}, found ${count}." >&2
@@ -333,17 +333,17 @@ run_finalize_preflight() {
 }
 
 run_finalize_rollback() {
-  local output_file="$1"
+  local rollback_output_file="$1"
 
   (
     set -euo pipefail
     version="v1.3.2"
 
     release_lookup() {
-      local output_file="$1"
+      local response_file="$1"
 
       curl -sS \
-        -o "${output_file}" \
+        -o "${response_file}" \
         -w "%{http_code}" \
         -H "Accept: application/vnd.github+json" \
         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
@@ -416,7 +416,7 @@ run_finalize_rollback() {
 
     assert_remote_tag_deleted
     assert_release_deleted
-  ) > "${output_file}" 2>&1
+  ) > "${rollback_output_file}" 2>&1
 }
 
 export PATH="${FAKE_BIN}:${PATH}"
