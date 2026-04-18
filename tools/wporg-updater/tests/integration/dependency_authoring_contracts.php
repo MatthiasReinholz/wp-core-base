@@ -183,7 +183,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
     $assert(str_contains($addHelp, '--private'), 'Expected add-dependency help to document private GitHub onboarding.');
     $assert(str_contains($addHelp, '--provider=KEY'), 'Expected add-dependency help to document the generic premium provider flag.');
     $assert(str_contains($addHelp, 'scaffold-premium-provider --repo-root=. --provider=example-vendor'), 'Expected add-dependency help to point users at the premium provider scaffold command.');
-    $assert(str_contains($addHelp, '--version=10.6.2'), 'Expected add-dependency help examples to reflect the current WooCommerce baseline.');
+    $assert(str_contains($addHelp, '--version=10.7.0'), 'Expected add-dependency help examples to reflect the current WooCommerce baseline.');
 
     $adoptHelp = CommandHelp::render(
         'adopt-dependency',
@@ -193,7 +193,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
     $assert(str_contains($adoptHelp, '--preserve-version'), 'Expected adopt-dependency help to document version-preserving adoption.');
     $assert(str_contains($adoptHelp, 'atomic'), 'Expected adopt-dependency help to explain the atomic single-dependency workflow.');
     $assert(str_contains($adoptHelp, '--source=premium --provider=example-vendor'), 'Expected adopt-dependency help to show the registered premium source example.');
-    $assert(str_contains($adoptHelp, '--version=10.6.2'), 'Expected adopt-dependency help examples to reflect the current WooCommerce baseline.');
+    $assert(str_contains($adoptHelp, '--version=10.7.0'), 'Expected adopt-dependency help examples to reflect the current WooCommerce baseline.');
 
     $generalHelp = CommandHelp::render(
         null,

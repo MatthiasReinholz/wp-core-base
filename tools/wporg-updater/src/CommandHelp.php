@@ -107,7 +107,7 @@ Notes:
 
 Examples:
   {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce
-  {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce --version=10.6.2 --replace
+  {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce --version=10.7.0 --replace
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --private
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --archive-subdir=private-plugin
@@ -163,7 +163,7 @@ Notes:
 
 Examples:
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=woocommerce --source=wordpress.org --preserve-version
-  {$commandPrefix} adopt-dependency --repo-root=. --component-key=plugin:local:woocommerce --source=wordpress.org --version=10.6.2
+  {$commandPrefix} adopt-dependency --repo-root=. --component-key=plugin:local:woocommerce --source=wordpress.org --version=10.7.0
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=private-plugin --source=github-release --github-repository=owner/private-plugin --preserve-version
   {$commandPrefix} scaffold-premium-provider --repo-root=. --provider=example-vendor
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=premium-plugin --source=premium --provider=example-vendor --preserve-version

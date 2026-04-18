@@ -283,7 +283,7 @@ assert_count() {
   local expected="$3"
   local count
 
-  count="$(grep -F "$pattern" "$file" | wc -l | tr -d ' ')"
+  count="$(grep -Fc "$pattern" "$file")"
 
   if [ "$count" != "$expected" ]; then
     echo "Expected ${expected} occurrence(s) of '${pattern}' in ${file}, found ${count}." >&2
@@ -340,10 +340,10 @@ run_finalize_rollback() {
     version="v1.3.2"
 
     release_lookup() {
-      local output_file="$1"
+      local response_file="$1"
 
       curl -sS \
-        -o "${output_file}" \
+        -o "${response_file}" \
         -w "%{http_code}" \
         -H "Accept: application/vnd.github+json" \
         -H "Authorization: Bearer ${GITHUB_TOKEN}" \
@@ -352,9 +352,7 @@ run_finalize_rollback() {
     }
 
     assert_remote_tag_deleted() {
-      local attempt
-
-      for attempt in 1 2 3 4 5; do
+      for _ in 1 2 3 4 5; do
         if ! git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
           return 0
         fi
@@ -367,10 +365,9 @@ run_finalize_rollback() {
     }
 
     assert_release_deleted() {
-      local attempt
       local release_lookup_status
 
-      for attempt in 1 2 3 4 5; do
+      for _ in 1 2 3 4 5; do
         release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
 
         if [ "${release_lookup_status}" = '404' ]; then

@@ -191,9 +191,7 @@ jobs:
           }
 
           assert_remote_tag_deleted() {
-            local attempt
-
-            for attempt in 1 2 3 4 5; do
+            for _ in 1 2 3 4 5; do
               if ! git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
                 return 0
               fi
@@ -206,10 +204,9 @@ jobs:
           }
 
           assert_release_deleted() {
-            local attempt
             local release_lookup_status
 
-            for attempt in 1 2 3 4 5; do
+            for _ in 1 2 3 4 5; do
               release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
 
               if [ "${release_lookup_status}" = '404' ]; then

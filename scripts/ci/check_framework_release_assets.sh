@@ -198,6 +198,7 @@ mark_state() {
 }
 
 normalize_text_file() {
+  # shellcheck disable=SC2016
   php -r '
     $contents = file_get_contents($argv[1]);
     if (! is_string($contents)) {
