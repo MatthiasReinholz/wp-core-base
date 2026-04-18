@@ -191,12 +191,16 @@ jobs:
           }
 
           assert_remote_tag_deleted() {
-            for _ in 1 2 3 4 5; do
+            local attempt
+
+            for attempt in 1 2 3 4 5; do
               if ! git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
                 return 0
               fi
 
-              sleep 1
+              if [ "${attempt}" -lt 5 ]; then
+                sleep 1
+              fi
             done
 
             echo "Remote tag ${VERSION} still exists after delete attempts." >&2
@@ -204,9 +208,10 @@ jobs:
           }
 
           assert_release_deleted() {
+            local attempt
             local release_lookup_status
 
-            for _ in 1 2 3 4 5; do
+            for attempt in 1 2 3 4 5; do
               release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
 
               if [ "${release_lookup_status}" = '404' ]; then
@@ -218,7 +223,9 @@ jobs:
                 exit 1
               fi
 
-              sleep 1
+              if [ "${attempt}" -lt 5 ]; then
+                sleep 1
+              fi
             done
 
             echo "GitHub Release ${VERSION} still exists after delete attempts." >&2

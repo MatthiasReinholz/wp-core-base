@@ -283,7 +283,7 @@ assert_count() {
   local expected="$3"
   local count
 
-  count="$(grep -Fc "$pattern" "$file")"
+  count="$(grep -F -c "$pattern" "$file" || true)"
 
   if [ "$count" != "$expected" ]; then
     echo "Expected ${expected} occurrence(s) of '${pattern}' in ${file}, found ${count}." >&2
@@ -333,7 +333,7 @@ run_finalize_preflight() {
 }
 
 run_finalize_rollback() {
-  local output_file="$1"
+  local rollback_output_file="$1"
 
   (
     set -euo pipefail
@@ -352,12 +352,16 @@ run_finalize_rollback() {
     }
 
     assert_remote_tag_deleted() {
-      for _ in 1 2 3 4 5; do
+      local attempt
+
+      for attempt in 1 2 3 4 5; do
         if ! git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
           return 0
         fi
 
-        sleep 1
+        if [ "${attempt}" -lt 5 ]; then
+          sleep 1
+        fi
       done
 
       echo "Remote tag ${version} still exists after delete attempts." >&2
@@ -365,9 +369,10 @@ run_finalize_rollback() {
     }
 
     assert_release_deleted() {
+      local attempt
       local release_lookup_status
 
-      for _ in 1 2 3 4 5; do
+      for attempt in 1 2 3 4 5; do
         release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
 
         if [ "${release_lookup_status}" = '404' ]; then
@@ -379,7 +384,9 @@ run_finalize_rollback() {
           exit 1
         fi
 
-        sleep 1
+        if [ "${attempt}" -lt 5 ]; then
+          sleep 1
+        fi
       done
 
       echo "GitHub Release ${version} still exists after delete attempts." >&2
@@ -409,7 +416,7 @@ run_finalize_rollback() {
 
     assert_remote_tag_deleted
     assert_release_deleted
-  ) > "${output_file}" 2>&1
+  ) > "${rollback_output_file}" 2>&1
 }
 
 export PATH="${FAKE_BIN}:${PATH}"
