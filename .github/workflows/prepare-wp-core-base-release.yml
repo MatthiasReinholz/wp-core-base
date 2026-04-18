@@ -145,6 +145,7 @@ jobs:
 
       - name: Sync README framework release fact
         run: |
+          # shellcheck disable=SC2016
           php -r '
             $path = "README.md";
             $contents = file_get_contents($path);
