@@ -359,7 +359,9 @@ run_finalize_rollback() {
           return 0
         fi
 
-        sleep 1
+        if [ "${attempt}" -lt 5 ]; then
+          sleep 1
+        fi
       done
 
       echo "Remote tag ${version} still exists after delete attempts." >&2
@@ -382,7 +384,9 @@ run_finalize_rollback() {
           exit 1
         fi
 
-        sleep 1
+        if [ "${attempt}" -lt 5 ]; then
+          sleep 1
+        fi
       done
 
       echo "GitHub Release ${version} still exists after delete attempts." >&2

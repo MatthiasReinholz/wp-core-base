@@ -198,7 +198,9 @@ jobs:
                 return 0
               fi
 
-              sleep 1
+              if [ "${attempt}" -lt 5 ]; then
+                sleep 1
+              fi
             done
 
             echo "Remote tag ${VERSION} still exists after delete attempts." >&2
@@ -221,7 +223,9 @@ jobs:
                 exit 1
               fi
 
-              sleep 1
+              if [ "${attempt}" -lt 5 ]; then
+                sleep 1
+              fi
             done
 
             echo "GitHub Release ${VERSION} still exists after delete attempts." >&2
