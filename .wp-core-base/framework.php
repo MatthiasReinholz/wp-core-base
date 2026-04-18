@@ -20,13 +20,13 @@ return array (
       0 => 
       array (
         'name' => 'WooCommerce',
-        'version' => '10.6.2',
+        'version' => '10.7.0',
         'kind' => 'plugin',
       ),
       1 => 
       array (
         'name' => 'Jetpack',
-        'version' => '15.7',
+        'version' => '15.7.1',
         'kind' => 'plugin',
       ),
       2 => 
