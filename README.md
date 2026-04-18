@@ -108,7 +108,7 @@ The framework is intentionally selective: it can manage chosen dependencies for 
 
 This repository currently ships:
 
-- framework release `1.3.3`
+- framework release `1.3.4`
 - WordPress core `6.9.4`
 - Akismet `5.6`
 - WooCommerce `10.7.0`
