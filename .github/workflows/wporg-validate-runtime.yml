@@ -106,7 +106,7 @@ jobs:
             --artifact=dist/wp-core-base-vendor-snapshot.zip \
             --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256 \
             --signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
-            --public-key-file=tools/wporg-updater/tests/fixtures/release-signing/public.pem
+            --public-key-file="${GITHUB_WORKSPACE}/tools/wporg-updater/tests/fixtures/release-signing/public.pem"
 
   downstream-fixtures:
     runs-on: ubuntu-latest
