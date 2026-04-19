@@ -46,6 +46,7 @@ final class PrBodyRenderer
         $reviewerWarning = $this->reviewerWarning($metadata);
         $automationNote = match ($metadata['source'] ?? '') {
             'github-release' => 'This PR is managed by the GitHub release updater automation.',
+            'gitlab-release' => 'This PR is managed by the GitLab release updater automation.',
             'premium' => 'This PR is managed by the premium provider updater automation.',
             default => 'This PR is managed by the WordPress.org updater automation.',
         };
@@ -170,7 +171,9 @@ MARKDOWN);
         string $releaseScope,
         string $releaseAt,
         array $labels,
-        string $sourceRepository,
+        string $sourceReferenceLabel,
+        string $sourceReference,
+        string $sourceReferenceUrl,
         string $releaseUrl,
         string $currentBaseline,
         string $targetBaseline,
@@ -200,7 +203,7 @@ MARKDOWN);
 | Field | Value |
 | --- | --- |
 | Component | `wp-core-base` |
-| Source repository | [`{$sourceRepository}`](https://github.com/{$sourceRepository}) |
+| {$sourceReferenceLabel} | [`{$sourceReference}`]({$sourceReferenceUrl}) |
 | Release | [Open]({$releaseUrl}) |
 | Installed version on base branch | `{$currentVersion}` |
 | Target version | `{$targetVersion}` |

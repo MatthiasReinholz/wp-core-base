@@ -12,7 +12,7 @@ final class ManagedPullRequestQueue
      * @return list<int>
      */
     public static function blockedByForPlannedPullRequest(
-        GitHubPullRequestReader $gitHubClient,
+        AutomationPullRequestReader $gitHubClient,
         array $blockedBy,
         array $activePlannedPrs,
     ): array {
@@ -29,7 +29,7 @@ final class ManagedPullRequestQueue
      * @param list<mixed> $blockedBy
      * @return list<int>
      */
-    public static function unresolvedBlockedBy(GitHubPullRequestReader $gitHubClient, array $blockedBy): array
+    public static function unresolvedBlockedBy(AutomationPullRequestReader $gitHubClient, array $blockedBy): array
     {
         $unresolved = [];
 
@@ -61,25 +61,31 @@ final class ManagedPullRequestQueue
      * @param list<int> $blockedBy
      */
     public static function syncDraftState(
-        GitHubAutomationClient $gitHubClient,
+        AutomationClient $gitHubClient,
         array $pullRequest,
         array $blockedBy,
     ): void {
-        $nodeId = (string) ($pullRequest['node_id'] ?? '');
+        $number = (int) ($pullRequest['number'] ?? 0);
 
-        if ($nodeId === '') {
+        if ($number <= 0) {
             return;
         }
 
-        $isDraft = (bool) ($pullRequest['draft'] ?? false);
+        try {
+            $currentPullRequest = $gitHubClient->getPullRequest($number);
+        } catch (\Throwable) {
+            return;
+        }
+
+        $isDraft = (bool) ($currentPullRequest['draft'] ?? false);
 
         if ($blockedBy !== [] && ! $isDraft) {
-            $gitHubClient->convertToDraft($nodeId);
+            $gitHubClient->convertToDraft($number);
             return;
         }
 
         if ($blockedBy === [] && $isDraft) {
-            $gitHubClient->markReadyForReview($nodeId);
+            $gitHubClient->markReadyForReview($number);
         }
     }
 }

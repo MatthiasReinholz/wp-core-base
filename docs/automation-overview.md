@@ -24,23 +24,18 @@ The legacy `.github/wporg-updates.php` model is no longer the primary configurat
 
 ## Commands
 
-Most downstream users only need the routine command group.
-
-Routine/downstream commands:
+The CLI supports:
 
 - `doctor`
 - `sync`
 - `stage-runtime`
 - `scaffold-downstream`
 - `framework-sync`
+- `refresh-admin-governance`
+- `release-verify`
+- `suggest-manifest`
+- `format-manifest`
 - `pr-blocker`
-
-Maintainer/workflow commands:
-
-- `refresh-admin-governance` (run after manual manifest edits when you need governance data refreshed without running authoring commands)
-- `suggest-manifest` (run when migrating an existing repository and you want candidate manifest entries from the current runtime tree)
-- `format-manifest` (run after manual manifest edits to enforce deterministic formatting before review/commit)
-- `release-verify` (run in release preparation/finalize workflows to validate release metadata, artifact checksum, and detached signature contract)
 
 ## Sync Behavior
 
@@ -62,7 +57,7 @@ The recommended workflow pattern is:
 
 - run `sync --report-json=... --fail-on-source-errors`
 - keep healthy updates and PR refreshes from that same run
-- publish the sync report into the GitHub Actions job summary
+- publish the sync report into the automation job summary
 - open or update one deduplicated issue for ongoing source failures
 - close that issue automatically once a later sync run is clean
 
@@ -73,21 +68,31 @@ The scaffolded automation now separates:
 
 That keeps queued follow-up updates moving after a merge without mixing `pull_request_target` behavior into the scheduled/manual update workflow.
 
+To keep reconciliation safe, downstreams should enforce `wp-core-base Runtime Validation` (or an equivalent runtime-contract workflow) as a required merge check on automation PRs.
+
 ## Dependency Update Sources
 
 Supported automated sources:
 
 - `WordPress.org`
 - `github-release`
+- `gitlab-release`
 - `premium`
 
-GitHub source handling uses stable Releases as the source of truth. It does not infer release state from raw tags or commit history.
+Hosted release source handling uses stable Releases as the source of truth. It does not infer release state from raw tags or commit history.
 
 Private GitHub release assets are supported through:
 
 - `source_config.github_repository`
 - `source_config.github_release_asset_pattern`
 - `source_config.github_token_env`
+
+Private GitLab release assets are supported through:
+
+- `source_config.gitlab_project`
+- `source_config.gitlab_release_asset_pattern`
+- `source_config.gitlab_token_env`
+- optionally `source_config.gitlab_api_base` for self-managed GitLab
 
 The download flow never forwards authorization headers to redirected CDN URLs.
 
@@ -128,7 +133,7 @@ Rules:
 - when the base branch changes after another automation PR merges, open dependency PRs are rebuilt onto the new base branch state so their manifest/checksum baseline stays current
 - if the target version is already present on the base branch after reconciliation, the stale PR is closed instead of being kept as a no-op
 - support topics refresh incrementally for WordPress.org plugins
-- when blocker verification is degraded by GitHub/API failures, later PRs stay blocked until verification succeeds again
+- when blocker verification is degraded by automation/API failures, later PRs stay blocked until verification succeeds again
 
 Framework PRs use the same queueing behavior, but operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.
 
@@ -145,11 +150,7 @@ Framework release artifacts are now also built through one explicit builder path
 
 - `.wp-core-base/manifest.php`
 - `.wp-core-base/framework.php`
-- `.github/workflows/wporg-updates.yml`
-- `.github/workflows/wporg-updates-reconcile.yml`
-- `.github/workflows/wporg-update-pr-blocker.yml`
-- `.github/workflows/wporg-validate-runtime.yml`
-- `.github/workflows/wp-core-base-self-update.yml`
+- GitHub workflows or a GitLab pipeline file, depending on `automation.provider`
 - a framework-managed admin governance MU plugin loader
 - a generated admin governance data file
 
@@ -174,7 +175,6 @@ Scaffolded manifests include:
 - `runtime.managed_sanitize_files`
 
 The governance data file is also refreshed automatically after dependency authoring commands and framework self-updates so wp-admin can keep reflecting the manifest’s ownership model without reading `.wp-core-base/manifest.php` at runtime.
-When the manifest contents are unchanged, governance refreshes are deterministic and byte-stable.
 
 ## Managed Dependency Packaging Contract
 

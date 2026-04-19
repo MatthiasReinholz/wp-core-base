@@ -2,11 +2,6 @@
 
 declare(strict_types=1);
 
-if (PHP_VERSION_ID < 80100) {
-    fwrite(STDERR, "wp-core-base requires PHP 8.1 or later.\n");
-    exit(1);
-}
-
 use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\Cli\Handlers\DependencyAuthoringModeHandler;
@@ -20,6 +15,8 @@ use WpOrgPluginUpdater\Cli\Handlers\SyncModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\SyncReportModeHandler;
 use WpOrgPluginUpdater\Cli\ModeDispatcher;
 use WpOrgPluginUpdater\AdminGovernanceExporter;
+use WpOrgPluginUpdater\GitLabReleaseClient;
+use WpOrgPluginUpdater\GitLabReleaseManagedSource;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\ManagedSourceRegistry;
@@ -37,7 +34,23 @@ require dirname(__DIR__) . '/src/Autoload.php';
 $mode = $argv[1] ?? 'sync';
 $arguments = array_slice($argv, 2);
 $frameworkRoot = dirname(__DIR__, 3);
-[$options, $positionals] = parseCliTokens($arguments);
+$options = [];
+
+foreach ($arguments as $argument) {
+    if (! str_starts_with($argument, '--')) {
+        continue;
+    }
+
+    $option = substr($argument, 2);
+
+    if (str_contains($option, '=')) {
+        [$name, $value] = explode('=', $option, 2);
+        $options[$name] = $value;
+        continue;
+    }
+
+    $options[$option] = true;
+}
 
 $repoRootEnv = getenv('WPORG_REPO_ROOT');
 $repoRoot = $options['repo-root'] ?? $repoRootEnv;
@@ -60,34 +73,112 @@ $emitJson = static function (array $payload, int $exitCode = 0): never {
     fwrite(STDOUT, json_encode($payload, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT) . "\n");
     exit($exitCode);
 };
+$emitUsageError = static function (string $message) use ($jsonOutput, $emitJson): never {
+    if ($jsonOutput) {
+        $emitJson([
+            'status' => 'failure',
+            'error' => $message,
+        ], 2);
+    }
+
+    fwrite(STDERR, $message . "\n");
+    fwrite(STDERR, "Run with `help` to see the available modes.\n");
+    exit(2);
+};
+$knownOptions = [
+    'adopt-existing-managed-files',
+    'allow-current-version',
+    'allowed_redirect_hosts',
+    'archive-subdir',
+    'artifact',
+    'automation',
+    'automation-provider',
+    'check-only',
+    'checksum-file',
+    'class',
+    'component-key',
+    'content-root',
+    'credential-key',
+    'delete-path',
+    'distribution-path',
+    'dry-run',
+    'fail-on-source-errors',
+    'force',
+    'from-source',
+    'github',
+    'github-release-asset-pattern',
+    'github-repository',
+    'github-token-env',
+    'gitlab-api-base',
+    'gitlab-project',
+    'gitlab-release-asset-pattern',
+    'gitlab-token-env',
+    'help',
+    'interactive',
+    'json',
+    'kind',
+    'main-file',
+    'management',
+    'max_body_bytes',
+    'max_download_bytes',
+    'max_redirects',
+    'max_request_bytes',
+    'name',
+    'output',
+    'passphrase-env',
+    'path',
+    'payload-root',
+    'plan',
+    'pr-number',
+    'preserve-version',
+    'preview',
+    'private',
+    'private-key-env',
+    'profile',
+    'provider',
+    'provider-product-id',
+    'public-key-file',
+    'release-type',
+    'replace',
+    'repo-root',
+    'report-json',
+    'result-path',
+    'signature-file',
+    'slug',
+    'source',
+    'strip_auth_on_cross_origin_redirect',
+    'summary-path',
+    'tag',
+    'tool-path',
+    'version',
+];
+
+foreach ($arguments as $argument) {
+    if (! str_starts_with($argument, '--')) {
+        continue;
+    }
+
+    $option = substr($argument, 2);
+    $name = str_contains($option, '=') ? explode('=', $option, 2)[0] : $option;
+
+    if (! in_array($name, $knownOptions, true)) {
+        $emitUsageError(sprintf('Unknown option: --%s', $name));
+    }
+}
 
 try {
     if (in_array($mode, ['help', '--help', '-h'], true)) {
-        $topic = $positionals[0] ?? null;
-        $topic = is_string($topic) ? $topic : null;
-        fwrite(STDOUT, CommandHelp::render($topic, $commandPrefix, $phpCommandPrefix));
-        exit(0);
-    }
+        $topic = null;
 
-    $unknownFlags = unknownFlagsForMode($mode, $options);
-
-    if ($unknownFlags !== []) {
-        $errorMessage = sprintf(
-            'Unknown option(s) for mode `%s`: %s. Run `%s help` to see grouped command help.',
-            $mode,
-            implode(', ', array_map(static fn (string $name): string => '--' . $name, $unknownFlags)),
-            $commandPrefix
-        );
-
-        if ($jsonOutput) {
-            $emitJson([
-                'status' => 'failure',
-                'error' => $errorMessage,
-            ], 2);
+        foreach ($arguments as $argument) {
+            if (! str_starts_with($argument, '--')) {
+                $topic = $argument;
+                break;
+            }
         }
 
-        fwrite(STDERR, $errorMessage . "\n");
-        exit(2);
+        fwrite(STDOUT, CommandHelp::render($topic, $commandPrefix, $phpCommandPrefix));
+        exit(0);
     }
 
     $earlyDispatcher = new ModeDispatcher([
@@ -127,6 +218,7 @@ try {
     $managedSourceRegistry = new ManagedSourceRegistry(
         new WordPressOrgManagedSource(new WordPressOrgClient($httpClient), $httpClient),
         new GitHubReleaseManagedSource(new GitHubReleaseClient($httpClient, $config->githubApiBase())),
+        new GitLabReleaseManagedSource(new GitLabReleaseClient($httpClient, $config->gitlabApiBase())),
         ...array_values($premiumProviderRegistry->instantiate($httpClient, new PremiumCredentialsStore(), $config->managedDependencies()))
     );
     $adminGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));
@@ -219,189 +311,4 @@ try {
 
     fwrite(STDERR, OutputRedactor::redact($throwable->getMessage()) . "\n");
     exit(1);
-}
-
-/**
- * @param list<string> $tokens
- * @return array{0:array<string, mixed>,1:list<string>}
- */
-function parseCliTokens(array $tokens): array
-{
-    $options = [];
-    $positionals = [];
-
-    for ($index = 0, $count = count($tokens); $index < $count; $index++) {
-        $token = (string) $tokens[$index];
-
-        if ($token === '--') {
-            for ($cursor = $index + 1; $cursor < $count; $cursor++) {
-                $positionals[] = (string) $tokens[$cursor];
-            }
-            break;
-        }
-
-        if (! str_starts_with($token, '--')) {
-            $positionals[] = $token;
-            continue;
-        }
-
-        $option = substr($token, 2);
-
-        if ($option === '') {
-            $positionals[] = $token;
-            continue;
-        }
-
-        if (str_contains($option, '=')) {
-            [$name, $value] = explode('=', $option, 2);
-            $options[$name] = $value;
-            continue;
-        }
-
-        $nextToken = $tokens[$index + 1] ?? null;
-
-        if (optionExpectsValue($option) && is_string($nextToken) && $nextToken !== '' && ! str_starts_with($nextToken, '--')) {
-            $options[$option] = $nextToken;
-            $index++;
-            continue;
-        }
-
-        $options[$option] = true;
-    }
-
-    return [$options, $positionals];
-}
-
-function optionExpectsValue(string $option): bool
-{
-    static $valueOptions = [
-        'artifact' => true,
-        'archive-subdir' => true,
-        'checksum-file' => true,
-        'class' => true,
-        'component-key' => true,
-        'content-root' => true,
-        'credential-key' => true,
-        'distribution-path' => true,
-        'from-source' => true,
-        'github-release-asset-pattern' => true,
-        'github-repository' => true,
-        'github-token-env' => true,
-        'kind' => true,
-        'main-file' => true,
-        'management' => true,
-        'name' => true,
-        'output' => true,
-        'passphrase-env' => true,
-        'path' => true,
-        'payload-root' => true,
-        'pr-number' => true,
-        'private-key-env' => true,
-        'profile' => true,
-        'provider' => true,
-        'provider-product-id' => true,
-        'public-key-file' => true,
-        'release-type' => true,
-        'repo-root' => true,
-        'report-json' => true,
-        'result-path' => true,
-        'signature-file' => true,
-        'slug' => true,
-        'source' => true,
-        'summary-path' => true,
-        'tag' => true,
-        'tool-path' => true,
-        'version' => true,
-    ];
-
-    return isset($valueOptions[$option]);
-}
-
-/**
- * @param array<string, mixed> $options
- * @return list<string>
- */
-function unknownFlagsForMode(string $mode, array $options): array
-{
-    $global = ['repo-root', 'tool-path', 'json', 'help'];
-    $byMode = [
-        'doctor' => ['github'],
-        'render-sync-report' => ['report-json', 'summary-path'],
-        'sync-report-issue' => ['report-json'],
-        'release-verify' => ['tag', 'artifact', 'checksum-file', 'signature-file', 'public-key-file'],
-        'build-release-artifact' => ['output', 'checksum-file'],
-        'release-sign' => ['artifact', 'checksum-file', 'signature-file', 'private-key-env', 'passphrase-env'],
-        'prepare-framework-release' => ['release-type', 'version', 'allow-current-version'],
-        'scaffold-downstream' => ['profile', 'content-root', 'force', 'adopt-existing-managed-files'],
-        'scaffold-premium-provider' => ['provider', 'class', 'path', 'force'],
-        'framework-apply' => ['payload-root', 'distribution-path', 'result-path'],
-        'stage-runtime' => ['output'],
-        'refresh-admin-governance' => [],
-        'suggest-manifest' => [],
-        'format-manifest' => [],
-        'add-dependency' => [
-            'source',
-            'kind',
-            'slug',
-            'path',
-            'main-file',
-            'version',
-            'archive-subdir',
-            'github-repository',
-            'github-release-asset-pattern',
-            'github-token-env',
-            'credential-key',
-            'provider',
-            'provider-product-id',
-            'private',
-            'replace',
-            'force',
-            'interactive',
-            'plan',
-            'preview',
-            'dry-run',
-            'name',
-            'management',
-        ],
-        'adopt-dependency' => [
-            'component-key',
-            'slug',
-            'kind',
-            'from-source',
-            'source',
-            'version',
-            'preserve-version',
-            'github-repository',
-            'github-release-asset-pattern',
-            'github-token-env',
-            'credential-key',
-            'provider',
-            'provider-product-id',
-            'private',
-            'archive-subdir',
-            'plan',
-            'preview',
-            'dry-run',
-        ],
-        'remove-dependency' => ['component-key', 'slug', 'kind', 'source', 'delete-path'],
-        'list-dependencies' => [],
-        'sync' => ['report-json', 'fail-on-source-errors'],
-        'framework-sync' => ['check-only'],
-        'pr-blocker' => ['pr-number'],
-        'pr-blocker-reconcile' => [],
-    ];
-
-    $allowed = array_fill_keys(array_merge($global, $byMode[$mode] ?? []), true);
-    $unknown = [];
-
-    foreach (array_keys($options) as $name) {
-        if (isset($allowed[$name])) {
-            continue;
-        }
-
-        $unknown[] = $name;
-    }
-
-    sort($unknown);
-    return $unknown;
 }

@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace WpOrgPluginUpdater\Cli\Handlers;
 
 use Closure;
+use WpOrgPluginUpdater\AutomationClientFactory;
 use WpOrgPluginUpdater\Cli\CliModeHandler;
 use WpOrgPluginUpdater\Config;
-use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\PullRequestBlocker;
 
@@ -31,8 +31,8 @@ final class PullRequestBlockerModeHandler implements CliModeHandler
      */
     public function handle(string $mode, array $options): int
     {
-        $gitHubClient = GitHubClient::fromEnvironment($this->httpClient, $this->config->githubApiBase(), $this->config->dryRun());
-        $blocker = new PullRequestBlocker($gitHubClient);
+        $automationClient = AutomationClientFactory::fromEnvironment($this->config, $this->httpClient);
+        $blocker = new PullRequestBlocker($automationClient);
         $result = $mode === 'pr-blocker-reconcile'
             ? $blocker->evaluateOpenAutomationPullRequestsStatus()
             : $this->evaluateSinglePullRequest($blocker, $options);

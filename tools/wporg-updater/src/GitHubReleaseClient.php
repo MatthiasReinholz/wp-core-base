@@ -268,7 +268,7 @@ final class GitHubReleaseClient implements GitHubReleaseSource
                 'GitHub source API GET %s failed with status %d: %s',
                 $path,
                 $response['status'],
-                $response['body']
+                OutputRedactor::redactHttpBody($response['body'])
             ));
         }
 

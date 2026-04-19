@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'version' => '1.3.4',
+  'release_source' =>
+  array (
+    'provider' => 'github-release',
+    'reference' => 'MatthiasReinholz/wp-core-base',
+    'api_base' => 'https://api.github.com',
+  ),
+  'version' => '1.3.3',
   'release_channel' => 'stable',
   'distribution' => 
   array (

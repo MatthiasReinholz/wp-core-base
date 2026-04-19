@@ -2,8 +2,6 @@
 
 `wp-core-base` is a reusable WordPress foundation for teams that want their WordPress code, dependency snapshots, and update flow to live in Git.
 
-Requires PHP 8.1 or newer. The framework is tested on PHP 8.1, 8.3, and 8.4.
-
 It supports two downstream styles:
 
 - `full-core`: the downstream repository contains WordPress core
@@ -18,15 +16,14 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 - a versioned WordPress base repository
 - an explicit manifest at `.wp-core-base/manifest.php`
 - explicit framework release metadata at `.wp-core-base/framework.php`
-- scheduled GitHub update PRs for WordPress core and managed dependencies
-- scheduled GitHub PRs when a newer `wp-core-base` framework release is available
-- support for WordPress.org, GitHub Release, and downstream-registered premium plugin sources
+- scheduled GitHub or GitLab update PRs for WordPress core and managed dependencies
+- scheduled GitHub or GitLab PRs when a newer `wp-core-base` framework release is available
+- support for WordPress.org, GitHub Release, GitLab Release, and downstream-registered premium plugin sources
 - support for project-owned custom code as first-class `local` runtime entries
 - optional staged-clean runtime assembly for richer local source trees
 - managed-dependency sanitation during update ingestion when upstream archives contain non-runtime metadata
 - runtime staging for image-first or immutable deployment flows
 - a framework-managed WordPress admin governance MU plugin that marks workflow-managed plugins and suppresses in-dashboard update actions for them
-- no built-in WordPress `wp-cli` wrapper; use the shipped PHP entrypoints or your own shell alias around them
 
 ## Why This Is Valuable
 
@@ -38,7 +35,7 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 - richer PR context for reviewers, including release scope, release notes, release timestamp, and support-topic signals for WordPress.org plugins. See [operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md#reviewing-update-prs).
 - intelligent PR lifecycle behavior: patch releases can refresh an existing PR, while later minor or major releases can queue behind unresolved work. See [automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md#pull-request-behavior).
 - `wp-core-base` itself is versioned and updateable, so downstream repos can pin a framework release and receive dedicated framework-update PRs instead of treating the base as a one-time copy. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#framework-version-pinning).
-- support for both WordPress.org and GitHub Release backed dependencies, including private GitHub release assets. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#source-types).
+- support for both WordPress.org and hosted release-backed dependencies, including private GitHub and GitLab release assets. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#source-types).
 - a premium provider extension model, so downstream repos can register their own premium plugin source adapters instead of forcing premium updates through manual plugin dashboard workflows. See [adding-premium-provider.md](/Users/matthias/DEV/wp-core-base/docs/adding-premium-provider.md).
 - local project-owned code remains first-class, so custom plugins, themes, MU plugins, runtime files, and runtime directories do not need to be forced through updater automation. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#managed-versus-local).
 - normalized runtime snapshots, because managed dependencies can be sanitized during update ingestion and local code can use staged-clean strip rules when needed. See [manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md#managed-sanitation).
@@ -58,23 +55,31 @@ Choose the path that matches your project:
 
 If you need help choosing an architecture first, read [docs/deployment-models.md](docs/deployment-models.md).
 
-If you want the content-only core-loading patterns, read [docs/deployment-models.md#content-only-core-loading](docs/deployment-models.md#content-only-core-loading).
-
 If you want the framework vocabulary first, read [docs/concepts.md](docs/concepts.md).
 
 If you want the day-to-day dependency authoring workflow, read [docs/managing-dependencies.md](docs/managing-dependencies.md).
 
-## GitHub And Non-GitHub Use
+## Git Hosts
 
 You do not need GitHub to use `wp-core-base` as a code base.
 
-You do need GitHub if you want the scheduled pull-request automation, because that part of the framework is built on GitHub Actions and GitHub pull requests.
+Today, scheduled pull-request automation is supported on:
+
+- GitHub
+- GitLab
+
+Other Git hosts can still use the manifest model, runtime ownership rules, staged runtime assembly, and manual dependency workflows, but they do not yet have first-class hosted PR automation in this repository.
+
+Framework self-update PRs also work on GitHub and GitLab downstreams today. `.wp-core-base/framework.php` records exactly one authoritative framework release source at a time. Today that official source is GitHub Releases.
 
 That means these are all valid:
 
 - GitHub for source control and CI/CD deployment
+- GitLab for source control and CI/CD deployment
 - GitHub for source control, with FTP or SFTP deployment
+- GitLab for source control, with FTP or SFTP deployment
 - GitHub for source control, with manual deployment
+- GitLab for source control, with manual deployment
 - no GitHub yet, with manual adoption of tagged releases
 
 ## Recommended First Commands
@@ -87,17 +92,17 @@ php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
 
-`stage-runtime --output` must stay repo-relative to the current repository. Absolute paths and traversal-style overrides are rejected.
-
 If you are onboarding a downstream repository and want the framework to generate the initial manifest and workflows:
 
 ```bash
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-default --content-root=cms
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation
 ```
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
 Use `content-only-image-first` if you want a stricter image-first preset with external core, `staged-clean` validation, and starter ownership roots for content repos.
+Add `--automation-provider=gitlab` when the downstream repository is hosted on GitLab.
+For GitLab-hosted automation, also set a masked `GITLAB_TOKEN` CI/CD variable with `api` and `write_repository` access before enabling the scaffolded pipeline.
 Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the scheduled updates, merged-PR reconciliation, blocker, validation, and framework self-update workflows. It also writes a framework-managed admin governance MU plugin, local downstream guidance at `.wp-core-base/USAGE.md`, and a downstream `AGENTS.md` so humans and coding agents can discover the correct CLI-first workflow from inside the project repo.
 
 If your downstream repo already ignores `/vendor/`, keep the ignore narrow so `vendor/wp-core-base` remains committed and self-updateable. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md) for the recommended pattern.
@@ -108,7 +113,7 @@ The framework is intentionally selective: it can manage chosen dependencies for 
 
 This repository currently ships:
 
-- framework release `1.3.4`
+- framework release `1.3.3`
 - WordPress core `6.9.4`
 - Akismet `5.6`
 - WooCommerce `10.7.0`
@@ -137,7 +142,7 @@ These versions describe the code committed in this repository, not a floating la
 - ongoing operations: [docs/operations.md](docs/operations.md)
 - manifest reference: [docs/manifest-reference.md](docs/manifest-reference.md)
 - migration guidance: [docs/migration-guide.md](docs/migration-guide.md)
-- example downstream manifest and workflows: [docs/examples/](docs/examples/)
+- example downstream manifests and workflows, including GitHub-first and GitLab-first downstreams: [docs/examples/](docs/examples/)
 - maintainer release flow: [docs/release-process.md](docs/release-process.md)
 - contributor guide: [docs/contributing.md](docs/contributing.md)
 - maintainer architecture: [docs/architecture.md](docs/architecture.md)

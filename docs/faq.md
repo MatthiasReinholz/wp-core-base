@@ -2,11 +2,11 @@
 
 This document answers common adoption questions and common objections.
 
-## Do I need GitHub to use `wp-core-base`?
+## Do I need GitHub or GitLab to use `wp-core-base`?
 
 No.
 
-You need GitHub only if you want the scheduled pull-request automation. The code base, manifest model, and runtime staging approach are still usable without GitHub.
+You need GitHub or GitLab only if you want the scheduled pull-request automation. The code base, manifest model, and runtime staging approach are still usable without either platform.
 
 ## Do I need to commit WordPress core into my repo?
 
@@ -56,7 +56,7 @@ Mixing them would make updates riskier and the system harder to reason about.
 
 Yes.
 
-GitHub automation and deployment are separate concerns. You can still deploy by FTP, SFTP, rsync, or manual upload.
+Git-host automation and deployment are separate concerns. You can still deploy by FTP, SFTP, rsync, or manual upload.
 
 ## Can I use this with Docker or immutable images?
 
@@ -75,6 +75,12 @@ That keeps review focused and avoids unrelated dependency changes getting bundle
 If the new version is a patch release on the same release line, the framework updates the existing PR.
 
 If the new version is a newer minor or major release, the framework opens a separate PR and can block it behind the older one.
+
+## What should I do if runtime validation reports `Managed dependency checksum mismatch` after merging an automation PR?
+
+That means the merged state contains manifest checksum/version metadata that does not match the dependency payload in Git.
+
+Open a corrective PR that restores parity between payload and manifest, then rerun runtime validation. To prevent repeats, keep `wp-core-base Runtime Validation` (or an equivalent `doctor --automation` + `stage-runtime` workflow) as a required merge check.
 
 ## What information is included in update PRs?
 
@@ -139,7 +145,7 @@ Today that includes:
 
 - generic `premium` sources with a downstream-registered provider key
 
-Those sources use one fixed local or GitHub Actions secret:
+Those sources use one fixed local or CI/CD secret:
 
 - `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
 

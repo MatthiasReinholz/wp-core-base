@@ -257,7 +257,7 @@ final class DependencyAuthoringModeHandler implements CliModeHandler
         if ($source === null || $source === '') {
             $options['source'] = $prompter->choose(
                 'Select dependency source',
-                ['wordpress.org', 'github-release', 'premium', 'local'],
+                ['wordpress.org', 'github-release', 'gitlab-release', 'premium', 'local'],
                 'local'
             );
             $source = $options['source'];
@@ -285,6 +285,10 @@ final class DependencyAuthoringModeHandler implements CliModeHandler
                 $options['github-repository'] = $prompter->ask('GitHub repository (owner/repo)');
             }
 
+            if (! isset($options['github-release-asset-pattern']) || ! is_string($options['github-release-asset-pattern']) || trim($options['github-release-asset-pattern']) === '') {
+                $options['github-release-asset-pattern'] = $prompter->ask('GitHub release asset pattern', '*.zip');
+            }
+
             if (! isset($options['private']) && $prompter->confirm('Is this GitHub repository private?', false)) {
                 $options['private'] = true;
             }
@@ -294,6 +298,28 @@ final class DependencyAuthoringModeHandler implements CliModeHandler
 
                 if ($tokenEnv !== '') {
                     $options['github-token-env'] = $tokenEnv;
+                }
+            }
+        }
+
+        if ($source === 'gitlab-release') {
+            if (! isset($options['gitlab-project']) || ! is_string($options['gitlab-project']) || trim($options['gitlab-project']) === '') {
+                $options['gitlab-project'] = $prompter->ask('GitLab project (group/project)');
+            }
+
+            if (! isset($options['gitlab-release-asset-pattern']) || ! is_string($options['gitlab-release-asset-pattern']) || trim($options['gitlab-release-asset-pattern']) === '') {
+                $options['gitlab-release-asset-pattern'] = $prompter->ask('GitLab release asset pattern', '*.zip');
+            }
+
+            if (! isset($options['private']) && $prompter->confirm('Is this GitLab project private?', false)) {
+                $options['private'] = true;
+            }
+
+            if (($options['private'] ?? false) === true && (! isset($options['gitlab-token-env']) || ! is_string($options['gitlab-token-env']) || trim($options['gitlab-token-env']) === '')) {
+                $tokenEnv = $prompter->ask('GitLab token env var name (leave blank for default)', '');
+
+                if ($tokenEnv !== '') {
+                    $options['gitlab-token-env'] = $tokenEnv;
                 }
             }
         }

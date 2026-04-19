@@ -68,23 +68,26 @@ For each path that might be `managed`, determine the source:
 
 - WordPress.org
 - GitHub Release
+- GitLab Release
 - private GitHub Release
+- private GitLab Release
 - unsupported source type
 
 Then compare against [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md).
 
-### 6. Check GitHub availability
+### 6. Check automation host availability
 
 Decide whether the project has:
 
 - GitHub source control and Actions available
-- GitHub source control only
-- no GitHub yet
+- GitLab source control and CI available
+- GitHub or GitLab source control only
+- neither automation host yet
 
 Remember:
 
-- GitHub is required for automated PR workflows
-- GitHub is not required to use the framework’s codebase structure or runtime model
+- GitHub or GitLab is required for automated PR workflows
+- neither GitHub nor GitLab is required to use the framework’s codebase structure or runtime model
 
 ### 6a. Check framework pinning strategy
 
@@ -147,7 +150,7 @@ The project is a moderate fit when:
 
 - it wants the runtime model and docs
 - but some dependency sources are still unsupported
-- or GitHub automation is not yet available
+- or GitHub/GitLab automation is not yet available
 
 ### Weak fit
 
@@ -183,7 +186,7 @@ Then converge toward `strict`.
 - Can this project keep custom code as `local`?
 - Which third-party dependencies are safe to overwrite?
 - Which dependency sources are unsupported today?
-- Does the team want GitHub-based PR automation?
+- Does the team want GitHub- or GitLab-based PR automation?
 - Should runtime builds come from `stage-runtime`?
 - Is the migration mostly structural, operational, or both?
 
@@ -191,7 +194,7 @@ Then converge toward `strict`.
 
 - assuming all plugin folders are safely `managed`
 - ignoring themes, MU plugins, and runtime files
-- assuming GitHub is required even when only the base/repo model is being adopted
+- assuming GitHub or GitLab is required even when only the base/repo model is being adopted
 - recommending `relaxed` as a permanent state
 - ignoring unsupported dependency source types
 

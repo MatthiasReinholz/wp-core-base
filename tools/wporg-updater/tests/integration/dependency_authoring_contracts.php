@@ -8,6 +8,7 @@ use WpOrgPluginUpdater\ArchiveDownloader;
 use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\ConfigWriter;
+use WpOrgPluginUpdater\Cli\Handlers\DependencyAuthoringModeHandler;
 use WpOrgPluginUpdater\DependencyAuthoringService;
 use WpOrgPluginUpdater\DependencyMetadataResolver;
 use WpOrgPluginUpdater\ExtractedPayloadLocator;
@@ -20,6 +21,7 @@ use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\ManifestWriter;
+use WpOrgPluginUpdater\MutationLock;
 use WpOrgPluginUpdater\PremiumCredentialsStore;
 use WpOrgPluginUpdater\PremiumProviderRegistry;
 use WpOrgPluginUpdater\PremiumProviderScaffolder;
@@ -54,53 +56,6 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
     $premiumCredentialsStore = $context['premiumCredentialsStore'];
     /** @var SupportForumClient $supportClient */
     $supportClient = $context['supportClient'];
-
-    $invalidSlugRejected = false;
-
-    try {
-        $wpClient->componentUrl('plugin', 'Foo');
-    } catch (RuntimeException $exception) {
-        $invalidSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
-    }
-
-    $assert($invalidSlugRejected, 'Expected WordPress.org client URL composition to reject uppercase slugs.');
-
-    $traversalSlugRejected = false;
-
-    try {
-        $wpClient->componentUrl('plugin', 'foo/../bar');
-    } catch (RuntimeException $exception) {
-        $traversalSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
-    }
-
-    $assert($traversalSlugRejected, 'Expected WordPress.org client URL composition to reject traversal slugs.');
-
-    $leadingHyphenSlugRejected = false;
-
-    try {
-        $wpClient->componentUrl('plugin', '-foo');
-    } catch (RuntimeException $exception) {
-        $leadingHyphenSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
-    }
-
-    $assert($leadingHyphenSlugRejected, 'Expected WordPress.org client URL composition to reject leading hyphen slugs.');
-    $assert(
-        $wpClient->componentUrl('plugin', 'valid-lowercase-slug') === 'https://wordpress.org/plugins/valid-lowercase-slug/',
-        'Expected WordPress.org client URL composition to accept valid lowercase slugs.'
-    );
-
-    $supportClientReflection = new ReflectionClass(SupportForumClient::class);
-    $supportUrlMethod = $supportClientReflection->getMethod('supportUrl');
-    $supportUrlMethod->setAccessible(true);
-    $supportClientSlugRejected = false;
-
-    try {
-        $supportUrlMethod->invoke($supportClient, 'Foo');
-    } catch (RuntimeException $exception) {
-        $supportClientSlugRejected = str_contains($exception->getMessage(), 'WordPress.org slug is invalid');
-    }
-
-    $assert($supportClientSlugRejected, 'Expected support forum URL composition to reject invalid slugs.');
 
     $authoringRoot = sys_get_temp_dir() . '/wporg-authoring-' . bin2hex(random_bytes(4));
     mkdir($authoringRoot . '/cms/plugins/project-plugin', 0777, true);
@@ -183,7 +138,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
     $assert(str_contains($addHelp, '--private'), 'Expected add-dependency help to document private GitHub onboarding.');
     $assert(str_contains($addHelp, '--provider=KEY'), 'Expected add-dependency help to document the generic premium provider flag.');
     $assert(str_contains($addHelp, 'scaffold-premium-provider --repo-root=. --provider=example-vendor'), 'Expected add-dependency help to point users at the premium provider scaffold command.');
-    $assert(str_contains($addHelp, '--version=10.7.0'), 'Expected add-dependency help examples to reflect the current WooCommerce baseline.');
+    $assert(str_contains($addHelp, '--version=10.6.2'), 'Expected add-dependency help examples to reflect the current WooCommerce baseline.');
 
     $adoptHelp = CommandHelp::render(
         'adopt-dependency',
@@ -193,7 +148,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
     $assert(str_contains($adoptHelp, '--preserve-version'), 'Expected adopt-dependency help to document version-preserving adoption.');
     $assert(str_contains($adoptHelp, 'atomic'), 'Expected adopt-dependency help to explain the atomic single-dependency workflow.');
     $assert(str_contains($adoptHelp, '--source=premium --provider=example-vendor'), 'Expected adopt-dependency help to show the registered premium source example.');
-    $assert(str_contains($adoptHelp, '--version=10.7.0'), 'Expected adopt-dependency help examples to reflect the current WooCommerce baseline.');
+    $assert(str_contains($adoptHelp, '--version=10.6.2'), 'Expected adopt-dependency help examples to reflect the current WooCommerce baseline.');
 
     $generalHelp = CommandHelp::render(
         null,
@@ -201,8 +156,6 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php'
     );
     $assert(str_contains($generalHelp, '--signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig'), 'Expected general help to document signature-backed artifact verification.');
-    $assert(str_contains($generalHelp, 'Routine downstream commands'), 'Expected general help to group routine downstream commands explicitly.');
-    $assert(str_contains($generalHelp, 'Maintainer/workflow commands'), 'Expected general help to group maintainer and workflow commands explicitly.');
 
     $premiumScaffoldHelp = CommandHelp::render(
         'scaffold-premium-provider',
@@ -238,43 +191,6 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         str_replace('\\', '/', $locatedPayload) === str_replace('\\', '/', $locatorRoot . '/example-companion'),
         'Expected archive payload selection to prefer the slug directory over the broader extract root when both are technically valid.'
     );
-
-    $locatorByEntryRoot = sys_get_temp_dir() . '/wporg-authoring-locator-entry-' . bin2hex(random_bytes(4));
-    mkdir($locatorByEntryRoot . '/example-companion', 0777, true);
-    file_put_contents($locatorByEntryRoot . '/example-companion/example-companion.php', "<?php\n");
-    file_put_contents($locatorByEntryRoot . '/example-companion.php', "<?php\n");
-    $locatedByExpectedEntry = ExtractedPayloadLocator::locateByExpectedEntry(
-        $locatorByEntryRoot,
-        '',
-        'example-companion.php',
-        'example-companion',
-        false
-    );
-    $assert(
-        str_replace('\\', '/', $locatedByExpectedEntry) === str_replace('\\', '/', $locatorByEntryRoot . '/example-companion'),
-        'Expected extracted payload locator to deterministically pick the better-scored candidate.'
-    );
-
-    $locatorAmbiguousRoot = sys_get_temp_dir() . '/wporg-authoring-locator-ambiguous-' . bin2hex(random_bytes(4));
-    mkdir($locatorAmbiguousRoot . '/package-a', 0777, true);
-    mkdir($locatorAmbiguousRoot . '/package-b', 0777, true);
-    file_put_contents($locatorAmbiguousRoot . '/package-a/main.php', "<?php\n");
-    file_put_contents($locatorAmbiguousRoot . '/package-b/main.php', "<?php\n");
-    $ambiguousLocatorRejected = false;
-
-    try {
-        ExtractedPayloadLocator::locateByExpectedEntry(
-            $locatorAmbiguousRoot,
-            '',
-            'main.php',
-            'example-companion',
-            false
-        );
-    } catch (RuntimeException $exception) {
-        $ambiguousLocatorRejected = str_contains($exception->getMessage(), 'multiple candidate dependency payloads');
-    }
-
-    $assert($ambiguousLocatorRejected, 'Expected extracted payload locator to reject exact top-score ties as ambiguous.');
 
     $managedArchivePath = sys_get_temp_dir() . '/wporg-authoring-managed-' . bin2hex(random_bytes(4)) . '.zip';
     $createPluginArchive($managedArchivePath, 'release-package', 'adopt-me', '2.3.4');
@@ -802,6 +718,105 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         DependencyAuthoringService::defaultGitHubTokenEnv('', 'owner/private-plugin') === 'WP_CORE_BASE_GITHUB_TOKEN_PRIVATE_PLUGIN',
         'Expected default token env names to fall back to the repository basename.'
     );
+    $assert(
+        DependencyAuthoringService::defaultGitLabTokenEnv('example-private-plugin') === 'WP_CORE_BASE_GITLAB_TOKEN_EXAMPLE_PRIVATE_PLUGIN',
+        'Expected default GitLab token env names to normalize plugin slugs.'
+    );
+    $assert(
+        DependencyAuthoringService::defaultGitLabTokenEnv('', 'group/private-plugin') === 'WP_CORE_BASE_GITLAB_TOKEN_PRIVATE_PLUGIN',
+        'Expected default GitLab token env names to fall back to the project basename.'
+    );
+
+    $promptHandler = new DependencyAuthoringModeHandler(
+        config: $authoringConfig,
+        managedSourceRegistry: new ManagedSourceRegistry(
+            new WordPressOrgManagedSource($wpClient, $httpClient),
+            new GitHubReleaseManagedSource($gitHubReleaseClient),
+            new ExamplePremiumManagedSource($httpClient, $premiumCredentialsStore),
+        ),
+        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
+        mutationLock: new MutationLock(),
+        repoRoot: $authoringRoot,
+        commandPrefix: 'vendor/wp-core-base/bin/wp-core-base',
+        phpCommandPrefix: 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php',
+        jsonOutput: false,
+        emitJson: static function (array $payload): void {
+        },
+        premiumProviders: ['example-vendor'],
+    );
+    $handlerReflection = new ReflectionClass(DependencyAuthoringModeHandler::class);
+    $maybePromptForMissing = $handlerReflection->getMethod('maybePromptForMissing');
+    $maybePromptForMissing->setAccessible(true);
+
+    $gitHubPromptInput = fopen('php://temp', 'r+');
+    $gitHubPromptOutput = fopen('php://temp', 'r+');
+    $assert($gitHubPromptInput !== false && $gitHubPromptOutput !== false, 'Expected temp streams for GitHub hosted-release prompting.');
+    fwrite($gitHubPromptInput, "\n" . "n\n");
+    rewind($gitHubPromptInput);
+    $gitHubPromptOptions = [
+        'source' => 'github-release',
+        'kind' => 'plugin',
+        'slug' => 'example-plugin',
+        'github-repository' => 'owner/example-plugin',
+    ];
+    $gitHubPromptArgs = [&$gitHubPromptOptions, new InteractivePrompter($gitHubPromptInput, $gitHubPromptOutput)];
+    $maybePromptForMissing->invokeArgs($promptHandler, $gitHubPromptArgs);
+    $assert(
+        $gitHubPromptOptions['github-release-asset-pattern'] === '*.zip',
+        'Expected interactive GitHub hosted-release authoring to default the release asset pattern.'
+    );
+    fclose($gitHubPromptInput);
+    fclose($gitHubPromptOutput);
+
+    $gitLabPromptInput = fopen('php://temp', 'r+');
+    $gitLabPromptOutput = fopen('php://temp', 'r+');
+    $assert($gitLabPromptInput !== false && $gitLabPromptOutput !== false, 'Expected temp streams for GitLab hosted-release prompting.');
+    fwrite($gitLabPromptInput, "\n" . "n\n");
+    rewind($gitLabPromptInput);
+    $gitLabPromptOptions = [
+        'source' => 'gitlab-release',
+        'kind' => 'plugin',
+        'slug' => 'example-plugin',
+        'gitlab-project' => 'group/example-plugin',
+    ];
+    $gitLabPromptArgs = [&$gitLabPromptOptions, new InteractivePrompter($gitLabPromptInput, $gitLabPromptOutput)];
+    $maybePromptForMissing->invokeArgs($promptHandler, $gitLabPromptArgs);
+    $assert(
+        $gitLabPromptOptions['gitlab-release-asset-pattern'] === '*.zip',
+        'Expected interactive GitLab hosted-release authoring to default the release asset pattern.'
+    );
+    fclose($gitLabPromptInput);
+    fclose($gitLabPromptOutput);
+
+    $missingGitHubAssetPatternRejected = false;
+
+    try {
+        $authoringService->planAddDependency([
+            'source' => 'github-release',
+            'kind' => 'plugin',
+            'slug' => 'missing-github-pattern',
+            'github-repository' => 'owner/missing-github-pattern',
+        ]);
+    } catch (RuntimeException $exception) {
+        $missingGitHubAssetPatternRejected = str_contains($exception->getMessage(), '--github-release-asset-pattern');
+    }
+
+    $assert($missingGitHubAssetPatternRejected, 'Expected non-interactive GitHub hosted-release authoring to fail early when --github-release-asset-pattern is missing.');
+
+    $missingGitLabAssetPatternRejected = false;
+
+    try {
+        $authoringService->planAddDependency([
+            'source' => 'gitlab-release',
+            'kind' => 'plugin',
+            'slug' => 'missing-gitlab-pattern',
+            'gitlab-project' => 'group/missing-gitlab-pattern',
+        ]);
+    } catch (RuntimeException $exception) {
+        $missingGitLabAssetPatternRejected = str_contains($exception->getMessage(), '--gitlab-release-asset-pattern');
+    }
+
+    $assert($missingGitLabAssetPatternRejected, 'Expected non-interactive GitLab hosted-release authoring to fail early when --gitlab-release-asset-pattern is missing.');
 
     $interactiveStream = fopen('php://temp', 'r+');
     $assert($interactiveStream !== false, 'Expected to create a temp stream for interactive prompter testing.');

@@ -41,7 +41,7 @@ If you are a coding agent implementing a premium provider inside a downstream re
 3. scaffold a provider only when no matching provider exists yet
 4. implement the generated class file
 5. set `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
-6. run `doctor --repo-root=. --github`
+6. run `doctor --repo-root=. --automation`
 7. if the plugin already exists as a local dependency, use `adopt-dependency`; otherwise use `add-dependency`
 8. run `stage-runtime`
 
@@ -74,7 +74,7 @@ return [
 Rules:
 
 - provider keys must use lowercase letters, numbers, and hyphens
-- provider keys may not collide with reserved built-in source names such as `wordpress.org`, `github-release`, `premium`, or `local`
+- provider keys may not collide with reserved built-in source names such as `wordpress.org`, `github-release`, `gitlab-release`, `premium`, or `local`
 - the class must be constructible with `(HttpClient, PremiumCredentialsStore)`
 - the class must implement `PremiumManagedDependencySource`
 - the class `key()` must match the registry key
@@ -192,7 +192,7 @@ export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:premium:example-vendor:pr
 4. Verify the repo configuration:
 
 ```bash
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation
 ```
 
 5. Add the plugin:
@@ -212,7 +212,7 @@ vendor/wp-core-base/bin/wp-core-base add-dependency \
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 ```
 
-If this flow works locally and `doctor --github` passes in CI, the provider is integrated correctly.
+If this flow works locally and `doctor --automation` passes in CI, the provider is integrated correctly.
 
 ### Credential Validation
 
@@ -365,7 +365,7 @@ That is enough for a downstream repo to implement a provider for any premium sou
 Use:
 
 ```bash
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation
 ```
 
 `doctor` verifies:

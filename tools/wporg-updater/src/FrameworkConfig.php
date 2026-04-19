@@ -10,6 +10,7 @@ final class FrameworkConfig
 {
     /**
      * @param array{mode:string, path:string, asset_name:string} $distribution
+     * @param array{provider:string, reference:string, api_base:string} $releaseSource
      * @param array{wordpress_core:string, managed_components:list<array{name:string, version:string, kind:string}>} $baseline
      * @param array{managed_files:array<string, string>} $scaffold
      */
@@ -20,6 +21,7 @@ final class FrameworkConfig
         public readonly string $version,
         public readonly string $releaseChannel,
         public readonly array $distribution,
+        public readonly array $releaseSource,
         public readonly array $baseline,
         public readonly array $scaffold,
     ) {
@@ -40,16 +42,18 @@ final class FrameworkConfig
         }
 
         $distribution = self::normalizeDistribution($data['distribution'] ?? []);
+        $releaseSource = self::normalizeReleaseSource($data);
         $baseline = self::normalizeBaseline($data['baseline'] ?? []);
         $scaffold = self::normalizeScaffold($data['scaffold'] ?? []);
 
         return new self(
             repoRoot: $repoRoot,
             path: $resolvedPath,
-            repository: self::string($data['repository'] ?? '', 'repository'),
+            repository: self::legacyRepositoryValue($data, $releaseSource),
             version: self::normalizeVersion((string) ($data['version'] ?? '')),
             releaseChannel: self::string($data['release_channel'] ?? 'stable', 'release_channel'),
             distribution: $distribution,
+            releaseSource: $releaseSource,
             baseline: $baseline,
             scaffold: $scaffold,
         );
@@ -80,6 +84,55 @@ final class FrameworkConfig
         return $this->checksumAssetName() . '.sig';
     }
 
+    public function releaseSourceProvider(): string
+    {
+        return $this->releaseSource['provider'];
+    }
+
+    public function releaseSourceReference(): string
+    {
+        return $this->releaseSource['reference'];
+    }
+
+    public function releaseSourceApiBase(): string
+    {
+        return $this->releaseSource['api_base'];
+    }
+
+    public function releaseSourceReferenceLabel(): string
+    {
+        return match ($this->releaseSourceProvider()) {
+            'gitlab-release' => 'Source project',
+            default => 'Source repository',
+        };
+    }
+
+    public function releaseSourceKindLabel(): string
+    {
+        return match ($this->releaseSourceProvider()) {
+            'gitlab-release' => 'GitLab release project',
+            default => 'GitHub release repository',
+        };
+    }
+
+    public function releaseSourceReferenceUrl(): string
+    {
+        return rtrim($this->releaseSourceWebBase(), '/') . '/' . implode('/', array_map(
+            'rawurlencode',
+            self::referenceSegments($this->releaseSourceReference())
+        ));
+    }
+
+    public function releaseSourceIdentity(): string
+    {
+        return sprintf(
+            '%s|%s|%s',
+            $this->releaseSourceProvider(),
+            rtrim($this->releaseSourceApiBase(), '/'),
+            $this->releaseSourceReference()
+        );
+    }
+
     /**
      * @return array<string, string>
      */
@@ -91,12 +144,14 @@ final class FrameworkConfig
     /**
      * @param array<string, string> $managedFiles
      * @param list<array{name:string, version:string, kind:string}> $managedComponents
+     * @param array{provider:string, reference:string, api_base:string}|null $releaseSource
      */
     public function withInstalledRelease(
         string $version,
         string $wordPressCoreVersion,
         array $managedComponents,
         array $managedFiles,
+        ?array $releaseSource = null,
         ?string $distributionPath = null,
         ?string $repoRoot = null,
         ?string $path = null,
@@ -112,6 +167,7 @@ final class FrameworkConfig
                 'path' => $distributionPath ?? $this->distribution['path'],
                 'asset_name' => $this->distribution['asset_name'],
             ],
+            releaseSource: $releaseSource ?? $this->releaseSource,
             baseline: [
                 'wordpress_core' => $wordPressCoreVersion,
                 'managed_components' => $managedComponents,
@@ -128,12 +184,54 @@ final class FrameworkConfig
     public function toArray(): array
     {
         return [
-            'repository' => $this->repository,
+            'repository' => $this->legacyRepositoryForSerialization(),
             'version' => $this->version,
             'release_channel' => $this->releaseChannel,
             'distribution' => $this->distribution,
+            'release_source' => $this->releaseSource,
             'baseline' => $this->baseline,
             'scaffold' => $this->scaffold,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $value
+     * @return array{provider:string, reference:string, api_base:string}
+     */
+    private static function normalizeReleaseSource(array $value): array
+    {
+        $raw = $value['release_source'] ?? null;
+
+        if ($raw === null) {
+            $repository = self::string($value['repository'] ?? '', 'repository');
+
+            return [
+                'provider' => 'github-release',
+                'reference' => $repository,
+                'api_base' => 'https://api.github.com',
+            ];
+        }
+
+        if (! is_array($raw)) {
+            throw new RuntimeException('release_source must be an array.');
+        }
+
+        $provider = self::string($raw['provider'] ?? '', 'release_source.provider');
+
+        if (! in_array($provider, ['github-release', 'gitlab-release'], true)) {
+            throw new RuntimeException('release_source.provider must be "github-release" or "gitlab-release".');
+        }
+
+        $reference = self::string($raw['reference'] ?? '', 'release_source.reference');
+        $apiBase = self::string(
+            $raw['api_base'] ?? ($provider === 'gitlab-release' ? 'https://gitlab.com/api/v4' : 'https://api.github.com'),
+            'release_source.api_base'
+        );
+
+        return [
+            'provider' => $provider,
+            'reference' => $reference,
+            'api_base' => rtrim($apiBase, '/'),
         ];
     }
 
@@ -218,6 +316,70 @@ final class FrameworkConfig
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param array<string, mixed> $value
+     * @param array{provider:string, reference:string, api_base:string} $releaseSource
+     */
+    private static function legacyRepositoryValue(array $value, array $releaseSource): string
+    {
+        $repository = $value['repository'] ?? null;
+
+        if (is_string($repository) && trim($repository) !== '') {
+            return trim($repository);
+        }
+
+        return $releaseSource['provider'] === 'github-release' ? $releaseSource['reference'] : '';
+    }
+
+    private function legacyRepositoryForSerialization(): string
+    {
+        if ($this->releaseSourceProvider() !== 'github-release') {
+            return $this->repository;
+        }
+
+        return $this->releaseSourceReference();
+    }
+
+    private function releaseSourceWebBase(): string
+    {
+        $apiBase = rtrim($this->releaseSourceApiBase(), '/');
+
+        if ($this->releaseSourceProvider() === 'gitlab-release') {
+            if (str_ends_with($apiBase, '/api/v4')) {
+                return substr($apiBase, 0, -strlen('/api/v4'));
+            }
+
+            return $apiBase;
+        }
+
+        if ($apiBase === 'https://api.github.com') {
+            return 'https://github.com';
+        }
+
+        if (str_ends_with($apiBase, '/api/v3')) {
+            return substr($apiBase, 0, -strlen('/api/v3'));
+        }
+
+        return $apiBase;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function referenceSegments(string $reference): array
+    {
+        $segments = array_values(array_filter(
+            explode('/', trim($reference, '/')),
+            static fn (string $segment): bool => $segment !== ''
+        ));
+
+        if ($segments === []) {
+            throw new RuntimeException('release_source.reference must contain at least one non-empty path segment.');
+        }
+
+        return $segments;
     }
 
     private static function string(mixed $value, string $field): string

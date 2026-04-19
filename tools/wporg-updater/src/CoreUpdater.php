@@ -5,18 +5,17 @@ declare(strict_types=1);
 namespace WpOrgPluginUpdater;
 
 use RuntimeException;
+use ZipArchive;
 
 final class CoreUpdater
 {
-    private ?CoreArchiveApplier $archiveApplier = null;
-
     public function __construct(
         private readonly Config $config,
         private readonly CoreScanner $coreScanner,
         private readonly WordPressCoreClient $coreClient,
         private readonly ReleaseClassifier $releaseClassifier,
         private readonly PrBodyRenderer $prBodyRenderer,
-        private readonly GitHubAutomationClient $gitHubClient,
+        private readonly AutomationClient $automationClient,
         private readonly GitRunnerInterface $gitRunner,
         private readonly ArchiveDownloader $archiveDownloader = new HttpClient(),
     ) {
@@ -29,9 +28,9 @@ final class CoreUpdater
         }
 
         $this->gitRunner->assertCleanWorktree();
-        $defaultBranch = $this->config->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
+        $defaultBranch = $this->config->baseBranch() ?? $this->automationClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
-        $this->gitHubClient->ensureLabels(Updater::labelDefinitions());
+        $this->automationClient->ensureLabels(Updater::labelDefinitions());
         $current = $this->coreScanner->inspect($this->config->repoRoot);
         $release = $this->coreClient->fetchLatestStableRelease();
         $existingPrs = $this->existingCorePrs();
@@ -66,7 +65,7 @@ final class CoreUpdater
 
         foreach ($plannedPrs as $plannedPr) {
             $blockedBy = ManagedPullRequestQueue::blockedByForPlannedPullRequest(
-                $this->gitHubClient,
+                $this->automationClient,
                 (array) (($plannedPr['metadata']['blocked_by'] ?? [])),
                 $activePlannedPrs
             );
@@ -111,10 +110,10 @@ final class CoreUpdater
     {
         $prs = [];
 
-        foreach ($this->gitHubClient->listOpenPullRequests('automation:dependency-update') as $pullRequest) {
+        foreach ($this->automationClient->listOpenPullRequests('automation:dependency-update') as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
-            if (($metadata['kind'] ?? null) === 'core' && AutomationPullRequestGuard::isSameRepositoryAutomationPullRequest($pullRequest)) {
+            if (($metadata['kind'] ?? null) === 'core' && $this->isManagedRepositoryPullRequest($pullRequest)) {
                 $pullRequest['metadata'] = $metadata;
                 $prs[] = $pullRequest;
             }
@@ -138,7 +137,7 @@ final class CoreUpdater
             throw new RuntimeException(sprintf('Managed core pull request #%d has incomplete metadata.', $pullRequest['number']));
         }
 
-        $requiresCodeUpdate = AutomationPullRequestGuard::branchRefreshRequired($metadata, $baseRevision);
+        $requiresCodeUpdate = $this->branchRefreshRequired($metadata, $baseRevision);
 
         if (
             $this->releaseClassifier->samePatchLine($targetVersion, $latestVersion) &&
@@ -185,7 +184,7 @@ final class CoreUpdater
             throw new RuntimeException(sprintf('Managed core pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
-        AutomationPullRequestGuard::assertRefreshable($plannedPr, $branch, $defaultBranch, 'Core automation PR');
+        $this->assertRefreshableAutomationPullRequest($plannedPr, $branch, $defaultBranch);
 
         $branchGuard = (bool) $plannedPr['requires_code_update'] ? $this->beginBranchRollbackGuard($branch) : null;
 
@@ -203,12 +202,11 @@ final class CoreUpdater
         try {
             if ((bool) $plannedPr['requires_code_update']) {
                 $paths = [];
-                $paths = $this->archiveApplier()->checkoutAndApplyCoreVersion(
-                    gitRunner: $this->gitRunner,
-                    defaultBranch: $defaultBranch,
-                    branch: $branch,
-                    downloadUrl: (string) $release['download_url'],
-                    targetVersion: $targetVersion
+                $paths = $this->checkoutAndApplyCoreVersion(
+                    $defaultBranch,
+                    $branch,
+                    (string) $release['download_url'],
+                    $targetVersion
                 );
                 $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
 
@@ -265,9 +263,9 @@ final class CoreUpdater
                 metadata: $metadata,
             );
 
-            $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $this->titleForPullRequest((string) $metadata['base_version'], $targetVersion), $body);
-            $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
-            ManagedPullRequestQueue::syncDraftState($this->gitHubClient, $plannedPr, $blockedBy);
+            $this->automationClient->updatePullRequest((int) $plannedPr['number'], $this->titleForPullRequest((string) $metadata['base_version'], $targetVersion), $body);
+            $this->automationClient->setPullRequestLabels((int) $plannedPr['number'], $labels);
+            ManagedPullRequestQueue::syncDraftState($this->automationClient, $plannedPr, $blockedBy);
 
             if ($branchGuard !== null) {
                 $branchGuard->complete();
@@ -310,12 +308,11 @@ final class CoreUpdater
         $branchGuard = $this->beginBranchRollbackGuard($branch);
 
         try {
-            $paths = $this->archiveApplier()->checkoutAndApplyCoreVersion(
-                gitRunner: $this->gitRunner,
-                defaultBranch: $defaultBranch,
-                branch: $branch,
-                downloadUrl: (string) $release['download_url'],
-                targetVersion: (string) $release['version']
+            $paths = $this->checkoutAndApplyCoreVersion(
+                $defaultBranch,
+                $branch,
+                (string) $release['download_url'],
+                (string) $release['version']
             );
             $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $release['version']), $paths);
 
@@ -364,7 +361,7 @@ final class CoreUpdater
                 metadata: $metadata,
             );
 
-            $pullRequest = $this->gitHubClient->createPullRequest(
+            $pullRequest = $this->automationClient->createPullRequest(
                 $this->titleForPullRequest($currentVersion, (string) $release['version']),
                 $branch,
                 $defaultBranch,
@@ -372,7 +369,7 @@ final class CoreUpdater
                 $blockedBy !== []
             );
 
-            $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
+            $this->automationClient->setPullRequestLabels((int) $pullRequest['number'], $labels);
             $branchGuard->complete();
         } catch (\Throwable $throwable) {
             $branchGuard->rollback($throwable);
@@ -382,6 +379,22 @@ final class CoreUpdater
     private function pullRequestAlreadySatisfied(string $baseVersion, string $targetVersion): bool
     {
         return version_compare($targetVersion, $baseVersion, '<=');
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function branchRefreshRequired(array $metadata, string $baseRevision): bool
+    {
+        if ($baseRevision === '') {
+            return false;
+        }
+
+        $recordedBaseRevision = $metadata['base_revision'] ?? null;
+
+        return ! is_string($recordedBaseRevision)
+            || $recordedBaseRevision === ''
+            || ! hash_equals($recordedBaseRevision, $baseRevision);
     }
 
     /**
@@ -396,7 +409,7 @@ final class CoreUpdater
     private function closeSupersededPullRequest(int $number, string $reason): void
     {
         fwrite(STDOUT, sprintf("Closing PR #%d: %s\n", $number, $reason));
-        $this->gitHubClient->closePullRequest($number, $reason);
+        $this->automationClient->closePullRequest($number, $reason);
     }
 
     /**
@@ -419,6 +432,162 @@ final class CoreUpdater
         return ManagedPullRequestCanonicalizer::selectCanonical($matching);
     }
 
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function assertRefreshableAutomationPullRequest(array $pullRequest, string $branch, string $defaultBranch): void
+    {
+        $baseRef = (string) ($pullRequest['base']['ref'] ?? '');
+
+        if ($branch === $defaultBranch || ($baseRef !== '' && $branch === $baseRef)) {
+            throw new RuntimeException(sprintf(
+                'Core automation PR #%d resolved to protected branch %s and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0),
+                $branch
+            ));
+        }
+
+        if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
+            throw new RuntimeException(sprintf(
+                'Core automation PR #%d does not use a same-repository automation branch and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0)
+            ));
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function isManagedRepositoryPullRequest(array $pullRequest): bool
+    {
+        $head = is_array($pullRequest['head'] ?? null) ? $pullRequest['head'] : [];
+        $base = is_array($pullRequest['base'] ?? null) ? $pullRequest['base'] : [];
+        $headRef = (string) ($head['ref'] ?? '');
+        $headRepo = is_array($head['repo'] ?? null) ? $head['repo'] : [];
+        $baseRepo = is_array($base['repo'] ?? null) ? $base['repo'] : [];
+        $headFullName = strtolower((string) ($headRepo['full_name'] ?? ''));
+        $baseFullName = strtolower((string) ($baseRepo['full_name'] ?? ''));
+
+        return $headRef !== '' && $headFullName !== '' && $headFullName === $baseFullName;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function checkoutAndApplyCoreVersion(string $defaultBranch, string $branch, string $downloadUrl, string $targetVersion): array
+    {
+        $this->gitRunner->checkoutBranch($defaultBranch, $branch);
+        $tempDir = sys_get_temp_dir() . '/wp-core-update-' . bin2hex(random_bytes(6));
+
+        if (! mkdir($tempDir, 0777, true) && ! is_dir($tempDir)) {
+            throw new RuntimeException(sprintf('Failed to create temp directory: %s', $tempDir));
+        }
+
+        $archivePath = $tempDir . '/core.zip';
+        $extractPath = $tempDir . '/extract';
+        if (! mkdir($extractPath, 0777, true) && ! is_dir($extractPath)) {
+            throw new RuntimeException(sprintf('Failed to create extraction directory: %s', $extractPath));
+        }
+
+        try {
+            $this->archiveDownloader->downloadToFile($downloadUrl, $archivePath);
+
+            $zip = new ZipArchive();
+
+            if ($zip->open($archivePath) !== true) {
+                throw new RuntimeException(sprintf('Failed to open core archive: %s', $archivePath));
+            }
+
+            ZipExtractor::extractValidated($zip, $extractPath);
+            $zip->close();
+
+            $sourceRoot = $extractPath . '/wordpress';
+
+            if (! is_dir($sourceRoot)) {
+                throw new RuntimeException('Expected extracted WordPress core archive to contain a wordpress/ root directory.');
+            }
+
+            $this->coreClient->assertOfficialChecksums($targetVersion, $sourceRoot);
+            $this->sanitizeExtractedTree($sourceRoot);
+
+            $paths = [];
+
+            foreach (array_values(array_filter(scandir($sourceRoot) ?: [], static fn (string $entry): bool => ! in_array($entry, ['.', '..'], true))) as $entry) {
+                $source = $sourceRoot . '/' . $entry;
+
+                if ($entry === 'wp-content') {
+                    $paths = array_merge($paths, $this->syncCoreWpContent($source));
+                    continue;
+                }
+
+                $destination = $this->config->repoRoot . '/' . $entry;
+                $this->removePath($destination);
+                $this->copyPath($source, $destination);
+                $paths[] = $entry;
+            }
+
+            return array_values(array_unique($paths));
+        } finally {
+            $this->removePath($tempDir);
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function syncCoreWpContent(string $sourceWpContent): array
+    {
+        $destinationWpContent = $this->config->repoRoot . '/' . $this->config->paths['content_root'];
+
+        if (! is_dir($destinationWpContent)) {
+            if (! mkdir($destinationWpContent, 0777, true) && ! is_dir($destinationWpContent)) {
+                throw new RuntimeException(sprintf('Failed to create WordPress content directory: %s', $destinationWpContent));
+            }
+        }
+
+        $paths = [];
+
+        foreach (array_values(array_filter(scandir($sourceWpContent) ?: [], static fn (string $entry): bool => ! in_array($entry, ['.', '..'], true))) as $entry) {
+            $source = $sourceWpContent . '/' . $entry;
+            $destination = $destinationWpContent . '/' . $entry;
+
+            if (is_dir($source) && in_array($entry, ['plugins', 'themes'], true)) {
+                $paths = array_merge($paths, $this->syncBundledDirectory($source, $destination, $this->config->paths['content_root'] . '/' . $entry));
+                continue;
+            }
+
+            $this->removePath($destination);
+            $this->copyPath($source, $destination);
+            $paths[] = $this->config->paths['content_root'] . '/' . $entry;
+        }
+
+        return $paths;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function syncBundledDirectory(string $sourceDirectory, string $destinationDirectory, string $pathPrefix): array
+    {
+        if (! is_dir($destinationDirectory)) {
+            if (! mkdir($destinationDirectory, 0777, true) && ! is_dir($destinationDirectory)) {
+                throw new RuntimeException(sprintf('Failed to create bundled destination directory: %s', $destinationDirectory));
+            }
+        }
+
+        $paths = [];
+
+        foreach (array_values(array_filter(scandir($sourceDirectory) ?: [], static fn (string $entry): bool => ! in_array($entry, ['.', '..'], true))) as $entry) {
+            $source = $sourceDirectory . '/' . $entry;
+            $destination = $destinationDirectory . '/' . $entry;
+            $this->removePath($destination);
+            $this->copyPath($source, $destination);
+            $paths[] = $pathPrefix . '/' . $entry;
+        }
+
+        return $paths;
+    }
+
     private function titleForPullRequest(string $baseVersion, string $targetVersion): string
     {
         return sprintf('Update WordPress core from %s to %s', $baseVersion, $targetVersion);
@@ -430,21 +599,121 @@ final class CoreUpdater
         return 'codex/' . trim((string) $fragment, '-');
     }
 
+    private function removePath(string $path): void
+    {
+        if (! file_exists($path)) {
+            return;
+        }
+
+        if (is_file($path) || is_link($path)) {
+            if (! unlink($path)) {
+                throw new RuntimeException(sprintf('Failed to remove path: %s', $path));
+            }
+            return;
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                if (! rmdir($item->getPathname())) {
+                    throw new RuntimeException(sprintf('Failed to remove directory: %s', $item->getPathname()));
+                }
+            } else {
+                if (! unlink($item->getPathname())) {
+                    throw new RuntimeException(sprintf('Failed to remove file: %s', $item->getPathname()));
+                }
+            }
+        }
+
+        if (! rmdir($path)) {
+            throw new RuntimeException(sprintf('Failed to remove directory: %s', $path));
+        }
+    }
+
+    private function copyPath(string $source, string $destination): void
+    {
+        if (is_file($source)) {
+            $targetDir = dirname($destination);
+
+            if (! is_dir($targetDir) && ! mkdir($targetDir, 0777, true) && ! is_dir($targetDir)) {
+                throw new RuntimeException(sprintf('Failed to create copy destination directory: %s', $targetDir));
+            }
+
+            if (! copy($source, $destination)) {
+                throw new RuntimeException(sprintf('Failed to copy file %s to %s.', $source, $destination));
+            }
+            return;
+        }
+
+        if (! mkdir($destination, 0777, true) && ! is_dir($destination)) {
+            throw new RuntimeException(sprintf('Failed to create directory: %s', $destination));
+        }
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            $target = $destination . '/' . $iterator->getSubPathName();
+
+            if ($item->isDir()) {
+                if (! is_dir($target)) {
+                    if (! mkdir($target, 0777, true) && ! is_dir($target)) {
+                        throw new RuntimeException(sprintf('Failed to create directory: %s', $target));
+                    }
+                }
+            } else {
+                if (! copy($item->getPathname(), $target)) {
+                    throw new RuntimeException(sprintf('Failed to copy file %s to %s.', $item->getPathname(), $target));
+                }
+            }
+        }
+    }
+
+    private function sanitizeExtractedTree(string $root): void
+    {
+        $forbiddenPaths = $this->config->runtime['forbidden_paths'];
+        $forbiddenFiles = $this->config->runtime['forbidden_files'];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+
+        foreach ($iterator as $item) {
+            $basename = basename($item->getPathname());
+
+            if ($item->isDir()) {
+                foreach ($forbiddenPaths as $pattern) {
+                    if (fnmatch($pattern, $basename)) {
+                        $this->removePath($item->getPathname());
+                        break;
+                    }
+                }
+
+                continue;
+            }
+
+            foreach ($forbiddenFiles as $pattern) {
+                if (fnmatch($pattern, $basename)) {
+                    if (! unlink($item->getPathname())) {
+                        throw new RuntimeException(sprintf('Failed to remove forbidden file during sanitize: %s', $item->getPathname()));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
     private function beginBranchRollbackGuard(string $branch): BranchRollbackGuard
     {
         $guard = new BranchRollbackGuard($this->config->repoRoot, $this->gitRunner);
         $guard->begin();
         $guard->trackBranch($branch);
         return $guard;
-    }
-
-    private function archiveApplier(): CoreArchiveApplier
-    {
-        return $this->archiveApplier ??= new CoreArchiveApplier(
-            $this->config,
-            $this->coreClient,
-            $this->archiveDownloader,
-            new RuntimeInspector($this->config->runtime),
-        );
     }
 }

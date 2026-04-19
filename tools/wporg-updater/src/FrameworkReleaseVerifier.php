@@ -79,8 +79,8 @@ final class FrameworkReleaseVerifier
 
         $contractReport = (new FrameworkPublicContractVerifier($this->repoRoot))->verify($framework, $releaseNotes);
 
-        if (trim($framework->repository) === '') {
-            throw new RuntimeException('Framework metadata must declare repository.');
+        if (trim($framework->releaseSourceReference()) === '') {
+            throw new RuntimeException('Framework metadata must declare an authoritative release source.');
         }
 
         $artifactVerified = false;
@@ -179,11 +179,13 @@ final class FrameworkReleaseVerifier
                 ));
             }
 
-            if ($payloadFramework->repository !== $framework->repository) {
+            if ($payloadFramework->releaseSourceIdentity() !== $framework->releaseSourceIdentity()) {
                 throw new RuntimeException(sprintf(
-                    'Release artifact repository mismatch. Expected %s but found %s.',
-                    $framework->repository,
-                    $payloadFramework->repository
+                    'Release artifact authoritative source mismatch. Expected %s `%s` but found %s `%s`.',
+                    $framework->releaseSourceKindLabel(),
+                    $framework->releaseSourceReference(),
+                    $payloadFramework->releaseSourceKindLabel(),
+                    $payloadFramework->releaseSourceReference()
                 ));
             }
 
@@ -230,41 +232,28 @@ final class FrameworkReleaseVerifier
     {
         $doctorOutput = $this->runVendoredCommand(
             $downstreamRoot,
-            ['php', 'vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php', 'doctor', '--repo-root=.', '--json']
+            'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --json'
         );
         $this->assertSuccessfulJsonResult($doctorOutput, 'doctor');
 
         $stageRuntimeOutput = $this->runVendoredCommand(
             $downstreamRoot,
-            [
-                'php',
-                'vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php',
-                'stage-runtime',
-                '--repo-root=.',
-                '--output=.wp-core-base/build/release-verify-runtime',
-                '--json',
-            ]
+            'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/release-verify-runtime --json'
         );
         $this->assertSuccessfulJsonResult($stageRuntimeOutput, 'stage-runtime');
     }
 
-    /**
-     * @param list<string> $command
-     */
-    private function runVendoredCommand(string $workingDirectory, array $command): string
+    private function runVendoredCommand(string $workingDirectory, string $command): string
     {
         $descriptorSpec = [
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open($command, $descriptorSpec, $pipes, $workingDirectory);
+        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
 
         if (! is_resource($process)) {
-            throw new RuntimeException(sprintf(
-                'Failed to start vendored release verification command: %s',
-                $this->formatCommand($command)
-            ));
+            throw new RuntimeException(sprintf('Failed to start vendored release verification command: %s', $command));
         }
 
         $stdout = stream_get_contents($pipes[1]);
@@ -279,7 +268,7 @@ final class FrameworkReleaseVerifier
         if ($status !== 0) {
             throw new RuntimeException(sprintf(
                 "Installed release artifact command failed: %s\n%s",
-                $this->formatCommand($command),
+                $command,
                 $output
             ));
         }
@@ -289,26 +278,20 @@ final class FrameworkReleaseVerifier
 
     private function initializeVerificationGitWorktree(string $downstreamRoot): void
     {
-        $this->runProcess($downstreamRoot, ['git', 'init', '-q']);
+        $this->runProcess($downstreamRoot, 'git init -q');
     }
 
-    /**
-     * @param list<string> $command
-     */
-    private function runProcess(string $workingDirectory, array $command): string
+    private function runProcess(string $workingDirectory, string $command): string
     {
         $descriptorSpec = [
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open($command, $descriptorSpec, $pipes, $workingDirectory);
+        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
 
         if (! is_resource($process)) {
-            throw new RuntimeException(sprintf(
-                'Failed to start release verification command: %s',
-                $this->formatCommand($command)
-            ));
+            throw new RuntimeException(sprintf('Failed to start release verification command: %s', $command));
         }
 
         $stdout = stream_get_contents($pipes[1]);
@@ -321,22 +304,10 @@ final class FrameworkReleaseVerifier
         $output = trim((string) $stdout . "\n" . (string) $stderr);
 
         if ($status !== 0) {
-            throw new RuntimeException(sprintf(
-                "Command failed during release verification: %s\n%s",
-                $this->formatCommand($command),
-                $output
-            ));
+            throw new RuntimeException(sprintf("Command failed during release verification: %s\n%s", $command, $output));
         }
 
         return (string) $stdout;
-    }
-
-    /**
-     * @param list<string> $command
-     */
-    private function formatCommand(array $command): string
-    {
-        return implode(' ', array_map(static fn (string $part): string => escapeshellarg($part), $command));
     }
 
     private function assertSuccessfulJsonResult(string $output, string $commandName): void

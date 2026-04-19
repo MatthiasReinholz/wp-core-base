@@ -6,13 +6,13 @@ namespace WpOrgPluginUpdater\Cli\Handlers;
 
 use Throwable;
 use WpOrgPluginUpdater\AdminGovernanceExporter;
+use WpOrgPluginUpdater\AutomationClientFactory;
 use WpOrgPluginUpdater\Cli\CliModeHandler;
 use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\CoreScanner;
 use WpOrgPluginUpdater\CoreUpdater;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\GitCommandRunner;
-use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\ManagedSourceRegistry;
@@ -29,6 +29,7 @@ use WpOrgPluginUpdater\TempDirectoryJanitor;
 use WpOrgPluginUpdater\SyncReport;
 use WpOrgPluginUpdater\Updater;
 use WpOrgPluginUpdater\WordPressCoreClient;
+use WpOrgPluginUpdater\WordPressOrgClient;
 
 final class SyncModeHandler implements CliModeHandler
 {
@@ -56,20 +57,22 @@ final class SyncModeHandler implements CliModeHandler
         $this->cleanupStaleTemporaryDirectories();
         StructuredLogger::log('info', 'sync', 'Starting sync run.', startedAt: $operationStartedAt);
 
-        $gitHubClient = GitHubClient::fromEnvironment($this->httpClient, $this->config->githubApiBase(), $this->config->dryRun());
+        $automationClient = AutomationClientFactory::fromEnvironment($this->config, $this->httpClient);
         $runtimeInspector = new RuntimeInspector($this->config->runtime);
         $dependencyUpdater = new Updater(
             config: $this->config,
             dependencyScanner: new DependencyScanner(),
+            wordPressOrgClient: new WordPressOrgClient($this->httpClient),
             gitHubReleaseClient: new GitHubReleaseClient($this->httpClient, $this->config->githubApiBase()),
             managedSourceRegistry: $this->managedSourceRegistry,
             supportForumClient: new SupportForumClient($this->httpClient, 100),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),
-            gitHubClient: $gitHubClient,
+            automationClient: $automationClient,
             gitRunner: new GitCommandRunner($this->repoRoot, $this->config->dryRun()),
             runtimeInspector: $runtimeInspector,
             manifestWriter: new ManifestWriter(),
+            httpClient: $this->httpClient,
             adminGovernanceExporter: $this->adminGovernanceExporter,
         );
         $coreUpdater = new CoreUpdater(
@@ -78,7 +81,7 @@ final class SyncModeHandler implements CliModeHandler
             coreClient: new WordPressCoreClient($this->httpClient),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),
-            gitHubClient: $gitHubClient,
+            automationClient: $automationClient,
             gitRunner: new GitCommandRunner($this->repoRoot, $this->config->dryRun()),
         );
         $errors = [];

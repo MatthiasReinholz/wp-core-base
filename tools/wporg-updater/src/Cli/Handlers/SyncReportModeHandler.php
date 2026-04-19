@@ -7,8 +7,8 @@ namespace WpOrgPluginUpdater\Cli\Handlers;
 use Closure;
 use RuntimeException;
 use WpOrgPluginUpdater\Cli\CliModeHandler;
+use WpOrgPluginUpdater\AutomationClientFactory;
 use WpOrgPluginUpdater\Config;
-use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\SyncReport;
 
@@ -66,21 +66,11 @@ final class SyncReportModeHandler implements CliModeHandler
         }
 
         $config = Config::load($this->repoRoot);
-        $gitHubClient = GitHubClient::fromEnvironment(
-            new HttpClient(userAgent: 'wp-core-base/sync-report-issue'),
-            $config->githubApiBase(),
-            $config->dryRun()
+        $automationClient = AutomationClientFactory::fromEnvironment(
+            $config,
+            new HttpClient(userAgent: 'wp-core-base/sync-report-issue')
         );
-        $runUrl = null;
-        $serverUrl = getenv('GITHUB_SERVER_URL');
-        $repository = getenv('GITHUB_REPOSITORY');
-        $runId = getenv('GITHUB_RUN_ID');
-
-        if (is_string($serverUrl) && $serverUrl !== '' && is_string($repository) && $repository !== '' && is_string($runId) && $runId !== '') {
-            $runUrl = sprintf('%s/%s/actions/runs/%s', rtrim($serverUrl, '/'), $repository, $runId);
-        }
-
-        SyncReport::syncIssue($gitHubClient, SyncReport::read($reportPath), $runUrl);
+        SyncReport::syncIssue($automationClient, SyncReport::read($reportPath), AutomationClientFactory::workflowRunUrl($config));
 
         return 0;
     }

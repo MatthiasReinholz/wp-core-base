@@ -9,13 +9,11 @@ If you are evaluating whether the framework fits your repo, start with [evaluati
 ```bash
 php tools/wporg-updater/bin/wporg-updater.php help
 php tools/wporg-updater/bin/wporg-updater.php doctor
-php tools/wporg-updater/bin/wporg-updater.php doctor --github
+php tools/wporg-updater/bin/wporg-updater.php doctor --automation
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only
 php tools/wporg-updater/tests/run.php
 ```
-
-`stage-runtime --output` must be repo-relative. Absolute paths and `..` traversal are rejected.
 
 If `wp-core-base` is vendored, run these commands from the vendored path and pass `--repo-root=.`
 
@@ -25,7 +23,7 @@ If `wp-core-base` is vendored, run these commands from the vendored path and pas
 2. run `doctor` after manifest changes
 3. run `stage-runtime` before changing your build or deployment contract
 4. review update PRs like normal code changes
-5. merge approved PRs
+5. merge approved PRs only after required runtime validation checks pass
 6. deploy through your existing process
 
 ## Reviewing Update PRs
@@ -70,19 +68,38 @@ That queueing behavior depends on the blocker workflow.
 
 The intended CI contract is:
 
-1. run `doctor --github`
+1. run `doctor --automation`
 2. run `stage-runtime`
 3. build or deploy from the staged runtime payload
 
+Treat `wp-core-base Runtime Validation` (or your equivalent workflow that runs the same contract) as a required merge check for automation PRs. Do not merge updater/reconciliation PRs while this check is failing.
+
 If your project is image-first, treat the staged runtime directory as the build input.
 
-## Troubleshooting
+## GitLab Automation Prerequisites
 
-If you are still onboarding, start with [getting-started.md](getting-started.md) and [managing-dependencies.md](managing-dependencies.md) before chasing operational errors.
+For GitLab-hosted automation, configure:
+
+- a masked CI/CD variable named `GITLAB_TOKEN`
+- token permissions that include `api` and `write_repository`
+
+The scaffolded `.gitlab-ci.yml` also relies on the normal GitLab CI project metadata, such as `CI_PROJECT_ID`, `CI_PROJECT_PATH`, and `CI_API_V4_URL`.
+
+## Common Failure Modes
 
 ### `doctor` reports checksum drift
 
 That means a managed dependency tree does not match the manifest checksum. Fix the tree or regenerate the managed dependency snapshot intentionally.
+
+### Runtime validation fails with `Managed dependency checksum mismatch` after an automation merge
+
+This usually means a PR updated a manifest checksum/version without carrying the matching dependency payload in the same merge.
+
+Recover by:
+
+1. opening a corrective PR that brings the dependency payload and manifest back into the same state
+2. rerunning runtime validation until the checksum contract passes
+3. ensuring `wp-core-base Runtime Validation` stays required so unsafe merges are blocked before landing
 
 ### `doctor` reports forbidden runtime files
 
@@ -95,9 +112,9 @@ Check:
 - the manifest entry
 - the main file path
 - the source type
-- GitHub release configuration if the source is `github-release`
+- hosted release configuration if the source is `github-release` or `gitlab-release`
 
-If the workflow still processed other dependencies, look at the GitHub Actions summary and the managed issue `wp-core-base dependency source failures`. The framework keeps healthy updates moving, but the job should still fail after the run when source warnings were reported.
+If the workflow still processed other dependencies, look at the automation job summary and the managed issue `wp-core-base dependency source failures`. The framework keeps healthy updates moving, but the job should still fail after the run when source warnings were reported.
 
 ### Framework self-update skips a workflow file
 
@@ -105,9 +122,11 @@ That means a scaffolded workflow no longer matches the last framework-managed ch
 
 The framework leaves that file untouched on purpose. Review the new version in the vendored snapshot and update the downstream workflow manually if you want to pick up the upstream changes.
 
-### GitHub env missing
+### Automation env missing
 
-That is expected outside GitHub unless you are explicitly validating the GitHub workflow contract locally.
+That is expected outside GitHub or GitLab unless you are explicitly validating the hosted automation contract locally.
+
+On GitLab, the most common cause is a missing `GITLAB_TOKEN` CI/CD variable or a token that lacks `api` and `write_repository` access.
 
 ## Deferred Scalability Work
 

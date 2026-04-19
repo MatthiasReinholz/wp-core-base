@@ -38,8 +38,6 @@ For mode-specific help, prefer:
 vendor/wp-core-base/bin/wp-core-base help add-dependency
 vendor/wp-core-base/bin/wp-core-base help adopt-dependency
 vendor/wp-core-base/bin/wp-core-base help remove-dependency
-vendor/wp-core-base/bin/wp-core-base help scaffold-premium-provider
-vendor/wp-core-base/bin/wp-core-base help sync
 ```
 
 ## Add A WordPress.org Plugin
@@ -81,20 +79,19 @@ vendor/wp-core-base/bin/wp-core-base add-dependency \
   --source=github-release \
   --kind=plugin \
   --slug=example-plugin \
-  --github-repository=owner/example-plugin
+  --github-repository=owner/example-plugin \
+  --github-release-asset-pattern='*.zip'
 ```
 
-Optional flags:
+Required or commonly paired flags:
 
+- `--github-release-asset-pattern=*.zip`
 - `--version=1.2.3`
 - `--archive-subdir=plugin`
-- `--github-release-asset-pattern=*.zip`
 - `--private`
 - `--plan`, `--preview`, or `--dry-run`
 
 Use `--archive-subdir` only when the extracted payload is not resolved correctly by default. Standard WordPress.org plugin ZIPs should not need it.
-
-The authoring locator first checks the archive root and then each direct child directory. For directory payloads it prefers a candidate whose basename matches the slug and whose resolved main file is shallower; for file payloads it prefers a basename match. Use `--archive-subdir` when the upstream archive wraps the real payload in one stable subdirectory and the default locator would otherwise pick the wrong layer.
 
 If the upstream project also publishes a checksum sidecar for the ZIP, add the matching manifest fields after creation:
 
@@ -110,17 +107,45 @@ Recommended hardened setup:
 
 That makes `sync` verify the downloaded archive before extraction. If you prefer a repo-wide default, set `security.github_release_verification` and `security.managed_release_min_age_hours` in the manifest instead.
 
+## Add A GitLab Release Plugin
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=gitlab-release \
+  --kind=plugin \
+  --slug=example-plugin \
+  --gitlab-project=group/example-plugin \
+  --gitlab-release-asset-pattern='*.zip'
+```
+
+Optional flags:
+
+- `--version=1.2.3`
+- `--archive-subdir=plugin`
+- `--gitlab-token-env=EXAMPLE_PLUGIN_GITLAB_TOKEN`
+- `--gitlab-api-base=https://gitlab.example.com/api/v4`
+- `--plan`, `--preview`, or `--dry-run`
+
+Use `--gitlab-api-base` when the source project is not hosted on GitLab.com.
+
+If the upstream project also publishes a checksum sidecar for the ZIP, add the matching manifest fields after creation:
+
+- `source_config.checksum_asset_pattern`
+- `source_config.verification_mode`
+- optionally `source_config.min_release_age_hours`
+
 ### Agent-ready GitHub release hardening workflow
 
-If an AI coding agent is upgrading a downstream repo to use GitHub release trust checks, it should follow this order exactly:
+If an AI coding agent is upgrading a downstream repo to use hosted release trust checks, it should follow this order exactly. The same sequence applies to GitLab Releases.
 
-1. inspect the real upstream GitHub Release assets
+1. inspect the real upstream GitHub or GitLab Release assets
 2. confirm the ZIP asset name or stable glob
 3. confirm whether a matching checksum sidecar asset exists
 4. add the dependency normally if it does not exist yet
 5. edit `.wp-core-base/manifest.php` only after the asset names are confirmed
 6. set:
-   - `source_config.github_release_asset_pattern`
+   - `source_config.github_release_asset_pattern` or `source_config.gitlab_release_asset_pattern`
    - `source_config.checksum_asset_pattern`
    - `source_config.verification_mode`
    - optionally `source_config.min_release_age_hours`
@@ -128,7 +153,7 @@ If an AI coding agent is upgrading a downstream repo to use GitHub release trust
 8. run `sync`
 9. only keep `checksum-sidecar-required` if the upstream checksum file really binds the digest to the ZIP filename
 
-Recommended per-dependency manifest shape:
+Recommended hosted GitHub release manifest shape:
 
 ```php
 'source_config' => [
@@ -143,6 +168,8 @@ Recommended per-dependency manifest shape:
     'provider_product_id' => null,
 ],
 ```
+
+For GitLab-hosted releases, use the same trust fields with `gitlab_project`, `gitlab_release_asset_pattern`, `gitlab_token_env`, and optionally `gitlab_api_base`.
 
 If the checksum sidecar does not exist upstream, do not guess. Leave verification at `none` or a repo-level optional mode instead.
 
@@ -184,7 +211,7 @@ If a downstream coding agent needs to make a premium plugin work, it should use 
 3. scaffold a provider only if one does not exist yet
 4. implement the generated provider class
 5. set `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
-6. run `doctor --repo-root=. --github`
+6. run `doctor --repo-root=. --automation`
 7. if the plugin already exists as a local dependency, use `adopt-dependency`; otherwise use `add-dependency`
 8. run `stage-runtime`
 
@@ -255,9 +282,9 @@ Local shell example:
 export WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON='{"plugin:premium:example-vendor:premium-plugin":{"license_key":"provider-specific-secret"}}'
 ```
 
-GitHub Actions setup:
+CI/CD setup:
 
-- create one repository secret named `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
+- create one repository secret or CI/CD variable named `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
 - store the same JSON object there
 
 Premium source failures remain per-dependency warnings during `sync`. A broken premium source does not stop healthy managed dependency updates from continuing.
@@ -298,6 +325,10 @@ export WP_CORE_BASE_GITHUB_TOKEN_PRIVATE_PLUGIN=...
 GitHub Actions setup:
 
 - create a repository secret with the same name as the configured env var
+
+GitLab CI setup:
+
+- create a masked CI/CD variable with the same name as the configured env var
 
 Preview private GitHub adoption without mutating the repo:
 

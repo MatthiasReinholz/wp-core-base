@@ -15,7 +15,7 @@ final class PullRequestBlocker
     public const STATE_INTENTIONALLY_BLOCKED = 'intentionally-blocked';
     public const STATE_WAITING_RETRY = 'waiting-for-retry';
 
-    public function __construct(private readonly GitHubPullRequestReader $gitHubClient)
+    public function __construct(private readonly AutomationPullRequestReader $gitHubClient)
     {
     }
 
@@ -31,33 +31,17 @@ final class PullRequestBlocker
     {
         $eventPath = getenv('GITHUB_EVENT_PATH');
 
-        if (! is_string($eventPath) || $eventPath === '' || ! is_file($eventPath)) {
-            throw new RuntimeException('GITHUB_EVENT_PATH must point to a pull request event payload.');
+        if (is_string($eventPath) && $eventPath !== '' && is_file($eventPath)) {
+            return $this->evaluateGitHubCurrentPullRequestStatus($eventPath);
         }
 
-        $eventContents = file_get_contents($eventPath);
+        $mergeRequestIid = getenv('CI_MERGE_REQUEST_IID');
 
-        if (! is_string($eventContents)) {
-            throw new RuntimeException('Unable to read pull request event payload from GITHUB_EVENT_PATH.');
+        if (is_string($mergeRequestIid) && ctype_digit($mergeRequestIid)) {
+            return $this->evaluatePullRequestNumberStatus((int) $mergeRequestIid);
         }
 
-        $event = json_decode($eventContents, true);
-
-        if (! is_array($event) || ! is_array($event['pull_request'] ?? null)) {
-            throw new RuntimeException('Event payload does not include pull_request data.');
-        }
-
-        $pullRequest = (array) $event['pull_request'];
-        $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
-
-        if ($metadata === null) {
-            fwrite(STDOUT, "No updater metadata found on this pull request. Passing.\n");
-            return $this->clearResult((int) ($pullRequest['number'] ?? 0), [], self::STATE_UNBLOCKED)->toArray();
-        }
-
-        $result = $this->evaluatePullRequestStatus($pullRequest);
-        $this->emitResultLine($result->toArray());
-        return $result->toArray();
+        throw new RuntimeException('Set GITHUB_EVENT_PATH or CI_MERGE_REQUEST_IID to evaluate the current pull request.');
     }
 
     /**
@@ -203,7 +187,7 @@ final class PullRequestBlocker
                     OutputRedactor::redact($throwable->getMessage())
                 );
                 $this->emitWarnings($verificationWarnings);
-                fwrite(STDERR, "Blocker evaluation is degraded by GitHub/API failures. Blocking until verification succeeds.\n");
+                fwrite(STDERR, "Blocker evaluation is degraded by automation/API failures. Blocking until verification succeeds.\n");
                 return new PullRequestBlockerResult(
                     status: self::STATUS_DEGRADED,
                     exitCode: 1,
@@ -221,7 +205,7 @@ final class PullRequestBlocker
                 'snapshot was invalid'
             );
             $this->emitWarnings($verificationWarnings);
-            fwrite(STDERR, "Blocker evaluation is degraded by GitHub/API failures. Blocking until verification succeeds.\n");
+            fwrite(STDERR, "Blocker evaluation is degraded by automation/API failures. Blocking until verification succeeds.\n");
             return new PullRequestBlockerResult(
                 status: self::STATUS_DEGRADED,
                 exitCode: 1,
@@ -302,8 +286,23 @@ final class PullRequestBlocker
      */
     private function metadataMatchesIdentity(array $candidate, array $reference): bool
     {
+        $candidateComponentKey = (string) ($candidate['component_key'] ?? '');
+        $referenceComponentKey = (string) ($reference['component_key'] ?? '');
+        $requirePathOrProvider = ! (
+            $this->isLegacyIdentityMetadata($candidate)
+            && $this->isLegacyIdentityMetadata($reference)
+        );
+
+        if ($candidateComponentKey !== '' && $referenceComponentKey !== '') {
+            if ($candidateComponentKey !== $referenceComponentKey) {
+                return false;
+            }
+
+            return $this->metadataIdentityFieldsCompatible($candidate, $reference, false);
+        }
+
         if ($this->identityForMetadata($candidate) === $this->identityForMetadata($reference)) {
-            return true;
+            return $this->metadataIdentityFieldsCompatible($candidate, $reference, $requirePathOrProvider);
         }
 
         if (
@@ -314,12 +313,61 @@ final class PullRequestBlocker
             return false;
         }
 
+        return $this->metadataIdentityFieldsCompatible($candidate, $reference, $requirePathOrProvider);
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function isLegacyIdentityMetadata(array $metadata): bool
+    {
+        return (string) ($metadata['component_key'] ?? '') === ''
+            && (string) ($metadata['dependency_path'] ?? '') === ''
+            && (string) ($metadata['provider'] ?? '') === '';
+    }
+
+    /**
+     * @param array<string, mixed> $candidate
+     * @param array<string, mixed> $reference
+     */
+    private function metadataIdentityFieldsCompatible(array $candidate, array $reference, bool $requirePathOrProvider): bool
+    {
+        if (
+            ! $this->metadataFieldsAgreeWhenPresent($candidate, $reference, 'kind')
+            || ! $this->metadataFieldsAgreeWhenPresent($candidate, $reference, 'source')
+            || ! $this->metadataFieldsAgreeWhenPresent($candidate, $reference, 'slug')
+            || ! $this->metadataFieldsAgreeWhenPresent($candidate, $reference, 'dependency_path')
+            || ! $this->metadataFieldsAgreeWhenPresent($candidate, $reference, 'provider')
+        ) {
+            return false;
+        }
+
+        if (! $requirePathOrProvider) {
+            return true;
+        }
+
         if ((string) ($candidate['dependency_path'] ?? '') !== '' && ($candidate['dependency_path'] ?? null) === ($reference['dependency_path'] ?? null)) {
             return true;
         }
 
         return (string) ($candidate['provider'] ?? '') !== ''
             && (string) ($candidate['provider'] ?? '') === (string) ($reference['provider'] ?? '');
+    }
+
+    /**
+     * @param array<string, mixed> $candidate
+     * @param array<string, mixed> $reference
+     */
+    private function metadataFieldsAgreeWhenPresent(array $candidate, array $reference, string $field): bool
+    {
+        $candidateValue = $candidate[$field] ?? null;
+        $referenceValue = $reference[$field] ?? null;
+
+        if (! is_string($candidateValue) || $candidateValue === '' || ! is_string($referenceValue) || $referenceValue === '') {
+            return true;
+        }
+
+        return $candidateValue === $referenceValue;
     }
 
     /**
@@ -361,5 +409,36 @@ final class PullRequestBlocker
             count($result['blockers']),
             count($result['warnings'])
         ));
+    }
+
+    /**
+     * @return array{status:string, exit_code:int, blockers:list<string>, warnings:list<string>, state:string, pull_request_number:int}
+     */
+    private function evaluateGitHubCurrentPullRequestStatus(string $eventPath): array
+    {
+        $eventContents = file_get_contents($eventPath);
+
+        if (! is_string($eventContents)) {
+            throw new RuntimeException('Unable to read pull request event payload from GITHUB_EVENT_PATH.');
+        }
+
+        $event = json_decode($eventContents, true);
+
+        if (! is_array($event) || ! is_array($event['pull_request'] ?? null)) {
+            throw new RuntimeException('Event payload does not include pull_request data.');
+        }
+
+        $pullRequest = (array) $event['pull_request'];
+        $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
+
+        if ($metadata === null) {
+            fwrite(STDOUT, "No updater metadata found on this pull request. Passing.\n");
+            return $this->clearResult((int) ($pullRequest['number'] ?? 0), [], self::STATE_UNBLOCKED)->toArray();
+        }
+
+        $result = $this->evaluatePullRequestStatus($pullRequest);
+        $this->emitResultLine($result->toArray());
+
+        return $result->toArray();
     }
 }

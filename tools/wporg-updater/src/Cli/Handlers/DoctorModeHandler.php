@@ -28,7 +28,9 @@ final class DoctorModeHandler implements CliModeHandler
     public function handle(string $mode, array $options): int
     {
         $doctor = new EnvironmentDoctor($this->repoRoot, ! $this->jsonOutput);
-        $exitCode = $doctor->run(isset($options['github']));
+        $providerOverride = isset($options['github']) ? 'github' : null;
+        $requireAutomation = isset($options['automation']) || isset($options['github']);
+        $exitCode = $doctor->run($requireAutomation, $providerOverride);
 
         if ($this->jsonOutput) {
             ($this->emitJson)($doctor->report(), $exitCode);

@@ -25,6 +25,8 @@ return [
             '.git',
             '.github',
             '.gitlab',
+            '.gitea',
+            '.forgejo',
             '.circleci',
             '.wordpress-org',
             'node_modules',
@@ -43,6 +45,8 @@ return [
             'CHANGELOG*',
             '.gitignore',
             '.gitattributes',
+            '.gitlab-ci.yml',
+            'bitbucket-pipelines.yml',
             'phpunit.xml*',
             'composer.json',
             'composer.lock',
@@ -60,7 +64,12 @@ return [
     'github' => [
         'api_base' => getenv('GITHUB_API_URL') ?: 'https://api.github.com',
     ],
+    'gitlab' => [
+        'api_base' => getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4',
+    ],
     'automation' => [
+        'provider' => '__AUTOMATION_PROVIDER__',
+        'api_base' => __AUTOMATION_API_BASE__,
         'base_branch' => null,
         'dry_run' => false,
         'managed_kinds' => __MANAGED_KINDS__,
@@ -110,6 +119,31 @@ return [
         //         'github_repository' => 'owner/private-plugin',
         //         'github_release_asset_pattern' => '*.zip',
         //         'github_token_env' => 'PRIVATE_PLUGIN_GITHUB_TOKEN',
+        //     ],
+        //     'policy' => [
+        //         'class' => 'managed-private',
+        //         'allow_runtime_paths' => [],
+        //         'sanitize_paths' => [],
+        //         'sanitize_files' => [],
+        //     ],
+        // ],
+        // Example managed GitLab Release plugin:
+        // [
+        //     'name' => 'Example GitLab Plugin',
+        //     'slug' => 'example-gitlab-plugin',
+        //     'kind' => 'plugin',
+        //     'management' => 'managed',
+        //     'source' => 'gitlab-release',
+        //     'path' => '__PLUGINS_ROOT__/example-gitlab-plugin',
+        //     'main_file' => 'example-gitlab-plugin.php',
+        //     'version' => '1.2.3',
+        //     'checksum' => 'sha256:...',
+        //     'archive_subdir' => '',
+        //     'extra_labels' => ['plugin:example-gitlab-plugin'],
+        //     'source_config' => [
+        //         'gitlab_project' => 'group/example-gitlab-plugin',
+        //         'gitlab_release_asset_pattern' => '*.zip',
+        //         'gitlab_token_env' => 'EXAMPLE_GITLAB_PLUGIN_TOKEN',
         //     ],
         //     'policy' => [
         //         'class' => 'managed-private',

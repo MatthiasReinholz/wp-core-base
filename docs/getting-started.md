@@ -2,12 +2,9 @@
 
 This guide is for downstream users of `wp-core-base`.
 
-Requires PHP 8.1 or newer. The framework is tested on PHP 8.1, 8.3, and 8.4.
-
 If you are contributing to `wp-core-base` itself, use [contributing.md](contributing.md).
 If you want the vocabulary before the setup steps, read [concepts.md](concepts.md).
 If you want the routine add/remove dependency workflow, read [managing-dependencies.md](managing-dependencies.md).
-If you want the content-only loading patterns, read [deployment-models.md#content-only-core-loading](deployment-models.md#content-only-core-loading).
 
 ## Choose Your Starting Point
 
@@ -33,7 +30,6 @@ If you want the content-only loading patterns, read [deployment-models.md#conten
 - a specific deployment method
 - Composer as your source of truth
 - your custom code to become updater-managed
-- a built-in WordPress `wp-cli` wrapper
 
 Project-owned plugins, themes, MU plugins, and runtime files can stay downstream-owned as `local` entries.
 
@@ -57,9 +53,7 @@ php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
 
-Keep `stage-runtime --output` repo-relative. The command rejects absolute paths and traversal-style overrides.
-
-7. if you want automated PRs, enable the GitHub workflows
+7. if you want automated PRs, scaffold or enable the GitHub workflows or GitLab pipeline for your chosen automation host
 
 The release version of the framework itself is tracked separately in `.wp-core-base/framework.php`.
 
@@ -80,21 +74,21 @@ Fastest bootstrap:
 
 ```bash
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-default --content-root=cms
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation
 ```
 
 If the project is image-first, keeps core external, expects substantial `local` code, and wants staged-clean validation by default, start with:
 
 ```bash
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-image-first --content-root=cms
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation
 ```
 
 If the project already has a strong PR build workflow that runs `doctor`, `stage-runtime`, and image or smoke checks, use the compact image-first profile instead:
 
 ```bash
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-image-first-compact --content-root=cms
-php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation
 ```
 
 Then:
@@ -114,13 +108,13 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 
 9. point your image build at the staged runtime directory instead of the raw working tree
 
-If the repo is multisite, treat the manifest, runtime roots, and governance settings as repo-wide decisions. Do not split them per site.
-
 If you want ongoing upstream framework maintenance, keep the scaffolded `.wp-core-base/framework.php` file and the `wp-core-base` self-update workflow enabled.
 
 Scaffolding also writes `.wp-core-base/USAGE.md`, `.wp-core-base/premium-providers.php`, and a downstream `AGENTS.md`. Treat those as the local entry points for routine dependency authoring, premium-provider registration, and agentic coding inside the project repo.
 
 The standalone `wp-core-base Runtime Validation` workflow is the default because it gives downstreams a small canonical runtime-contract check even when they do not yet have a mature PR build pipeline. The scaffold also writes a separate merged-PR reconciliation workflow so scheduled/manual update runs stay distinct from post-merge queue unblocking. If your main PR workflow already runs `doctor` and `stage-runtime`, the compact image-first scaffold profile is usually the better fit.
+
+After scaffolding, mark `wp-core-base Runtime Validation` (or your equivalent workflow that runs `doctor --automation` + `stage-runtime`) as a required branch-protection check before merges. This prevents manifest-only or payload-only merges from bypassing the runtime checksum contract.
 
 If your repo already has a blanket `/vendor/` ignore from historical Composer usage, do not unignore the whole directory. Keep the exception narrow so only `vendor/wp-core-base` becomes repo-owned:
 
@@ -166,7 +160,7 @@ Suggested order:
 4. create or migrate to `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`
 5. declare every managed and local dependency explicitly
 6. run `doctor` and `stage-runtime`
-7. enable GitHub automation only after the manifest is correct
+7. enable GitHub or GitLab automation only after the manifest is correct
 
 ### Adopt The Automation First
 
@@ -178,7 +172,7 @@ Suggested order:
 2. run `scaffold-downstream`
 3. fill in `.wp-core-base/manifest.php`
 4. keep `.wp-core-base/framework.php` pinned to the vendored framework version
-5. run `doctor --github`
+5. run `doctor --automation`
 6. test one dry-run or one manual workflow dispatch before enabling the schedule
 
 ## Existing FTP Or Manual Deployment
@@ -193,16 +187,14 @@ Recommended order:
 2. make the project reproducible locally
 3. choose `full-core` or `content-only`
 4. create the manifest
-5. adopt GitHub only when you want automated pull requests
+5. adopt GitHub or GitLab only when you want automated pull requests
 6. keep deploying by FTP, SFTP, rsync, or manual upload if that still fits your team
 
-GitHub is optional for the code base itself. It becomes required only if you want the automated update PR flow.
+GitHub and GitLab are optional for the code base itself. One of them becomes required only if you want the automated update PR flow.
 
 ## Local Development
 
 Local development is normal WordPress development.
-
-The framework commands are exposed through the PHP entrypoints in this repository. There is no separate built-in `wp-cli` wrapper.
 
 Use whichever local stack your team already prefers, such as:
 
@@ -230,22 +222,24 @@ Two practical defaults for new downstreams:
 - keep `runtime.manifest_mode` as `strict`
 - use `local` for custom project code rather than trying to force it through update automation
 
-## GitHub Basics For Teams New To GitHub
+## Git Host Basics For Teams New To Hosted Automation
 
-GitHub is used here for three things:
+GitHub or GitLab is used here for three things:
 
 - remote Git hosting
-- scheduled workflows through GitHub Actions
+- scheduled automation through GitHub Actions or GitLab CI
 - reviewable update PRs
 
-It does not have to be your deployment tool.
+Neither host has to be your deployment tool.
 
-You can use GitHub while still:
+You can use either host while still:
 
 - building Docker images elsewhere
 - deploying by FTP or SFTP
 - deploying manually from a local workstation
 - using another CI platform for final release delivery
+
+If you choose GitLab as the automation host, set a masked CI/CD variable named `GITLAB_TOKEN` with `api` and `write_repository` access before enabling the scaffolded pipeline. GitLab CI already provides the project identity variables that `wp-core-base` consumes.
 
 ## What To Read Next
 

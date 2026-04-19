@@ -103,6 +103,7 @@ Supported automated source types today:
 
 - `WordPress.org`
 - `github-release`
+- `gitlab-release`
 
 Not every possible WordPress dependency source is supported by automation.
 
@@ -202,8 +203,11 @@ That keeps PRs focused while avoiding one moving target.
 The framework can work with:
 
 - GitHub + CI/CD
+- GitLab + CI/CD
 - GitHub + FTP or SFTP deployment
+- GitLab + FTP or SFTP deployment
 - GitHub + manual deployment
-- local/manual usage without GitHub automation
+- GitLab + manual deployment
+- local/manual usage without hosted automation
 
-GitHub is required only for the automated PR workflows.
+GitHub or GitLab is required only for the automated PR workflows.

@@ -19,7 +19,8 @@ final class DownstreamScaffolder
         string $profile = 'content-only-default',
         ?string $contentRoot = null,
         bool $force = false,
-        bool $adoptExistingManagedFiles = false
+        bool $adoptExistingManagedFiles = false,
+        string $automationProvider = 'github',
     ): int
     {
         if (! is_dir($this->repoRoot)) {
@@ -37,7 +38,7 @@ final class DownstreamScaffolder
 
         $this->printHeading('wp-core-base scaffold-downstream');
 
-        $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --github');
+        $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --automation');
 
         $writes = [
             [
@@ -59,6 +60,8 @@ final class DownstreamScaffolder
                     '__VALIDATED_KINDS__' => $this->exportInlineArray($preset['validated_kinds']),
                     '__MANAGED_SANITIZE_PATHS__' => $this->exportInlineArray($managedSanitizePaths),
                     '__MANAGED_SANITIZE_FILES__' => $this->exportInlineArray($preset['managed_sanitize_files']),
+                    '__AUTOMATION_PROVIDER__' => $automationProvider,
+                    '__AUTOMATION_API_BASE__' => $this->automationApiBaseExpression($automationProvider),
                 ],
             ],
             [
@@ -87,7 +90,7 @@ final class DownstreamScaffolder
             ],
         ];
 
-        $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset, $paths);
+        $managedFiles = $this->renderFrameworkManagedFiles($toolPath, $preset, $paths, $automationProvider);
 
         foreach ($managedFiles as $relativePath => $rendered) {
             $writes[] = [
@@ -164,61 +167,46 @@ final class DownstreamScaffolder
      * @param array{include_runtime_validation?:bool} $preset
      * @return array<string, string>
      */
-    public function renderFrameworkManagedFiles(string $toolPath, array $preset = [], ?array $paths = null): array
+    public function renderFrameworkManagedFiles(string $toolPath, array $preset = [], ?array $paths = null, ?string $automationProvider = null): array
     {
         if ($paths === null) {
             $paths = Config::load($this->repoRoot)->paths;
+        }
+
+        if (! is_string($automationProvider) || $automationProvider === '') {
+            throw new RuntimeException('Framework-managed file rendering requires an explicit automation provider.');
         }
 
         $phpPath = $this->updaterCommand($toolPath, '');
         $syncCommand = $this->updaterCommand($toolPath, 'sync');
         $frameworkSyncCommand = $this->updaterCommand($toolPath, 'framework-sync --repo-root=.');
         $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
-        $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --github');
+        $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --automation');
         $stageCommand = $this->updaterCommand($toolPath, 'stage-runtime --repo-root=. --output=.wp-core-base/build/runtime');
 
-        $files = [
-            '.github/workflows/wporg-updates.yml' => $this->renderTemplate(
-                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
-                [
-                    '__WPORG_SYNC_COMMAND__' => $syncCommand,
-                    '__WPORG_PHP_PATH__' => $phpPath,
-                ]
+        $files = match ($automationProvider) {
+            'github' => $this->renderGitHubManagedFiles(
+                $preset,
+                $paths,
+                $phpPath,
+                $syncCommand,
+                $frameworkSyncCommand,
+                $blockerCommand,
+                $doctorCommand,
+                $stageCommand
             ),
-            '.github/workflows/wporg-updates-reconcile.yml' => $this->renderTemplate(
-                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-updates-reconcile-workflow.yml.tpl',
-                [
-                    '__WPORG_SYNC_COMMAND__' => $syncCommand,
-                    '__WPORG_PHP_PATH__' => $phpPath,
-                ]
+            'gitlab' => $this->renderGitLabManagedFiles(
+                $preset,
+                $paths,
+                $phpPath,
+                $syncCommand,
+                $frameworkSyncCommand,
+                $blockerCommand,
+                $doctorCommand,
+                $stageCommand
             ),
-            '.github/workflows/wporg-update-pr-blocker.yml' => $this->renderTemplate(
-                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
-                [
-                    '__WPORG_BLOCKER_COMMAND__' => $blockerCommand,
-                    '__WPORG_PHP_PATH__' => $phpPath,
-                ]
-            ),
-            '.github/workflows/wporg-validate-runtime.yml' => $this->renderTemplate(
-                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-validate-runtime-workflow.yml.tpl',
-                [
-                    '__WPORG_DOCTOR_COMMAND__' => $doctorCommand,
-                    '__WPORG_STAGE_RUNTIME_COMMAND__' => $stageCommand,
-                ]
-            ),
-            '.github/workflows/wp-core-base-self-update.yml' => $this->renderTemplate(
-                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-framework-self-update-workflow.yml.tpl',
-                ['__WPORG_FRAMEWORK_SYNC_COMMAND__' => $frameworkSyncCommand]
-            ),
-            $paths['mu_plugins_root'] . '/' . FrameworkRuntimeFiles::GOVERNANCE_LOADER_BASENAME => $this->renderTemplate(
-                $this->frameworkRoot . '/tools/wporg-updater/templates/admin-governance-loader.php.tpl',
-                ['__WP_CORE_BASE_GOVERNANCE_DATA_BASENAME__' => FrameworkRuntimeFiles::GOVERNANCE_DATA_BASENAME]
-            ),
-        ];
-
-        if (($preset['include_runtime_validation'] ?? true) !== true) {
-            unset($files['.github/workflows/wporg-validate-runtime.yml']);
-        }
+            default => throw new RuntimeException(sprintf('Unsupported automation provider for scaffolding: %s', $automationProvider)),
+        };
 
         return $files;
     }
@@ -308,6 +296,125 @@ final class DownstreamScaffolder
     }
 
     /**
+     * @param array{include_runtime_validation?:bool} $preset
+     * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @return array<string, string>
+     */
+    private function renderGitHubManagedFiles(
+        array $preset,
+        array $paths,
+        string $phpPath,
+        string $syncCommand,
+        string $frameworkSyncCommand,
+        string $blockerCommand,
+        string $doctorCommand,
+        string $stageCommand,
+    ): array {
+        $files = [
+            '.github/workflows/wporg-updates.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl',
+                [
+                    '__WPORG_SYNC_COMMAND__' => $syncCommand,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                ]
+            ),
+            '.github/workflows/wporg-updates-reconcile.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-updates-reconcile-workflow.yml.tpl',
+                [
+                    '__WPORG_SYNC_COMMAND__' => $syncCommand,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                ]
+            ),
+            '.github/workflows/wporg-update-pr-blocker.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-pr-blocker-workflow.yml.tpl',
+                [
+                    '__WPORG_BLOCKER_COMMAND__' => $blockerCommand,
+                    '__WPORG_PHP_PATH__' => $phpPath,
+                ]
+            ),
+            '.github/workflows/wporg-validate-runtime.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-validate-runtime-workflow.yml.tpl',
+                [
+                    '__WPORG_DOCTOR_COMMAND__' => $doctorCommand,
+                    '__WPORG_STAGE_RUNTIME_COMMAND__' => $stageCommand,
+                ]
+            ),
+            '.github/workflows/wp-core-base-self-update.yml' => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-framework-self-update-workflow.yml.tpl',
+                ['__WPORG_FRAMEWORK_SYNC_COMMAND__' => $frameworkSyncCommand]
+            ),
+            $paths['mu_plugins_root'] . '/' . FrameworkRuntimeFiles::GOVERNANCE_LOADER_BASENAME => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/admin-governance-loader.php.tpl',
+                ['__WP_CORE_BASE_GOVERNANCE_DATA_BASENAME__' => FrameworkRuntimeFiles::GOVERNANCE_DATA_BASENAME]
+            ),
+        ];
+
+        if (($preset['include_runtime_validation'] ?? true) !== true) {
+            unset($files['.github/workflows/wporg-validate-runtime.yml']);
+        }
+
+        return $files;
+    }
+
+    /**
+     * @param array{include_runtime_validation?:bool} $preset
+     * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @return array<string, string>
+     */
+    private function renderGitLabManagedFiles(
+        array $preset,
+        array $paths,
+        string $phpPath,
+        string $syncCommand,
+        string $frameworkSyncCommand,
+        string $blockerCommand,
+        string $doctorCommand,
+        string $stageCommand,
+    ): array {
+        $pipeline = $this->renderTemplate(
+            $this->frameworkRoot . '/tools/wporg-updater/templates/downstream-gitlab-ci.yml.tpl',
+            [
+                '__WPORG_PHP_PATH__' => $phpPath,
+                '__WPORG_SYNC_COMMAND__' => $syncCommand,
+                '__WPORG_FRAMEWORK_SYNC_COMMAND__' => $frameworkSyncCommand,
+                '__WPORG_BLOCKER_COMMAND__' => $blockerCommand,
+                '__WPORG_DOCTOR_COMMAND__' => $doctorCommand,
+                '__WPORG_STAGE_RUNTIME_COMMAND__' => $stageCommand,
+                '__WPORG_VALIDATE_RUNTIME_JOB__' => ($preset['include_runtime_validation'] ?? true) === true
+                    ? $this->gitLabRuntimeValidationJob($doctorCommand, $stageCommand)
+                    : '',
+            ]
+        );
+
+        if (($preset['include_runtime_validation'] ?? true) !== true) {
+            $pipeline = str_replace("\n\nwp_core_base_framework_sync:", "\nwp_core_base_framework_sync:", $pipeline);
+        }
+
+        return [
+            '.gitlab-ci.yml' => $pipeline,
+            $paths['mu_plugins_root'] . '/' . FrameworkRuntimeFiles::GOVERNANCE_LOADER_BASENAME => $this->renderTemplate(
+                $this->frameworkRoot . '/tools/wporg-updater/templates/admin-governance-loader.php.tpl',
+                ['__WP_CORE_BASE_GOVERNANCE_DATA_BASENAME__' => FrameworkRuntimeFiles::GOVERNANCE_DATA_BASENAME]
+            ),
+        ];
+    }
+
+    private function gitLabRuntimeValidationJob(string $doctorCommand, string $stageCommand): string
+    {
+        return <<<YAML
+wp_core_base_validate_runtime:
+  stage: validate
+  extends: .wp_core_base_setup
+  rules:
+    - if: '\$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '\$CI_PIPELINE_SOURCE == "web"'
+  script:
+    - {$doctorCommand}
+    - {$stageCommand}
+YAML;
+    }
+
+    /**
      * @param array<string, string> $managedFiles
      */
     private function frameworkMetadataForDownstream(string $toolPath, array $managedFiles): FrameworkConfig
@@ -381,6 +488,15 @@ final class DownstreamScaffolder
         return sprintf('%s %s', $command, $mode);
     }
 
+    private function automationApiBaseExpression(string $automationProvider): string
+    {
+        return match ($automationProvider) {
+            'github' => "getenv('GITHUB_API_URL') ?: 'https://api.github.com'",
+            'gitlab' => "getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4'",
+            default => throw new RuntimeException(sprintf('Unsupported automation provider: %s', $automationProvider)),
+        };
+    }
+
     /**
      * @return array{template:string, profile:string, core_mode:string, core_enabled:bool, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, managed_kinds:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>, include_runtime_validation:bool}
      */
@@ -398,8 +514,8 @@ final class DownstreamScaffolder
                 'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
-                'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.gitlab', '__PLUGINS_ROOT__/.gitea', '__PLUGINS_ROOT__/.forgejo', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.gitlab', '__THEMES_ROOT__/.gitea', '__THEMES_ROOT__/.forgejo', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.gitlab', '__MU_PLUGINS_ROOT__/.gitea', '__MU_PLUGINS_ROOT__/.forgejo', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
+                'managed_sanitize_files' => ['README*', 'CHANGELOG*', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
                 'include_runtime_validation' => true,
             ],
             'content-only', 'content-only-default', 'content-only-local-mu' => [
@@ -413,8 +529,8 @@ final class DownstreamScaffolder
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
-                'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.gitlab', '__PLUGINS_ROOT__/.gitea', '__PLUGINS_ROOT__/.forgejo', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.gitlab', '__THEMES_ROOT__/.gitea', '__THEMES_ROOT__/.forgejo', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.gitlab', '__MU_PLUGINS_ROOT__/.gitea', '__MU_PLUGINS_ROOT__/.forgejo', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
+                'managed_sanitize_files' => ['README*', 'CHANGELOG*', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
                 'include_runtime_validation' => true,
             ],
             'content-only-migration' => [
@@ -428,8 +544,8 @@ final class DownstreamScaffolder
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
-                'managed_sanitize_files' => ['README*', 'CHANGELOG*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.gitlab', '__PLUGINS_ROOT__/.gitea', '__PLUGINS_ROOT__/.forgejo', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.gitlab', '__THEMES_ROOT__/.gitea', '__THEMES_ROOT__/.forgejo', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.gitlab', '__MU_PLUGINS_ROOT__/.gitea', '__MU_PLUGINS_ROOT__/.forgejo', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
+                'managed_sanitize_files' => ['README*', 'CHANGELOG*', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
                 'include_runtime_validation' => true,
             ],
             'content-only-image-first' => [
@@ -446,6 +562,9 @@ final class DownstreamScaffolder
                 'managed_sanitize_paths' => [
                     '__PLUGINS_ROOT__/docs',
                     '__PLUGINS_ROOT__/.github',
+                    '__PLUGINS_ROOT__/.gitlab',
+                    '__PLUGINS_ROOT__/.gitea',
+                    '__PLUGINS_ROOT__/.forgejo',
                     '__PLUGINS_ROOT__/.wordpress-org',
                     '__PLUGINS_ROOT__/node_modules',
                     '__PLUGINS_ROOT__/doc',
@@ -458,6 +577,9 @@ final class DownstreamScaffolder
                     '__PLUGINS_ROOT__/screenshots',
                     '__THEMES_ROOT__/docs',
                     '__THEMES_ROOT__/.github',
+                    '__THEMES_ROOT__/.gitlab',
+                    '__THEMES_ROOT__/.gitea',
+                    '__THEMES_ROOT__/.forgejo',
                     '__THEMES_ROOT__/.wordpress-org',
                     '__THEMES_ROOT__/node_modules',
                     '__THEMES_ROOT__/doc',
@@ -474,6 +596,8 @@ final class DownstreamScaffolder
                     'CHANGELOG*',
                     '.gitignore',
                     '.gitattributes',
+                    '.gitlab-ci.yml',
+                    'bitbucket-pipelines.yml',
                     'phpunit.xml*',
                     'composer.json',
                     'composer.lock',
@@ -498,6 +622,9 @@ final class DownstreamScaffolder
                 'managed_sanitize_paths' => [
                     '__PLUGINS_ROOT__/docs',
                     '__PLUGINS_ROOT__/.github',
+                    '__PLUGINS_ROOT__/.gitlab',
+                    '__PLUGINS_ROOT__/.gitea',
+                    '__PLUGINS_ROOT__/.forgejo',
                     '__PLUGINS_ROOT__/.wordpress-org',
                     '__PLUGINS_ROOT__/node_modules',
                     '__PLUGINS_ROOT__/doc',
@@ -510,6 +637,9 @@ final class DownstreamScaffolder
                     '__PLUGINS_ROOT__/screenshots',
                     '__THEMES_ROOT__/docs',
                     '__THEMES_ROOT__/.github',
+                    '__THEMES_ROOT__/.gitlab',
+                    '__THEMES_ROOT__/.gitea',
+                    '__THEMES_ROOT__/.forgejo',
                     '__THEMES_ROOT__/.wordpress-org',
                     '__THEMES_ROOT__/node_modules',
                     '__THEMES_ROOT__/doc',
@@ -526,6 +656,8 @@ final class DownstreamScaffolder
                     'CHANGELOG*',
                     '.gitignore',
                     '.gitattributes',
+                    '.gitlab-ci.yml',
+                    'bitbucket-pipelines.yml',
                     'phpunit.xml*',
                     'composer.json',
                     'composer.lock',

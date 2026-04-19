@@ -51,8 +51,31 @@ final class GitHubClient implements GitHubAutomationClient
      */
     public function ensureLabels(array $definitions): void
     {
-        (new GitHubLabelSynchronizer($this->repository, $this->dryRun))
-            ->ensureLabels($definitions, fn (string $method, string $path, ?array $payload = null): array => $this->requestJson($method, $path, $payload));
+        $definitions = LabelHelper::normalizeDefinitions($definitions);
+
+        if ($this->dryRun) {
+            fwrite(STDOUT, "[dry-run] Ensuring GitHub labels\n");
+            return;
+        }
+
+        foreach ($definitions as $name => $definition) {
+            $encodedName = rawurlencode($name);
+
+            try {
+                $this->requestJson('GET', '/repos/' . $this->repository . '/labels/' . $encodedName);
+                $this->requestJson('PATCH', '/repos/' . $this->repository . '/labels/' . $encodedName, [
+                    'new_name' => $name,
+                    'color' => $definition['color'],
+                    'description' => $definition['description'],
+                ]);
+            } catch (RuntimeException) {
+                $this->requestJson('POST', '/repos/' . $this->repository . '/labels', [
+                    'name' => $name,
+                    'color' => $definition['color'],
+                    'description' => $definition['description'],
+                ]);
+            }
+        }
     }
 
     /**
@@ -332,12 +355,12 @@ final class GitHubClient implements GitHubAutomationClient
     /**
      * @param list<string> $labels
      */
-    public function setLabels(int $issueNumber, array $labels): void
+    public function setIssueLabels(int $issueNumber, array $labels): void
     {
         $labels = LabelHelper::normalizeList($labels);
 
         if ($this->dryRun) {
-            fwrite(STDOUT, sprintf("[dry-run] Set labels on PR #%d: %s\n", $issueNumber, implode(', ', $labels)));
+            fwrite(STDOUT, sprintf("[dry-run] Set labels on issue #%d: %s\n", $issueNumber, implode(', ', $labels)));
             return;
         }
 
@@ -346,8 +369,18 @@ final class GitHubClient implements GitHubAutomationClient
         ]);
     }
 
-    public function markReadyForReview(string $nodeId): void
+    /**
+     * @param list<string> $labels
+     */
+    public function setPullRequestLabels(int $number, array $labels): void
     {
+        $this->setIssueLabels($number, $labels);
+    }
+
+    public function markReadyForReview(int $number): void
+    {
+        $nodeId = $this->pullRequestNodeId($number);
+
         if ($this->dryRun) {
             fwrite(STDOUT, sprintf("[dry-run] Mark PR %s ready for review\n", $nodeId));
             return;
@@ -358,8 +391,10 @@ final class GitHubClient implements GitHubAutomationClient
         ]);
     }
 
-    public function convertToDraft(string $nodeId): void
+    public function convertToDraft(int $number): void
     {
+        $nodeId = $this->pullRequestNodeId($number);
+
         if ($this->dryRun) {
             fwrite(STDOUT, sprintf("[dry-run] Convert PR %s to draft\n", $nodeId));
             return;
@@ -381,46 +416,46 @@ final class GitHubClient implements GitHubAutomationClient
         ], true);
     }
 
+    private function pullRequestNodeId(int $number): string
+    {
+        $pullRequest = $this->getPullRequest($number);
+        $nodeId = (string) ($pullRequest['node_id'] ?? '');
+
+        if ($nodeId === '') {
+            throw new RuntimeException(sprintf('GitHub pull request #%d did not include node_id.', $number));
+        }
+
+        return $nodeId;
+    }
+
     /**
      * @param array<string, mixed>|null $payload
      * @return array<string, mixed>|list<mixed>
      */
     private function requestJson(string $method, string $path, ?array $payload = null, bool $graphql = false): array
     {
-        try {
-            $response = $this->httpClient->requestWithOptions(
-                $method,
-                rtrim($this->apiBase, '/') . $path,
-                $this->headers($graphql),
-                $payload,
-                null,
-                false,
-                ['max_body_bytes' => HttpClient::DEFAULT_MAX_JSON_BODY_BYTES],
-            );
-        } catch (RuntimeException $exception) {
-            if (str_contains($exception->getMessage(), 'exceeded the configured byte limit')) {
-                throw new RuntimeException(sprintf(
-                    'GitHub API %s %s exceeded the maximum JSON response size of %d bytes.',
-                    $method,
-                    $path,
-                    HttpClient::DEFAULT_MAX_JSON_BODY_BYTES
-                ), previous: $exception);
-            }
-
-            throw $exception;
-        }
+        $response = $this->httpClient->request(
+            $method,
+            rtrim($this->apiBase, '/') . $path,
+            $this->headers($graphql),
+            $payload,
+        );
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
-            throw new HttpStatusRuntimeException(
+            throw new RuntimeException(sprintf(
+                'GitHub API %s %s failed with status %d: %s',
+                $method,
+                $path,
                 $response['status'],
-                sprintf('GitHub API %s %s failed with status %d: %s', $method, $path, $response['status'], $response['body'])
-            );
+                OutputRedactor::redactHttpBody($response['body'])
+            ));
         }
 
-        $decoded = HttpClient::decodeJsonObject(
-            $response['body'],
-            sprintf('GitHub API %s %s returned invalid JSON.', $method, $path)
-        );
+        $decoded = json_decode($response['body'], true);
+
+        if (! is_array($decoded)) {
+            throw new RuntimeException(sprintf('GitHub API %s %s returned invalid JSON.', $method, $path));
+        }
 
         if ($graphql && isset($decoded['errors'])) {
             throw new RuntimeException(sprintf('GitHub GraphQL error for %s: %s', $path, json_encode($decoded['errors'], JSON_THROW_ON_ERROR)));

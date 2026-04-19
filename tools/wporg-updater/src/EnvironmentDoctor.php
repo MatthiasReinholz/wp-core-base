@@ -19,7 +19,7 @@ final class EnvironmentDoctor
     ) {
     }
 
-    public function run(bool $requireGitHub = false): int
+    public function run(bool $requireAutomation = false, ?string $automationProviderOverride = null): int
     {
         $this->errors = 0;
         $this->warnings = 0;
@@ -55,8 +55,9 @@ final class EnvironmentDoctor
         try {
             $framework = FrameworkConfig::load($this->repoRoot);
             $this->ok(sprintf(
-                'Framework metadata loaded successfully for `%s` at version %s.',
-                $framework->repository,
+                'Framework metadata loaded successfully for official %s `%s` at version %s.',
+                strtolower($framework->releaseSourceKindLabel()),
+                $framework->releaseSourceReference(),
                 $framework->version
             ));
         } catch (RuntimeException $exception) {
@@ -73,11 +74,12 @@ final class EnvironmentDoctor
         }
 
         if ($framework !== null) {
-            $this->inspectFrameworkDistributionPath($framework, $requireGitHub);
+            $this->inspectFrameworkDistributionPath($framework, $requireAutomation);
         }
 
-        $this->inspectGitHubEnvironment($config, $requireGitHub);
-        $this->inspectGitHubWorkflows($framework, $requireGitHub);
+        $automationProvider = $automationProviderOverride ?? $config?->automationProvider() ?? 'github';
+        $this->inspectAutomationEnvironment($config, $requireAutomation, $automationProvider);
+        $this->inspectAutomationWorkflows($framework, $requireAutomation, $automationProvider);
         $this->printSummary();
 
         return $this->errors === 0 ? 0 : 1;
@@ -321,13 +323,13 @@ final class EnvironmentDoctor
 
     private function inspectRuntimeStaging(Config $config): void
     {
-        $stageOutput = $this->doctorRuntimeStageOutputPath();
-        $stagePath = $config->repoRoot . '/' . $stageOutput;
+        $relativeStagePath = $this->doctorRuntimeStagePath();
+        $stagePath = $config->repoRoot . '/' . $relativeStagePath;
         $runtimeInspector = new RuntimeInspector($config->runtime);
         $stager = new RuntimeStager($config, $runtimeInspector, new AdminGovernanceExporter($runtimeInspector));
 
         try {
-            $stagedPaths = $stager->stage($stageOutput);
+            $stagedPaths = $stager->stage($relativeStagePath);
             $this->ok(sprintf(
                 'Runtime staging succeeded at %s (%s).',
                 $stagePath,
@@ -340,42 +342,20 @@ final class EnvironmentDoctor
         }
     }
 
-    private function doctorRuntimeStageOutputPath(): string
+    private function doctorRuntimeStagePath(): string
     {
-        $pid = getmypid();
-        try {
-            $suffix = bin2hex(random_bytes(6));
-        } catch (\Throwable) {
-            $suffix = str_replace('.', '', uniqid('', true));
-        }
+        $pid = function_exists('getmypid') ? (int) getmypid() : 0;
 
-        return sprintf('.wp-core-base/build/doctor-runtime-%d-%s', is_int($pid) ? $pid : 0, $suffix);
+        return sprintf(
+            '.wp-core-base/build/doctor-runtime-%d-%s',
+            $pid,
+            bin2hex(random_bytes(4))
+        );
     }
 
-    private function inspectGitHubEnvironment(?Config $config, bool $requireGitHub): void
+    private function inspectAutomationEnvironment(?Config $config, bool $requireAutomation, string $automationProvider): void
     {
-        $repository = getenv('GITHUB_REPOSITORY');
-        $token = getenv('GITHUB_TOKEN');
-        $apiUrl = getenv('GITHUB_API_URL');
-
-        $hasRepository = is_string($repository) && $repository !== '';
-        $hasToken = is_string($token) && $token !== '';
-
-        if ($hasRepository && $hasToken) {
-            $this->ok(sprintf(
-                'GitHub automation environment looks configured for %s%s.',
-                $repository,
-                is_string($apiUrl) && $apiUrl !== '' ? sprintf(' using API %s', $apiUrl) : ''
-            ));
-        } else {
-            $message = 'GitHub automation environment is not fully configured. Set GITHUB_REPOSITORY and GITHUB_TOKEN to run sync or pr-blocker modes.';
-
-            if ($requireGitHub) {
-                $this->error($message);
-            } else {
-                $this->warn($message . ' This is fine for local verification and non-GitHub use.');
-            }
-        }
+        $this->inspectPrimaryAutomationEnvironment($requireAutomation, $automationProvider);
 
         if ($config === null) {
             return;
@@ -417,7 +397,7 @@ final class EnvironmentDoctor
             $premiumRegistry = null;
             $premiumSources = [];
 
-            if ($requireGitHub) {
+            if ($requireAutomation) {
                 $this->error($exception->getMessage());
             } else {
                 $this->warn($exception->getMessage());
@@ -425,7 +405,7 @@ final class EnvironmentDoctor
         }
 
         foreach ($config->managedDependencies() as $dependency) {
-            if ($dependency['source'] !== 'github-release') {
+            if (! in_array((string) $dependency['source'], ['github-release', 'gitlab-release'], true)) {
                 if (PremiumSourceResolver::isPremiumSource((string) $dependency['source'])) {
                     $provider = PremiumSourceResolver::providerForDependency($dependency);
 
@@ -454,7 +434,7 @@ final class EnvironmentDoctor
                             PremiumCredentialsStore::envName()
                         ));
                     } catch (RuntimeException $exception) {
-                        if ($requireGitHub) {
+                        if ($requireAutomation) {
                             $this->error($exception->getMessage());
                         } else {
                             $this->warn($exception->getMessage());
@@ -465,7 +445,7 @@ final class EnvironmentDoctor
                 continue;
             }
 
-            $tokenEnv = $dependency['source_config']['github_token_env'] ?? null;
+            $tokenEnv = $dependency['source_config']['github_token_env'] ?? $dependency['source_config']['gitlab_token_env'] ?? null;
 
             if (! is_string($tokenEnv) || $tokenEnv === '') {
                 continue;
@@ -474,13 +454,13 @@ final class EnvironmentDoctor
             $hasDependencyToken = getenv($tokenEnv);
 
             if (is_string($hasDependencyToken) && $hasDependencyToken !== '') {
-                $this->ok(sprintf('GitHub token env is configured for %s: %s', $dependency['component_key'], $tokenEnv));
+                $this->ok(sprintf('Hosted release token env is configured for %s: %s', $dependency['component_key'], $tokenEnv));
                 continue;
             }
 
-            $message = sprintf('GitHub token env %s is missing for %s.', $tokenEnv, $dependency['component_key']);
+            $message = sprintf('Hosted release token env %s is missing for %s.', $tokenEnv, $dependency['component_key']);
 
-            if ($requireGitHub) {
+            if ($requireAutomation) {
                 $this->error($message);
             } else {
                 $this->warn($message);
@@ -518,9 +498,14 @@ final class EnvironmentDoctor
         }
     }
 
-    private function inspectGitHubWorkflows(?FrameworkConfig $framework, bool $requireGitHub): void
+    private function inspectAutomationWorkflows(?FrameworkConfig $framework, bool $requireAutomation, string $automationProvider): void
     {
-        if (! $requireGitHub) {
+        if (! $requireAutomation) {
+            return;
+        }
+
+        if ($automationProvider === 'gitlab') {
+            $this->inspectGitLabAutomationWorkflows($framework);
             return;
         }
 
@@ -567,7 +552,7 @@ final class EnvironmentDoctor
         $this->inspectWorkflowSemantics($workflowDir);
     }
 
-    private function inspectFrameworkDistributionPath(FrameworkConfig $framework, bool $requireGitHub): void
+    private function inspectFrameworkDistributionPath(FrameworkConfig $framework, bool $requireAutomation): void
     {
         $distributionPath = $framework->distributionPath();
 
@@ -612,7 +597,7 @@ final class EnvironmentDoctor
                 );
             }
 
-            if ($requireGitHub) {
+            if ($requireAutomation) {
                 $this->error($message);
             } else {
                 $this->warn($message);
@@ -770,6 +755,100 @@ final class EnvironmentDoctor
     private function isSafeRelativePath(string $path): bool
     {
         return $path !== '' && ! str_starts_with($path, '/') && ! str_contains($path, '../');
+    }
+
+    private function inspectPrimaryAutomationEnvironment(bool $requireAutomation, string $automationProvider): void
+    {
+        if ($automationProvider === 'gitlab') {
+            $project = getenv('GITLAB_PROJECT_ID');
+
+            if (! is_string($project) || $project === '') {
+                $project = getenv('CI_PROJECT_ID');
+            }
+
+            if (! is_string($project) || $project === '') {
+                $project = getenv('GITLAB_PROJECT_PATH');
+            }
+
+            if (! is_string($project) || $project === '') {
+                $project = getenv('CI_PROJECT_PATH');
+            }
+
+            $token = getenv('GITLAB_TOKEN');
+            $apiUrl = getenv('CI_API_V4_URL');
+            $hasProject = is_string($project) && $project !== '';
+            $hasToken = is_string($token) && $token !== '';
+
+            if ($hasProject && $hasToken) {
+                $this->ok(sprintf(
+                    'GitLab automation environment looks configured for %s%s.',
+                    $project,
+                    is_string($apiUrl) && $apiUrl !== '' ? sprintf(' using API %s', $apiUrl) : ''
+                ));
+                return;
+            }
+
+            $message = 'GitLab automation environment is not fully configured. Set GITLAB_TOKEN and one of GITLAB_PROJECT_ID, CI_PROJECT_ID, GITLAB_PROJECT_PATH, or CI_PROJECT_PATH to run sync or pr-blocker modes.';
+
+            if ($requireAutomation) {
+                $this->error($message);
+            } else {
+                $this->warn($message . ' This is fine for local verification and non-GitLab use.');
+            }
+
+            return;
+        }
+
+        $repository = getenv('GITHUB_REPOSITORY');
+        $token = getenv('GITHUB_TOKEN');
+        $apiUrl = getenv('GITHUB_API_URL');
+        $hasRepository = is_string($repository) && $repository !== '';
+        $hasToken = is_string($token) && $token !== '';
+
+        if ($hasRepository && $hasToken) {
+            $this->ok(sprintf(
+                'GitHub automation environment looks configured for %s%s.',
+                $repository,
+                is_string($apiUrl) && $apiUrl !== '' ? sprintf(' using API %s', $apiUrl) : ''
+            ));
+            return;
+        }
+
+        $message = 'GitHub automation environment is not fully configured. Set GITHUB_REPOSITORY and GITHUB_TOKEN to run sync or pr-blocker modes.';
+
+        if ($requireAutomation) {
+            $this->error($message);
+        } else {
+            $this->warn($message . ' This is fine for local verification and non-GitHub use.');
+        }
+    }
+
+    private function inspectGitLabAutomationWorkflows(?FrameworkConfig $framework): void
+    {
+        $pipelinePath = $this->repoRoot . '/.gitlab-ci.yml';
+
+        if (! is_file($pipelinePath)) {
+            $this->error('GitLab pipeline file is missing. Run scaffold-downstream with --automation-provider=gitlab or add .gitlab-ci.yml manually.');
+            return;
+        }
+
+        $contents = file_get_contents($pipelinePath);
+
+        if (! is_string($contents) || trim($contents) === '') {
+            $this->error('GitLab pipeline file is empty. Run scaffold-downstream with --automation-provider=gitlab or add .gitlab-ci.yml manually.');
+            return;
+        }
+
+        $hasSyncWorkflow = str_contains($contents, 'wporg-updater.php sync');
+        $hasBlockerWorkflow = str_contains($contents, 'wporg-updater.php pr-blocker');
+        $hasValidationWorkflow = str_contains($contents, 'wporg-updater.php stage-runtime');
+        $hasFrameworkSyncWorkflow = $framework === null || $framework->distributionPath() === '.'
+            || str_contains($contents, 'wporg-updater.php framework-sync');
+
+        $this->okIf($hasSyncWorkflow, 'Found a GitLab pipeline job that runs sync mode.', 'No GitLab pipeline job found that runs `wporg-updater.php sync`.');
+        $this->okIf($hasBlockerWorkflow, 'Found a GitLab pipeline job that runs blocker mode.', 'No GitLab pipeline job found that runs `wporg-updater.php pr-blocker`.');
+        $this->okIf($hasValidationWorkflow, 'Found a GitLab pipeline job that stages runtime output.', 'No GitLab pipeline job found that runs `wporg-updater.php stage-runtime`.');
+        $this->okIf($hasFrameworkSyncWorkflow, 'Found a GitLab pipeline job that runs framework-sync mode.', 'No GitLab pipeline job found that runs `wporg-updater.php framework-sync`.');
     }
 
     private function inspectRuntimeAllowPaths(Config $config): void
@@ -1152,52 +1231,52 @@ final class EnvironmentDoctor
 
     private function ok(string $message): void
     {
-        $redacted = OutputRedactor::redact($message);
-        $this->messages[] = ['level' => 'ok', 'message' => $redacted];
+        $message = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'ok', 'message' => $message];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[ok] " . $redacted . "\n");
+        fwrite(STDOUT, "[ok] " . $message . "\n");
     }
 
     private function warn(string $message): void
     {
         $this->warnings++;
-        $redacted = OutputRedactor::redact($message);
-        $this->messages[] = ['level' => 'warn', 'message' => $redacted];
+        $message = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'warn', 'message' => $message];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[warn] " . $redacted . "\n");
+        fwrite(STDOUT, "[warn] " . $message . "\n");
     }
 
     private function error(string $message): void
     {
         $this->errors++;
-        $redacted = OutputRedactor::redact($message);
-        $this->messages[] = ['level' => 'error', 'message' => $redacted];
+        $message = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'error', 'message' => $message];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[error] " . $redacted . "\n");
+        fwrite(STDOUT, "[error] " . $message . "\n");
     }
 
     private function note(string $message): void
     {
-        $redacted = OutputRedactor::redact($message);
-        $this->messages[] = ['level' => 'note', 'message' => $redacted];
+        $message = OutputRedactor::redact($message);
+        $this->messages[] = ['level' => 'note', 'message' => $message];
 
         if (! $this->emitOutput) {
             return;
         }
 
-        fwrite(STDOUT, "[note] " . $redacted . "\n");
+        fwrite(STDOUT, "[note] " . $message . "\n");
     }
 
     private function okIf(bool $condition, string $okMessage, string $errorMessage): void
