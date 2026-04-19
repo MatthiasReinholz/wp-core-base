@@ -267,7 +267,7 @@ final class FrameworkSyncer
         try {
             if ((bool) $plannedPr['requires_code_update']) {
                 $result = [];
-                $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData);
+                $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData, $failOnSkippedManagedFiles);
 
                 $changed = $this->gitRunner->commitAndPush(
                     $branch,
