@@ -10,6 +10,8 @@ final class FrameworkReleaseNotes
         'Summary',
         'Downstream Impact',
         'Migration Notes',
+        'Downstream Workflow Changes',
+        'Required Downstream Actions',
         'Bundled Baseline',
     ];
 

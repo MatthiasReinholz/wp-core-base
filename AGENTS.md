@@ -63,8 +63,17 @@ For machine-readable automation around the CLI, prefer:
 - `doctor --automation --json` when validating the configured automation contract
 - `doctor --github --json` when validating the GitHub automation contract explicitly
 - `stage-runtime --json`
+- `framework-sync --check-only --json` when preflighting the next framework release
+- `framework-sync --check-only --fail-on-skipped-managed-files --json` when customized framework-managed files must block rollout
 - dependency preview flows with `--plan --json`
 - `release-verify --json`
+
+Use one command surface consistently inside downstream repos:
+
+- base-repo form: `bin/wp-core-base ...` for authoring commands and `php tools/wporg-updater/bin/wporg-updater.php ...` for framework-maintenance commands
+- vendored form: `vendor/wp-core-base/bin/wp-core-base ...` for authoring commands and `php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php --repo-root=. ...` for framework-maintenance commands
+
+Prefer `adopt-dependency` over manual manifest rewrites when converting an existing `local` entry into a managed source. Run `refresh-admin-governance` after direct manifest edits that change ownership metadata.
 
 Every runtime path should be understood as one of:
 

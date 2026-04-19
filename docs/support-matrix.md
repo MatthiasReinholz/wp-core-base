@@ -4,6 +4,12 @@ This document lists what `wp-core-base` supports today, what it supports with co
 
 ## Automation Hosts
 
+Support tiers in this table mean:
+
+- `First-class`: native automation provider support is implemented and documented
+- `Supported with constraints`: same provider family works with explicit API-base or environment configuration
+- `Not yet supported`: no native automation provider exists in `wp-core-base` yet
+
 | Host | Status | Notes |
 | --- | --- | --- |
 | GitHub.com | First-class | Default hosted automation path. |

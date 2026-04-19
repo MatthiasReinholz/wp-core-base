@@ -85,8 +85,14 @@ function run_multi_host_contract_tests(
             (string) file_get_contents($payloadTemplatePath)
         )
     );
-    $installResult = (new FrameworkInstaller($frameworkInstallRoot, new RuntimeInspector(Config::load($frameworkInstallRoot)->runtime)))
-        ->apply($payloadRoot, 'vendor/wp-core-base');
+    $customizedGitLabPipeline = $frameworkInstallRoot . '/.gitlab-ci.yml';
+    file_put_contents($customizedGitLabPipeline, (string) file_get_contents($customizedGitLabPipeline) . "\n# local customization\n");
+    $gitlabInstaller = new FrameworkInstaller($frameworkInstallRoot, new RuntimeInspector(Config::load($frameworkInstallRoot)->runtime));
+    $installPlan = $gitlabInstaller->plan($payloadRoot, 'vendor/wp-core-base');
+    $assert(in_array('.gitlab-ci.yml', $installPlan['skipped_files'], true), 'Expected GitLab framework install planning to preserve customized .gitlab-ci.yml files as skipped managed files.');
+    $assert(! in_array('.github/workflows/wporg-updates.yml', $installPlan['refreshed_files'], true), 'Expected GitLab framework install planning to stay provider-aware and avoid GitHub workflow refreshes.');
+    file_put_contents($customizedGitLabPipeline, str_replace("\n# local customization\n", '', (string) file_get_contents($customizedGitLabPipeline)));
+    $installResult = $gitlabInstaller->apply($payloadRoot, 'vendor/wp-core-base');
     $updatedFramework = FrameworkConfig::load($frameworkInstallRoot);
     $updatedPipeline = (string) file_get_contents($frameworkInstallRoot . '/.gitlab-ci.yml');
     $assert($updatedFramework->version === '9.9.9', 'Expected framework installer to update the pinned version for GitLab downstreams.');

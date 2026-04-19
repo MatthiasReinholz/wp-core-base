@@ -7,8 +7,10 @@ use WpOrgPluginUpdater\FileChecksum;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseArtifactBuilder;
+use WpOrgPluginUpdater\FrameworkSyncer;
 use WpOrgPluginUpdater\FrameworkWriter;
 use WpOrgPluginUpdater\PrBodyRenderer;
+use WpOrgPluginUpdater\ReleaseClassifier;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\WordPressCoreClient;
 
@@ -65,6 +67,10 @@ function run_security_framework_contract_tests(
     $customizedWorkflowPath = $tempScaffoldRoot . '/.github/workflows/wp-core-base-self-update.yml';
     file_put_contents($customizedWorkflowPath, (string) file_get_contents($customizedWorkflowPath) . "\n# local customization\n");
     $installer = new FrameworkInstaller($tempScaffoldRoot, new RuntimeInspector(Config::load($tempScaffoldRoot)->runtime));
+    $installPlan = $installer->plan($payloadRoot, 'vendor/wp-core-base');
+    $assert(in_array('.github/workflows/wp-core-base-self-update.yml', $installPlan['skipped_files'], true), 'Expected framework installer plans to surface customized managed workflows before apply.');
+    $assert(in_array('.github/workflows/wporg-updates.yml', $installPlan['refreshed_files'], true), 'Expected framework installer plans to list framework-managed workflows that will refresh.');
+    $assert(FrameworkConfig::load($tempScaffoldRoot)->version === $frameworkConfig->version, 'Expected framework installer planning to avoid mutating the pinned framework version.');
     $installResult = $installer->apply($payloadRoot, 'vendor/wp-core-base');
     $updatedFramework = FrameworkConfig::load($tempScaffoldRoot);
     $assert($updatedFramework->version === '1.0.1', 'Expected framework installer to update the pinned framework version.');
@@ -183,6 +189,135 @@ function run_security_framework_contract_tests(
         $legacyRefreshUpdatedFramework->managedFiles()['.github/workflows/wp-core-base-self-update.yml'] === 'sha256:' . hash('sha256', $legacyRefreshWorkflowContents),
         'Expected refreshed legacy untracked managed workflows to be tracked under their refreshed checksum.'
     );
+
+    $strictCheckRoot = sys_get_temp_dir() . '/wporg-framework-strict-check-' . bin2hex(random_bytes(4));
+    mkdir($strictCheckRoot, 0777, true);
+    (new \WpOrgPluginUpdater\DownstreamScaffolder($repoRoot, $strictCheckRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
+    $repoRuntimeInspector->copyPath($repoRoot, $strictCheckRoot . '/vendor/wp-core-base', FrameworkReleaseArtifactBuilder::excludedPaths());
+    $repoRuntimeInspector->clearPath($strictCheckRoot . '/vendor/wp-core-base/.git');
+    $strictCheckWorkflowPath = $strictCheckRoot . '/.github/workflows/wp-core-base-self-update.yml';
+    file_put_contents($strictCheckWorkflowPath, (string) file_get_contents($strictCheckWorkflowPath) . "\n# local customization\n");
+    [$strictMajor, $strictMinor, $strictPatch] = array_map('intval', explode('.', $frameworkConfig->normalizedVersion()));
+    $strictTargetVersion = sprintf('%d.%d.%d', $strictMajor, $strictMinor, $strictPatch + 1);
+    $strictPayloadRoot = sys_get_temp_dir() . '/wporg-framework-strict-check-payload-' . bin2hex(random_bytes(4));
+    mkdir($strictPayloadRoot, 0777, true);
+    $repoRuntimeInspector->copyPath($repoRoot, $strictPayloadRoot, FrameworkReleaseArtifactBuilder::excludedPaths());
+    (new RuntimeInspector($config->runtime))->clearPath($strictPayloadRoot . '/.git');
+    (new FrameworkWriter())->write(FrameworkConfig::load($strictPayloadRoot)->withInstalledRelease(
+        version: $strictTargetVersion,
+        wordPressCoreVersion: '6.9.4',
+        managedComponents: $frameworkConfig->baseline['managed_components'],
+        managedFiles: [],
+        distributionPath: '.'
+    ));
+    $strictPayloadTemplatePath = $strictPayloadRoot . '/tools/wporg-updater/templates/downstream-workflow.yml.tpl';
+    file_put_contents(
+        $strictPayloadTemplatePath,
+        str_replace(
+            'scheduled update PRs',
+            'scheduled update PRs from strict check payload',
+            (string) file_get_contents($strictPayloadTemplatePath)
+        )
+    );
+    $strictArtifactPath = sys_get_temp_dir() . '/wporg-framework-strict-check-' . bin2hex(random_bytes(4)) . '.zip';
+    $strictZip = new ZipArchive();
+    $assert($strictZip->open($strictArtifactPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true, 'Expected strict framework-sync fixture ZIP to be created.');
+    $strictPayloadIterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($strictPayloadRoot, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($strictPayloadIterator as $strictEntry) {
+        $strictEntryPath = $strictEntry->getPathname();
+        $strictRelativePath = ltrim(str_replace('\\', '/', substr($strictEntryPath, strlen($strictPayloadRoot))), '/');
+        $strictArchivePath = 'wp-core-base/' . $strictRelativePath;
+
+        if ($strictEntry->isDir()) {
+            $strictZip->addEmptyDir($strictArchivePath);
+            continue;
+        }
+
+        $strictZip->addFile($strictEntryPath, $strictArchivePath);
+    }
+
+    $strictZip->close();
+    $strictReleaseSource = new class($strictArtifactPath, $strictTargetVersion) implements \WpOrgPluginUpdater\FrameworkReleaseSource
+    {
+        public function __construct(
+            private readonly string $artifactPath,
+            private readonly string $targetVersion,
+        )
+        {
+        }
+
+        public function fetchStableReleases(FrameworkConfig $framework): array
+        {
+            return [[
+                'version' => $this->targetVersion,
+                'release_at' => '2026-04-19T12:00:00+00:00',
+            ]];
+        }
+
+        public function releaseData(FrameworkConfig $framework, array $release): array
+        {
+            return [
+                'release' => $release,
+                'version' => (string) $release['version'],
+                'release_at' => (string) $release['release_at'],
+                'release_url' => 'https://example.com/wp-core-base/releases/' . $this->targetVersion,
+                'notes_sections' => [
+                    'Summary' => 'Strict check fixture release.',
+                    'Downstream Impact' => 'Check-only should expose skipped managed files.',
+                    'Migration Notes' => 'Review customized workflows.',
+                    'Downstream Workflow Changes' => 'Self-update workflow remains managed.',
+                    'Required Downstream Actions' => 'Reconcile local customizations before rollout.',
+                    'Bundled Baseline' => 'WordPress core 6.9.4',
+                ],
+            ];
+        }
+
+        public function downloadVerifiedReleaseAsset(FrameworkConfig $framework, array $release, string $destination): void
+        {
+            copy($this->artifactPath, $destination);
+        }
+    };
+    $strictFrameworkSyncer = new FrameworkSyncer(
+        framework: FrameworkConfig::load($strictCheckRoot),
+        repoRoot: $strictCheckRoot,
+        config: Config::load($strictCheckRoot),
+        frameworkReleaseClient: $strictReleaseSource,
+        releaseClassifier: new ReleaseClassifier(),
+        prBodyRenderer: new PrBodyRenderer(),
+        automationClient: null,
+        gitRunner: new \FakeGitRunner(),
+        runtimeInspector: new RuntimeInspector(Config::load($strictCheckRoot)->runtime),
+    );
+    $strictReport = $strictFrameworkSyncer->checkOnlyReport(true);
+    $assert($strictReport['update_available'] === true, 'Expected framework-sync check-only reports to detect available framework updates.');
+    $assert($strictReport['release_scope'] === 'patch', 'Expected framework-sync check-only reports to classify the pending release scope.');
+    $assert(in_array('.github/workflows/wp-core-base-self-update.yml', $strictReport['skipped_files'], true), 'Expected framework-sync check-only reports to list customized managed files that would be skipped.');
+    $assert(in_array('.github/workflows/wporg-updates.yml', $strictReport['refreshed_files'], true), 'Expected framework-sync check-only reports to list managed files that would refresh.');
+    $assert($strictReport['would_fail_on_skipped_managed_files'] === true, 'Expected strict framework-sync check-only mode to report a failing preflight when managed files would be skipped.');
+    $strictSyncerReflection = new ReflectionClass(FrameworkSyncer::class);
+    $strictApplyMethod = $strictSyncerReflection->getMethod('checkoutAndApplyFrameworkVersion');
+    $strictApplyMethod->setAccessible(true);
+    $strictFailureRaised = false;
+
+    try {
+        $strictApplyMethod->invoke($strictFrameworkSyncer, 'main', 'codex/framework-strict-check', [
+            'release' => ['version' => $strictTargetVersion, 'release_at' => '2026-04-19T12:00:00+00:00'],
+            'version' => $strictTargetVersion,
+            'release_at' => '2026-04-19T12:00:00+00:00',
+            'release_url' => 'https://example.com/wp-core-base/releases/' . $strictTargetVersion,
+            'target_wordpress_core' => '6.9.4',
+            'notes_sections' => [],
+        ], true);
+    } catch (RuntimeException $exception) {
+        $strictFailureRaised = str_contains($exception->getMessage(), '--fail-on-skipped-managed-files')
+            && str_contains($exception->getMessage(), '.github/workflows/wp-core-base-self-update.yml');
+    }
+
+    $assert($strictFailureRaised, 'Expected strict framework-sync apply mode to abort when customized managed files would be skipped.');
 
     $corePayload = json_decode((string) file_get_contents($fixtureDir . '/wp-core-version-check.json'), true, 512, JSON_THROW_ON_ERROR);
     $coreOffer = $coreClient->parseLatestStableOffer($corePayload);

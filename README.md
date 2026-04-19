@@ -109,6 +109,36 @@ If your downstream repo already ignores `/vendor/`, keep the ignore narrow so `v
 
 The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, runtime files, and runtime directories owned directly by the downstream project. `local` is a normal long-term ownership model, not a migration workaround.
 
+## Command Contract
+
+Use one command form consistently in downstream automation and agent instructions.
+
+If `wp-core-base` is the repo root:
+
+```bash
+bin/wp-core-base add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
+php tools/wporg-updater/bin/wporg-updater.php doctor --automation --json
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime --json
+php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only --json
+```
+
+If `wp-core-base` is vendored into another repo:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation --json
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime --json
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only --json
+```
+
+When a downstream carries intentional changes in framework-managed workflow files, preflight the next framework release with:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only --fail-on-skipped-managed-files --json
+```
+
+That surfaces any framework-managed files that would refresh, be removed, or be skipped before a real framework update run opens or refreshes a PR.
+
 ## Current Baseline
 
 This repository currently ships:

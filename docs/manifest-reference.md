@@ -186,6 +186,7 @@ Each dependency entry supports:
         'gitlab_release_asset_pattern' => null,
         'gitlab_token_env' => null,
         'gitlab_api_base' => null,
+        'generic_json_url' => null,
         'min_release_age_hours' => null,
         'verification_mode' => 'inherit',
         'checksum_asset_pattern' => null,
@@ -358,6 +359,48 @@ If you want to rely on GitLab CI's built-in job token for release access, set `s
 
 Concrete hardened example:
 
+```php
+'security' => [
+    'managed_release_min_age_hours' => 24,
+    'github_release_verification' => 'checksum-sidecar-optional',
+],
+'dependencies' => [
+    [
+        'name' => 'Example Plugin',
+        'slug' => 'example-plugin',
+        'kind' => 'plugin',
+        'management' => 'managed',
+        'source' => 'gitlab-release',
+        'path' => 'cms/plugins/example-plugin',
+        'main_file' => 'example-plugin.php',
+        'version' => '1.2.3',
+        'checksum' => 'sha256:...',
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => [
+            'gitlab_project' => 'group/example-plugin',
+            'gitlab_release_asset_pattern' => 'example-plugin-*.zip',
+            'gitlab_token_env' => 'CI_JOB_TOKEN',
+            'gitlab_api_base' => getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4',
+            'min_release_age_hours' => 48,
+            'verification_mode' => 'checksum-sidecar-required',
+            'checksum_asset_pattern' => 'example-plugin-*.zip.sha256',
+            'credential_key' => null,
+            'provider' => null,
+            'provider_product_id' => null,
+        ],
+        'policy' => [
+            'class' => 'managed-private',
+            'allow_runtime_paths' => [],
+            'strip_paths' => [],
+            'strip_files' => [],
+            'sanitize_paths' => [],
+            'sanitize_files' => [],
+        ],
+    ],
+],
+```
+
 ## Generic JSON Dependencies
 
 For a public JSON metadata endpoint, use:
@@ -371,6 +414,9 @@ The metadata URL must be HTTPS and should expose, at minimum:
 - `version`
 - `download_url`
 - one valid release timestamp field: `release_at`, `published_at`, `last_updated`, or `updated`
+
+Recommended metadata for WordPress plugin interoperability, even though `wp-core-base` does not require it:
+
 - `requires`
 - `tested`
 - `requires_php`
@@ -406,6 +452,8 @@ Concrete example:
     ],
 ],
 ```
+
+## Private GitHub Dependency Example
 
 ```php
 'security' => [

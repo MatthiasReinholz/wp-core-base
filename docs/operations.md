@@ -12,10 +12,39 @@ php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php doctor --automation
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only
-php tools/wporg-updater/tests/run.php
 ```
 
 If `wp-core-base` is vendored, run these commands from the vendored path and pass `--repo-root=.`
+
+## Canonical Command Contract
+
+Use one command surface consistently.
+
+If `wp-core-base` is the repo root:
+
+```bash
+bin/wp-core-base add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
+bin/wp-core-base adopt-dependency --kind=plugin --slug=example-plugin --source=wordpress.org --preserve-version
+php tools/wporg-updater/bin/wporg-updater.php doctor --automation --json
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime --json
+php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only --json
+```
+
+If `wp-core-base` is vendored:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
+vendor/wp-core-base/bin/wp-core-base adopt-dependency --repo-root=. --kind=plugin --slug=example-plugin --source=wordpress.org --preserve-version
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation --json
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime --json
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only --json
+```
+
+Use `refresh-admin-governance` after direct manifest edits that change dependency ownership or visibility:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php refresh-admin-governance --repo-root=.
+```
 
 ## Recommended Operating Routine
 
@@ -49,6 +78,17 @@ For framework update PRs, pay attention to:
 - any scaffolded workflow files that were intentionally skipped because they were locally customized
 
 Framework update PRs are separate from dependency and core PRs. They update the vendored framework snapshot and `.wp-core-base/framework.php`, not your runtime dependency manifest.
+
+## Framework Upgrade Preflight
+
+Before merging or auto-merging a framework update:
+
+1. run `framework-sync --check-only --json`
+2. inspect `refreshed_files`, `removed_files`, and `skipped_files`
+3. if customized framework-managed files must block rollout, run `framework-sync --check-only --fail-on-skipped-managed-files --json`
+4. reconcile any skipped managed files manually before allowing the real framework update PR to land
+
+The strict flag is for GitOps-style downstreams that treat framework-managed workflow drift as a release gate instead of a review note.
 
 ## Blocked PRs
 
@@ -113,6 +153,7 @@ Check:
 - the main file path
 - the source type
 - hosted release configuration if the source is `github-release` or `gitlab-release`
+- the metadata URL, timestamp field, and download URL if the source is `generic-json`
 
 If the workflow still processed other dependencies, look at the automation job summary and the managed issue `wp-core-base dependency source failures`. The framework keeps healthy updates moving, but the job should still fail after the run when source warnings were reported.
 
@@ -121,6 +162,12 @@ If the workflow still processed other dependencies, look at the automation job s
 That means a scaffolded workflow no longer matches the last framework-managed checksum in `.wp-core-base/framework.php`.
 
 The framework leaves that file untouched on purpose. Review the new version in the vendored snapshot and update the downstream workflow manually if you want to pick up the upstream changes.
+
+If that situation should fail preflight in CI instead of surfacing only as a review note, run:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only --fail-on-skipped-managed-files --json
+```
 
 ### Automation env missing
 

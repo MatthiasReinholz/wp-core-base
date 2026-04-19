@@ -26,12 +26,49 @@ final class FrameworkInstaller
      *   managed_components:list<array{name:string, version:string, kind:string}>
      * }
      */
+    public function plan(string $payloadRoot, string $distributionPath): array
+    {
+        $plan = $this->buildPlan($payloadRoot, $distributionPath);
+
+        return $this->publicPlan($plan);
+    }
+
+    /**
+     * @return array{
+     *   changed_paths:list<string>,
+     *   refreshed_files:list<string>,
+     *   removed_files:list<string>,
+     *   skipped_files:list<string>,
+     *   framework_version:string,
+     *   wordpress_core:string,
+     *   managed_components:list<array{name:string, version:string, kind:string}>
+     * }
+     */
     public function apply(string $payloadRoot, string $distributionPath): array
     {
-        $currentFramework = FrameworkConfig::load($this->repoRoot);
-        $payloadFramework = FrameworkConfig::load($payloadRoot);
-        $distributionPath = trim($distributionPath) === '' ? $currentFramework->distributionPath() : trim($distributionPath, '/');
-        $targetPath = $distributionPath === '.' ? $this->repoRoot : $this->repoRoot . '/' . $distributionPath;
+        $plan = $this->buildPlan($payloadRoot, $distributionPath);
+        /** @var FrameworkConfig $currentFramework */
+        $currentFramework = $plan['current_framework'];
+        /** @var FrameworkConfig $payloadFramework */
+        $payloadFramework = $plan['payload_framework'];
+        /** @var Config $downstreamConfig */
+        $downstreamConfig = $plan['downstream_config'];
+        /** @var string $distributionPath */
+        $distributionPath = $plan['distribution_path'];
+        /** @var string $targetPath */
+        $targetPath = $plan['target_path'];
+        /** @var array<string, string> $renderedFiles */
+        $renderedFiles = $plan['rendered_files'];
+        /** @var array<string, string> $managedFileChecksums */
+        $managedFileChecksums = $plan['managed_file_checksums'];
+        /** @var list<string> $changedPaths */
+        $changedPaths = $plan['changed_paths'];
+        /** @var list<string> $refreshedFiles */
+        $refreshedFiles = $plan['refreshed_files'];
+        /** @var list<string> $removedFiles */
+        $removedFiles = $plan['removed_files'];
+        /** @var list<string> $skippedFiles */
+        $skippedFiles = $plan['skipped_files'];
         $stagingPath = $this->repoRoot . '/.wp-core-base/build/framework-install-' . bin2hex(random_bytes(4));
         $backupPath = $this->repoRoot . '/.wp-core-base/build/framework-install-backup-' . bin2hex(random_bytes(4));
         $stateBackupRoot = $this->repoRoot . '/.wp-core-base/build/framework-install-state-' . bin2hex(random_bytes(4));
@@ -40,6 +77,7 @@ final class FrameworkInstaller
         $frameworkState = null;
         $governanceState = null;
         $swappedIntoPlace = false;
+        $refreshedFileLookup = array_fill_keys($refreshedFiles, true);
 
         $this->runtimeInspector->clearPath($stagingPath);
         $this->runtimeInspector->clearPath($backupPath);
@@ -49,76 +87,13 @@ final class FrameworkInstaller
             $this->runtimeInspector->copyPath($payloadRoot, $stagingPath);
             $pathSwapper->swap($targetPath, $stagingPath, $backupPath, $this->repoRoot);
             $swappedIntoPlace = true;
-            $downstreamConfig = Config::load($this->repoRoot);
-            $renderedFiles = (new DownstreamScaffolder($targetPath, $this->repoRoot))->renderFrameworkManagedFiles(
-                $distributionPath,
-                [],
-                $downstreamConfig->paths,
-                $downstreamConfig->automationProvider()
-            );
-            $previousRenderedFiles = $this->previousRenderedFrameworkManagedFiles(
-                $backupPath,
-                $distributionPath,
-                $downstreamConfig
-            );
-            $managedFileChecksums = [];
-            $changedPaths = [$distributionPath];
-            $refreshedFiles = [];
-            $removedFiles = [];
-            $skippedFiles = [];
-            $staleManagedFiles = array_diff_key($currentFramework->managedFiles(), $renderedFiles);
 
-            foreach ($staleManagedFiles as $relativePath => $managedChecksum) {
-                $absolutePath = $this->repoRoot . '/' . $relativePath;
-
-                if (! file_exists($absolutePath) && ! is_link($absolutePath)) {
+            foreach ($renderedFiles as $relativePath => $contents) {
+                if (! isset($refreshedFileLookup[$relativePath])) {
                     continue;
                 }
 
-                if (is_file($absolutePath)) {
-                    $currentChecksum = $this->contentsChecksum((string) file_get_contents($absolutePath));
-
-                    if (! hash_equals((string) $managedChecksum, $currentChecksum)) {
-                        $skippedFiles[] = $relativePath;
-                        continue;
-                    }
-                }
-
-                $managedFileStates[$relativePath] ??= $this->captureFileState(
-                    $absolutePath,
-                    $stateBackupRoot . '/managed/' . str_replace('/', '--', $relativePath)
-                );
-                $this->runtimeInspector->clearPath($absolutePath);
-                $removedFiles[] = $relativePath;
-                $changedPaths[] = $relativePath;
-            }
-
-            foreach ($renderedFiles as $relativePath => $contents) {
                 $absolutePath = $this->repoRoot . '/' . $relativePath;
-                $managedChecksum = $currentFramework->managedFiles()[$relativePath] ?? null;
-                $renderedChecksum = $this->contentsChecksum($contents);
-
-                if ($managedChecksum !== null && is_file($absolutePath)) {
-                    $currentChecksum = $this->contentsChecksum((string) file_get_contents($absolutePath));
-
-                    if (! hash_equals($managedChecksum, $currentChecksum)) {
-                        $managedFileChecksums[$relativePath] = $managedChecksum;
-                        $skippedFiles[] = $relativePath;
-                        continue;
-                    }
-                } elseif ($managedChecksum === null && is_file($absolutePath)) {
-                    $currentChecksum = $this->contentsChecksum((string) file_get_contents($absolutePath));
-                    $previousRenderedChecksum = isset($previousRenderedFiles[$relativePath])
-                        ? $this->contentsChecksum($previousRenderedFiles[$relativePath])
-                        : null;
-
-                    if ($previousRenderedChecksum === null || ! hash_equals($previousRenderedChecksum, $currentChecksum)) {
-                        $managedFileChecksums[$relativePath] = $currentChecksum;
-                        $skippedFiles[] = $relativePath;
-                        continue;
-                    }
-                }
-
                 $directory = dirname($absolutePath);
 
                 if (! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) {
@@ -130,10 +105,15 @@ final class FrameworkInstaller
                     $stateBackupRoot . '/managed/' . str_replace('/', '--', $relativePath)
                 );
                 (new AtomicFileWriter())->write($absolutePath, $contents);
+            }
 
-                $managedFileChecksums[$relativePath] = $renderedChecksum;
-                $refreshedFiles[] = $relativePath;
-                $changedPaths[] = $relativePath;
+            foreach ($removedFiles as $relativePath) {
+                $absolutePath = $this->repoRoot . '/' . $relativePath;
+                $managedFileStates[$relativePath] ??= $this->captureFileState(
+                    $absolutePath,
+                    $stateBackupRoot . '/managed/' . str_replace('/', '--', $relativePath)
+                );
+                $this->runtimeInspector->clearPath($absolutePath);
             }
 
             $framework = $currentFramework->withInstalledRelease(
@@ -186,6 +166,146 @@ final class FrameworkInstaller
             $this->runtimeInspector->clearPath($backupPath);
             $this->runtimeInspector->clearPath($stateBackupRoot);
         }
+    }
+
+    /**
+     * @return array{
+     *   current_framework:FrameworkConfig,
+     *   payload_framework:FrameworkConfig,
+     *   downstream_config:Config,
+     *   distribution_path:string,
+     *   target_path:string,
+     *   rendered_files:array<string, string>,
+     *   managed_file_checksums:array<string, string>,
+     *   changed_paths:list<string>,
+     *   refreshed_files:list<string>,
+     *   removed_files:list<string>,
+     *   skipped_files:list<string>
+     * }
+     */
+    private function buildPlan(string $payloadRoot, string $distributionPath): array
+    {
+        $currentFramework = FrameworkConfig::load($this->repoRoot);
+        $payloadFramework = FrameworkConfig::load($payloadRoot);
+        $downstreamConfig = Config::load($this->repoRoot);
+        $distributionPath = trim($distributionPath) === '' ? $currentFramework->distributionPath() : trim($distributionPath, '/');
+        $distributionPath = $distributionPath === '' ? '.' : $distributionPath;
+        $targetPath = $distributionPath === '.' ? $this->repoRoot : $this->repoRoot . '/' . $distributionPath;
+        $renderedFiles = (new DownstreamScaffolder($payloadRoot, $this->repoRoot))->renderFrameworkManagedFiles(
+            $distributionPath,
+            [],
+            $downstreamConfig->paths,
+            $downstreamConfig->automationProvider()
+        );
+        $previousRenderedFiles = $this->previousRenderedFrameworkManagedFiles($targetPath, $distributionPath, $downstreamConfig);
+        $managedFileChecksums = [];
+        $changedPaths = [$distributionPath];
+        $refreshedFiles = [];
+        $removedFiles = [];
+        $skippedFiles = [];
+        $staleManagedFiles = array_diff_key($currentFramework->managedFiles(), $renderedFiles);
+
+        foreach ($staleManagedFiles as $relativePath => $managedChecksum) {
+            $absolutePath = $this->repoRoot . '/' . $relativePath;
+
+            if (! file_exists($absolutePath) && ! is_link($absolutePath)) {
+                continue;
+            }
+
+            if (is_file($absolutePath)) {
+                $currentContents = file_get_contents($absolutePath);
+                $currentChecksum = $this->contentsChecksum($currentContents === false ? '' : $currentContents);
+
+                if (! hash_equals((string) $managedChecksum, $currentChecksum)) {
+                    $skippedFiles[] = $relativePath;
+                    continue;
+                }
+            }
+
+            $removedFiles[] = $relativePath;
+            $changedPaths[] = $relativePath;
+        }
+
+        foreach ($renderedFiles as $relativePath => $contents) {
+            $absolutePath = $this->repoRoot . '/' . $relativePath;
+            $managedChecksum = $currentFramework->managedFiles()[$relativePath] ?? null;
+            $renderedChecksum = $this->contentsChecksum($contents);
+
+            if ($managedChecksum !== null && is_file($absolutePath)) {
+                $currentContents = file_get_contents($absolutePath);
+                $currentChecksum = $this->contentsChecksum($currentContents === false ? '' : $currentContents);
+
+                if (! hash_equals($managedChecksum, $currentChecksum)) {
+                    $managedFileChecksums[$relativePath] = $managedChecksum;
+                    $skippedFiles[] = $relativePath;
+                    continue;
+                }
+            } elseif ($managedChecksum === null && is_file($absolutePath)) {
+                $currentContents = file_get_contents($absolutePath);
+                $currentChecksum = $this->contentsChecksum($currentContents === false ? '' : $currentContents);
+                $previousRenderedChecksum = isset($previousRenderedFiles[$relativePath])
+                    ? $this->contentsChecksum($previousRenderedFiles[$relativePath])
+                    : null;
+
+                if ($previousRenderedChecksum === null || ! hash_equals($previousRenderedChecksum, $currentChecksum)) {
+                    $managedFileChecksums[$relativePath] = $currentChecksum;
+                    $skippedFiles[] = $relativePath;
+                    continue;
+                }
+            }
+
+            $managedFileChecksums[$relativePath] = $renderedChecksum;
+            $refreshedFiles[] = $relativePath;
+            $changedPaths[] = $relativePath;
+        }
+
+        return [
+            'current_framework' => $currentFramework,
+            'payload_framework' => $payloadFramework,
+            'downstream_config' => $downstreamConfig,
+            'distribution_path' => $distributionPath,
+            'target_path' => $targetPath,
+            'rendered_files' => $renderedFiles,
+            'managed_file_checksums' => $managedFileChecksums,
+            'changed_paths' => array_values(array_unique($changedPaths)),
+            'refreshed_files' => array_values(array_unique($refreshedFiles)),
+            'removed_files' => array_values(array_unique($removedFiles)),
+            'skipped_files' => array_values(array_unique($skippedFiles)),
+        ];
+    }
+
+    /**
+     * @param array{
+     *   changed_paths:list<string>,
+     *   refreshed_files:list<string>,
+     *   removed_files:list<string>,
+     *   skipped_files:list<string>,
+     *   payload_framework:FrameworkConfig
+     * } $plan
+     * @return array{
+     *   changed_paths:list<string>,
+     *   refreshed_files:list<string>,
+     *   removed_files:list<string>,
+     *   skipped_files:list<string>,
+     *   framework_version:string,
+     *   wordpress_core:string,
+     *   managed_components:list<array{name:string, version:string, kind:string}>
+     * }
+     */
+    private function publicPlan(array $plan): array
+    {
+        /** @var FrameworkConfig $payloadFramework */
+        $payloadFramework = $plan['payload_framework'];
+
+        return [
+            'changed_paths' => $plan['changed_paths'],
+            'refreshed_files' => $plan['refreshed_files'],
+            'removed_files' => $plan['removed_files'],
+            'skipped_files' => $plan['skipped_files'],
+            'framework_version' => $payloadFramework->version,
+            'wordpress_core' => $payloadFramework->baseline['wordpress_core'],
+            'managed_components' => $payloadFramework->baseline['managed_components'],
+        ];
     }
 
     private function contentsChecksum(string $contents): string

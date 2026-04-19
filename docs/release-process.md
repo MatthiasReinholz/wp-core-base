@@ -37,15 +37,20 @@ The release-notes file must contain:
 - `Summary`
 - `Downstream Impact`
 - `Migration Notes`
+- `Downstream Workflow Changes`
+- `Required Downstream Actions`
 - `Bundled Baseline`
 
 ## Maintainer Flow
 
 1. run the manual `prepare-wp-core-base-release` workflow
-2. review the generated `release/vX.Y.Z` pull request like any normal code change
-3. merge that release PR only after the normal CI checks pass on the protected default branch
-4. `finalize-wp-core-base-release` verifies the merged release PR and its required CI run, then creates and pushes the annotated tag automatically and publishes the GitHub Release asset
-5. use `release-wp-core-base` only as the manual recovery workflow for an already existing tag
+2. update the README baseline section and the release-note bundled-baseline section together when bundled versions changed
+3. review the generated `release/vX.Y.Z` pull request like any normal code change
+4. call out any framework-managed workflow or pipeline template changes under `Downstream Workflow Changes`
+5. list the actual downstream rollout steps, if any, under `Required Downstream Actions`
+6. merge that release PR only after the normal CI checks pass on the protected default branch
+7. `finalize-wp-core-base-release` verifies the merged release PR and its required CI run, then creates and pushes the annotated tag automatically and publishes the GitHub Release asset
+8. use `release-wp-core-base` only as the manual recovery workflow for an already existing tag
 
 Do not cut ad hoc tags by hand.
 

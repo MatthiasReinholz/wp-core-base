@@ -26,6 +26,8 @@ final class FrameworkSyncModeHandler implements CliModeHandler
         private readonly HttpClient $httpClient,
         private readonly MutationLock $mutationLock,
         private readonly string $repoRoot,
+        private readonly bool $jsonOutput,
+        private readonly \Closure $emitJson,
     ) {
     }
 
@@ -45,6 +47,7 @@ final class FrameworkSyncModeHandler implements CliModeHandler
 
         $framework = FrameworkConfig::load($this->repoRoot);
         $checkOnly = isset($options['check-only']);
+        $failOnSkippedManagedFiles = isset($options['fail-on-skipped-managed-files']);
         $automationClient = $checkOnly
             ? null
             : AutomationClientFactory::fromEnvironment($this->config, $this->httpClient);
@@ -61,20 +64,43 @@ final class FrameworkSyncModeHandler implements CliModeHandler
         );
 
         if ($checkOnly) {
-            $frameworkSyncer->sync(true);
+            $report = $frameworkSyncer->checkOnlyReport($failOnSkippedManagedFiles);
+            $exitCode = $report['would_fail_on_skipped_managed_files'] ? 1 : 0;
+
+            if ($this->jsonOutput) {
+                ($this->emitJson)([
+                    'status' => $exitCode === 0 ? 'success' : 'failure',
+                    'mode' => 'framework-sync',
+                    'check_only' => true,
+                    'strict_mode' => $failOnSkippedManagedFiles,
+                ] + $report + ($exitCode === 0 ? [] : [
+                    'error' => 'framework-sync would skip framework-managed files in strict mode.',
+                ]), $exitCode);
+            }
+
+            $frameworkSyncer->printCheckOnlyResult($report);
             StructuredLogger::log('info', 'framework-sync', 'Framework check-only sync completed.', startedAt: $operationStartedAt);
-            return 0;
+            return $exitCode;
         }
 
         $this->mutationLock->synchronized(
             $this->repoRoot,
-            static function () use ($frameworkSyncer): void {
-                $frameworkSyncer->sync(false);
+            static function () use ($frameworkSyncer, $failOnSkippedManagedFiles): void {
+                $frameworkSyncer->sync($failOnSkippedManagedFiles);
             },
             'framework-sync'
         );
 
         StructuredLogger::log('info', 'framework-sync', 'Framework sync completed.', startedAt: $operationStartedAt);
+
+        if ($this->jsonOutput) {
+            ($this->emitJson)([
+                'status' => 'success',
+                'mode' => 'framework-sync',
+                'check_only' => false,
+                'strict_mode' => $failOnSkippedManagedFiles,
+            ]);
+        }
 
         return 0;
     }

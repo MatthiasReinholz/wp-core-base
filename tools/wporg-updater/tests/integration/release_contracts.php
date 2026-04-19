@@ -62,6 +62,9 @@ function run_release_contract_tests(
     $assert(FrameworkReleaseNotes::missingRequiredSections($preparedNotes) === [], 'Expected scaffolded release notes to include required sections.');
     $assert(str_contains($preparedNotes, sprintf('This is the `patch` framework release from `v%s` to `%s`', $currentFrameworkVersion, $expectedPreparedVersion)), 'Expected scaffolded release notes summary to be prefilled with the version transition.');
     $assert(str_contains($preparedNotes, sprintf('Downstream repositories pinned to an older `wp-core-base` release can update to `%s`', $expectedPreparedVersion)), 'Expected scaffolded release notes to include downstream impact guidance.');
+    $assert(str_contains($preparedNotes, '## Downstream Workflow Changes'), 'Expected scaffolded release notes to require a dedicated downstream workflow changes section.');
+    $assert(str_contains($preparedNotes, '## Required Downstream Actions'), 'Expected scaffolded release notes to require a dedicated required downstream actions section.');
+    $assert(str_contains($preparedNotes, 'framework-sync --check-only --fail-on-skipped-managed-files'), 'Expected scaffolded release notes to instruct maintainers to call out strict framework-sync preflight guidance when workflow drift matters.');
     $assert(str_contains($preparedNotes, 'The published framework asset for this release is `wp-core-base-vendor-snapshot.zip`.'), 'Expected scaffolded release notes to include operational asset details.');
     $assert(str_contains($preparedNotes, 'publish the authoritative framework release artifact'), 'Expected scaffolded release notes to describe the singular authoritative release source contract.');
     $assert(

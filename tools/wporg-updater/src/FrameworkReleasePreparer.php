@@ -134,6 +134,18 @@ final class FrameworkReleasePreparer
             $targetVersion
         );
 
+        $workflowChanges = sprintf(
+            'No framework-managed downstream workflow or pipeline template changes are expected by default for `v%s`.' . "\n\n" .
+            'If this release changes GitHub workflows, GitLab pipeline jobs, required permissions, removed managed files, or framework-sync behavior, replace this paragraph with the concrete downstream impact.',
+            $targetVersion
+        );
+
+        $requiredDownstreamActions = sprintf(
+            'No extra downstream action is required by default for `v%s`.' . "\n\n" .
+            'If downstreams with customized framework-managed files must act before rollout, replace this paragraph with the exact steps and include `framework-sync --check-only --fail-on-skipped-managed-files` when appropriate.',
+            $targetVersion
+        );
+
         $operationalNotes = sprintf(
             'The published framework asset for this release is `%s`.' . "\n\n" .
             'Normal release flow: run `prepare-wp-core-base-release`, review and merge `release/v%s`, then let `finalize-wp-core-base-release` create the tag and publish the authoritative framework release artifact.',
@@ -142,11 +154,13 @@ final class FrameworkReleasePreparer
         );
 
         $contents = sprintf(
-            "# wp-core-base %s\n\n## Summary\n\n%s\n\n## Downstream Impact\n\n%s\n\n## Migration Notes\n\n%s\n\n## Bundled Baseline\n\n- WordPress core: `%s`\n%s\n\n## Operational Notes\n\n%s\n",
+            "# wp-core-base %s\n\n## Summary\n\n%s\n\n## Downstream Impact\n\n%s\n\n## Migration Notes\n\n%s\n\n## Downstream Workflow Changes\n\n%s\n\n## Required Downstream Actions\n\n%s\n\n## Bundled Baseline\n\n- WordPress core: `%s`\n%s\n\n## Operational Notes\n\n%s\n",
             $targetVersion,
             $summary,
             $downstreamImpact,
             $migrationNotes,
+            $workflowChanges,
+            $requiredDownstreamActions,
             $framework->baseline['wordpress_core'],
             $components === [] ? '' : implode("\n", $components),
             $operationalNotes
