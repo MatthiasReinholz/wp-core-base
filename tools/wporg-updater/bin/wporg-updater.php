@@ -73,6 +73,98 @@ $emitJson = static function (array $payload, int $exitCode = 0): never {
     fwrite(STDOUT, json_encode($payload, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT) . "\n");
     exit($exitCode);
 };
+$emitUsageError = static function (string $message) use ($jsonOutput, $emitJson): never {
+    if ($jsonOutput) {
+        $emitJson([
+            'status' => 'failure',
+            'error' => $message,
+        ], 2);
+    }
+
+    fwrite(STDERR, $message . "\n");
+    fwrite(STDERR, "Run with `help` to see the available modes.\n");
+    exit(2);
+};
+$knownOptions = [
+    'adopt-existing-managed-files',
+    'allow-current-version',
+    'allowed_redirect_hosts',
+    'archive-subdir',
+    'artifact',
+    'automation',
+    'automation-provider',
+    'check-only',
+    'checksum-file',
+    'class',
+    'component-key',
+    'content-root',
+    'credential-key',
+    'delete-path',
+    'distribution-path',
+    'dry-run',
+    'fail-on-source-errors',
+    'force',
+    'from-source',
+    'github',
+    'github-release-asset-pattern',
+    'github-repository',
+    'github-token-env',
+    'gitlab-api-base',
+    'gitlab-project',
+    'gitlab-release-asset-pattern',
+    'gitlab-token-env',
+    'help',
+    'interactive',
+    'json',
+    'kind',
+    'main-file',
+    'management',
+    'max_body_bytes',
+    'max_download_bytes',
+    'max_redirects',
+    'max_request_bytes',
+    'name',
+    'output',
+    'passphrase-env',
+    'path',
+    'payload-root',
+    'plan',
+    'pr-number',
+    'preserve-version',
+    'preview',
+    'private',
+    'private-key-env',
+    'profile',
+    'provider',
+    'provider-product-id',
+    'public-key-file',
+    'release-type',
+    'replace',
+    'repo-root',
+    'report-json',
+    'result-path',
+    'signature-file',
+    'slug',
+    'source',
+    'strip_auth_on_cross_origin_redirect',
+    'summary-path',
+    'tag',
+    'tool-path',
+    'version',
+];
+
+foreach ($arguments as $argument) {
+    if (! str_starts_with($argument, '--')) {
+        continue;
+    }
+
+    $option = substr($argument, 2);
+    $name = str_contains($option, '=') ? explode('=', $option, 2)[0] : $option;
+
+    if (! in_array($name, $knownOptions, true)) {
+        $emitUsageError(sprintf('Unknown option: --%s', $name));
+    }
+}
 
 try {
     if (in_array($mode, ['help', '--help', '-h'], true)) {
