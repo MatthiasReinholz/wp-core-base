@@ -383,7 +383,7 @@ final class Config
     public function stageDir(string $outputOverride = ''): string
     {
         if ($outputOverride !== '') {
-            return $this->repoRoot . '/' . ltrim($outputOverride, '/');
+            return $this->repoRoot . '/' . ConfigPathRules::normalizeStageOutputOverride($outputOverride);
         }
 
         return $this->repoRoot . '/' . ltrim($this->runtime['stage_dir'], '/');
