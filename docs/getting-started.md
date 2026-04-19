@@ -210,7 +210,7 @@ The framework-specific commands you will use most often are:
 bin/wp-core-base list-dependencies
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
-php tools/wporg-updater/tests/run.php
+php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only
 ```
 
 If `wp-core-base` is vendored into another repository, run the same commands from that vendored path and pass `--repo-root=.`

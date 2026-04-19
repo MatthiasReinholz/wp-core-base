@@ -23,8 +23,10 @@ The updater does not infer managed dependencies by scanning folders.
 For day-to-day work, the recommended interface is still command-driven:
 
 - `add-dependency`
+- `adopt-dependency`
 - `remove-dependency`
 - `list-dependencies`
+- `refresh-admin-governance` after direct ownership edits
 
 Use manual manifest editing for advanced policy changes, not for every normal plugin or MU plugin addition.
 
@@ -35,7 +37,7 @@ Framework version pinning is separate from runtime ownership. Downstreams should
 Use `.wp-core-base/framework.php` for:
 
 - the pinned installed framework version
-- the source repository for framework releases
+- the authoritative framework release source
 - the vendored install path, usually `vendor/wp-core-base`
 - checksums for framework-managed scaffold files
 
@@ -64,6 +66,13 @@ It:
 
 The scaffolded downstream setup includes a weekly `wp-core-base` self-update workflow.
 
+Recommended preflight before merging a framework update:
+
+1. run `framework-sync --check-only --json`
+2. inspect `refreshed_files`, `removed_files`, and `skipped_files`
+3. rerun with `--fail-on-skipped-managed-files` in CI when customized framework-managed files must block rollout
+4. reconcile any skipped workflow files manually before merging the framework update PR
+
 The framework release source is singular. If upstream ever moves the official framework release source to another Git platform, downstreams will follow the source recorded in their installed `.wp-core-base/framework.php` only after they adopt the migration release that updates that metadata. The framework does not maintain parallel legacy-source discovery.
 
 ## Dependency Classes
@@ -72,6 +81,7 @@ Each dependency should fall into one of these classes:
 
 - `managed-upstream`
 - `managed-private`
+- `managed-premium`
 - `local-owned`
 - `ignored`
 
@@ -79,6 +89,7 @@ These map to manifest values like this:
 
 - `management: managed` + `source: wordpress.org` => `managed-upstream`
 - `management: managed` + `source: github-release` => `managed-private`
+- `management: managed` + `source: gitlab-release` => `managed-private`
 - `management: managed` + `source: generic-json` => `managed-private`
 - `management: managed` + `source: premium` => `managed-premium`
 - `management: local` + `source: local` => `local-owned`
@@ -119,7 +130,7 @@ For AI coding agents working in a downstream repo, the safe sequence is:
 
 If upstream does not publish a checksum sidecar, keep verification optional or disabled for that dependency.
 
-Premium workflow sources use one fixed env var or GitHub secret:
+Premium workflow sources use one fixed env var or CI/CD secret:
 
 - `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
 
@@ -129,6 +140,36 @@ Current premium position:
 - The provider key must be registered in `.wp-core-base/premium-providers.php`
 - The concrete adapter class lives in the downstream repo, not in framework core
 - `wp-core-base` itself does not ship vendor-specific premium adapters
+
+## Command Contract
+
+Humans and agents should use one of these two command surfaces consistently.
+
+If `wp-core-base` is the repo root:
+
+```bash
+bin/wp-core-base add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
+bin/wp-core-base adopt-dependency --kind=plugin --slug=example-plugin --source=wordpress.org --preserve-version
+php tools/wporg-updater/bin/wporg-updater.php doctor --automation --json
+php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime --json
+php tools/wporg-updater/bin/wporg-updater.php framework-sync --check-only --json
+```
+
+If `wp-core-base` is vendored into a downstream repo:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
+vendor/wp-core-base/bin/wp-core-base adopt-dependency --repo-root=. --kind=plugin --slug=example-plugin --source=wordpress.org --preserve-version
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation --json
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime --json
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only --json
+```
+
+After manual manifest edits that change ownership or visibility, run:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php refresh-admin-governance --repo-root=.
+```
 
 ## Managed Versus Local
 
@@ -292,7 +333,6 @@ Most downstream teams only need these commands:
 php tools/wporg-updater/bin/wporg-updater.php doctor
 php tools/wporg-updater/bin/wporg-updater.php doctor --automation
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
-php tools/wporg-updater/tests/run.php
 ```
 
 If `wp-core-base` is vendored, run the same commands from the vendored path and pass `--repo-root=.`
@@ -301,6 +341,7 @@ Framework version checks use:
 
 ```bash
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only --fail-on-skipped-managed-files --json
 ```
 
 ## Downstream Dependency Strategies

@@ -40,15 +40,79 @@ final class FrameworkSyncer
         ];
     }
 
-    public function sync(bool $checkOnly = false): void
+    /**
+     * @return array{
+     *   installed_version:string,
+     *   latest_version:string,
+     *   release_scope:string,
+     *   release_at:string,
+     *   release_url:string,
+     *   current_wordpress_core:string,
+     *   target_wordpress_core:string,
+     *   update_available:bool,
+     *   changed_paths:list<string>,
+     *   refreshed_files:list<string>,
+     *   removed_files:list<string>,
+     *   skipped_files:list<string>,
+     *   would_fail_on_skipped_managed_files:bool
+     * }
+     */
+    public function checkOnlyReport(bool $failOnSkippedManagedFiles = false): array
     {
         $releases = $this->frameworkReleaseClient->fetchStableReleases($this->framework);
         $latestRelease = $this->frameworkReleaseClient->releaseData($this->framework, $releases[0]);
+        $latestVersion = (string) $latestRelease['version'];
+        $updateAvailable = version_compare($latestVersion, $this->framework->version, '>');
+        $report = [
+            'installed_version' => $this->framework->version,
+            'latest_version' => $latestVersion,
+            'release_scope' => $updateAvailable
+                ? $this->releaseClassifier->classifyScope($this->framework->version, $latestVersion)
+                : 'none',
+            'release_at' => (string) ($latestRelease['release_at'] ?? ''),
+            'release_url' => (string) ($latestRelease['release_url'] ?? ''),
+            'current_wordpress_core' => $this->framework->baseline['wordpress_core'],
+            'target_wordpress_core' => $this->framework->baseline['wordpress_core'],
+            'update_available' => $updateAvailable,
+            'changed_paths' => [],
+            'refreshed_files' => [],
+            'removed_files' => [],
+            'skipped_files' => [],
+            'would_fail_on_skipped_managed_files' => false,
+        ];
 
-        if ($checkOnly) {
-            $this->printCheckOnlyResult($latestRelease);
-            return;
+        if (! $updateAvailable) {
+            return $report;
         }
+
+        $inspection = $this->withFrameworkPayload($latestRelease, function (string $payloadRoot): array {
+            $payloadFramework = FrameworkConfig::load($payloadRoot);
+            $installPlan = (new FrameworkInstaller($this->repoRoot, $this->runtimeInspector))->plan(
+                $payloadRoot,
+                $this->framework->distributionPath()
+            );
+
+            return [
+                'target_wordpress_core' => $payloadFramework->baseline['wordpress_core'],
+                'install_plan' => $installPlan,
+            ];
+        });
+
+        $installPlan = (array) ($inspection['install_plan'] ?? []);
+        $report['target_wordpress_core'] = (string) ($inspection['target_wordpress_core'] ?? $this->framework->baseline['wordpress_core']);
+        $report['changed_paths'] = array_values(array_map('strval', (array) ($installPlan['changed_paths'] ?? [])));
+        $report['refreshed_files'] = array_values(array_map('strval', (array) ($installPlan['refreshed_files'] ?? [])));
+        $report['removed_files'] = array_values(array_map('strval', (array) ($installPlan['removed_files'] ?? [])));
+        $report['skipped_files'] = array_values(array_map('strval', (array) ($installPlan['skipped_files'] ?? [])));
+        $report['would_fail_on_skipped_managed_files'] = $failOnSkippedManagedFiles && $report['skipped_files'] !== [];
+
+        return $report;
+    }
+
+    public function sync(bool $failOnSkippedManagedFiles = false): void
+    {
+        $releases = $this->frameworkReleaseClient->fetchStableReleases($this->framework);
+        $latestRelease = $this->frameworkReleaseClient->releaseData($this->framework, $releases[0]);
 
         if ($this->automationClient === null) {
             throw new RuntimeException('framework-sync requires the configured automation environment unless --check-only is used.');
@@ -95,7 +159,7 @@ final class FrameworkSyncer
                 $activePlannedPrs
             );
 
-            if ($this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch, $baseRevision)) {
+            if ($this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch, $baseRevision, $failOnSkippedManagedFiles)) {
                 $activePlannedPrs[] = $plannedPr;
             }
         }
@@ -116,7 +180,8 @@ final class FrameworkSyncer
                 $scope,
                 array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
                 $defaultBranch,
-                $baseRevision
+                $baseRevision,
+                $failOnSkippedManagedFiles
             );
         }
     }
@@ -169,7 +234,7 @@ final class FrameworkSyncer
      * @param array<string, mixed> $latestRelease
      * @param list<int> $blockedBy
      */
-    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch, string $baseRevision): bool
+    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch, string $baseRevision, bool $failOnSkippedManagedFiles): bool
     {
         $metadata = $plannedPr['metadata'];
         $targetVersion = (string) $plannedPr['planned_target_version'];
@@ -229,6 +294,10 @@ final class FrameworkSyncer
                 }
             }
 
+            if ($failOnSkippedManagedFiles && $skippedFiles !== []) {
+                throw new RuntimeException($this->strictSkippedManagedFilesMessage($targetVersion, $skippedFiles));
+            }
+
             $labels = $this->deriveFrameworkLabels($scope, $blockedBy);
             $metadata['component_key'] = self::COMPONENT_KEY;
             $metadata['slug'] = 'wp-core-base';
@@ -284,7 +353,7 @@ final class FrameworkSyncer
      * @param array<string, mixed> $latestRelease
      * @param list<int> $blockedBy
      */
-    private function createPullRequestForLatest(array $latestRelease, string $scope, array $blockedBy, string $defaultBranch, string $baseRevision): void
+    private function createPullRequestForLatest(array $latestRelease, string $scope, array $blockedBy, string $defaultBranch, string $baseRevision, bool $failOnSkippedManagedFiles): void
     {
         $existingPullRequest = $this->findOpenPullRequestForTarget((string) $latestRelease['version']);
 
@@ -302,7 +371,7 @@ final class FrameworkSyncer
         $branchGuard = $this->beginBranchRollbackGuard($branch);
 
         try {
-            $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $latestRelease);
+            $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $latestRelease, $failOnSkippedManagedFiles);
             $this->framework = FrameworkConfig::load($this->repoRoot);
             $changed = $this->gitRunner->commitAndPush(
                 $branch,
@@ -373,41 +442,27 @@ final class FrameworkSyncer
      * @param array<string, mixed> $releaseData
      * @return array{changed_paths:list<string>, skipped_files:list<string>}
      */
-    private function checkoutAndApplyFrameworkVersion(string $defaultBranch, string $branch, array $releaseData): array
+    private function checkoutAndApplyFrameworkVersion(string $defaultBranch, string $branch, array $releaseData, bool $failOnSkippedManagedFiles): array
     {
         $this->gitRunner->checkoutBranch($defaultBranch, $branch);
-        $tempDir = sys_get_temp_dir() . '/wp-core-base-framework-' . bin2hex(random_bytes(6));
-        $archivePath = $tempDir . '/framework.zip';
-        $extractPath = $tempDir . '/extract';
-
-        if (! mkdir($extractPath, 0775, true) && ! is_dir($extractPath)) {
-            throw new RuntimeException(sprintf('Failed to create temp directory: %s', $extractPath));
-        }
-
-        try {
-            $this->frameworkReleaseClient->downloadVerifiedReleaseAsset($this->framework, $releaseData['release'], $archivePath);
-            $zip = new ZipArchive();
-
-            if ($zip->open($archivePath) !== true) {
-                throw new RuntimeException(sprintf('Failed to open framework release archive: %s', $archivePath));
-            }
-
-            ZipExtractor::extractValidated($zip, $extractPath);
-            $zip->close();
-
-            $payloadRoot = $this->resolveExtractedPayloadRoot($extractPath);
-            $installerResult = (new FrameworkInstaller($this->repoRoot, $this->runtimeInspector))->apply(
+        $installerResult = $this->withFrameworkPayload($releaseData, function (string $payloadRoot): array {
+            return (new FrameworkInstaller($this->repoRoot, $this->runtimeInspector))->apply(
                 $payloadRoot,
                 $this->framework->distributionPath()
             );
+        });
 
-            return [
-                'changed_paths' => array_values(array_map('strval', (array) ($installerResult['changed_paths'] ?? []))),
-                'skipped_files' => array_values(array_map('strval', (array) ($installerResult['skipped_files'] ?? []))),
-            ];
-        } finally {
-            $this->runtimeInspector->clearPath($tempDir);
+        $changedPaths = array_values(array_map('strval', (array) ($installerResult['changed_paths'] ?? [])));
+        $skippedFiles = array_values(array_map('strval', (array) ($installerResult['skipped_files'] ?? [])));
+
+        if ($failOnSkippedManagedFiles && $skippedFiles !== []) {
+            throw new RuntimeException($this->strictSkippedManagedFilesMessage((string) ($releaseData['version'] ?? ''), $skippedFiles));
         }
+
+        return [
+            'changed_paths' => $changedPaths,
+            'skipped_files' => $skippedFiles,
+        ];
     }
 
     /**
@@ -433,6 +488,19 @@ final class FrameworkSyncer
      */
     private function frameworkMetadataForReleaseAsset(array $releaseData): FrameworkConfig
     {
+        return $this->withFrameworkPayload($releaseData, function (string $payloadRoot): FrameworkConfig {
+            return FrameworkConfig::load($payloadRoot);
+        });
+    }
+
+    /**
+     * @template T
+     * @param array<string, mixed> $releaseData
+     * @param callable(string):T $callback
+     * @return T
+     */
+    private function withFrameworkPayload(array $releaseData, callable $callback): mixed
+    {
         $tempDir = sys_get_temp_dir() . '/wp-core-base-framework-meta-' . bin2hex(random_bytes(6));
         $archivePath = $tempDir . '/framework.zip';
         $extractPath = $tempDir . '/extract';
@@ -451,8 +519,7 @@ final class FrameworkSyncer
 
             ZipExtractor::extractValidated($zip, $extractPath);
             $zip->close();
-
-            return FrameworkConfig::load($this->resolveExtractedPayloadRoot($extractPath));
+            return $callback($this->resolveExtractedPayloadRoot($extractPath));
         } finally {
             $this->runtimeInspector->clearPath($tempDir);
         }
@@ -568,19 +635,52 @@ final class FrameworkSyncer
     }
 
     /**
-     * @param array<string, mixed> $latestRelease
+     * @param array{
+     *   installed_version:string,
+     *   latest_version:string,
+     *   release_scope:string,
+     *   release_at:string,
+     *   release_url:string,
+     *   current_wordpress_core:string,
+     *   target_wordpress_core:string,
+     *   update_available:bool,
+     *   changed_paths:list<string>,
+     *   refreshed_files:list<string>,
+     *   removed_files:list<string>,
+     *   skipped_files:list<string>,
+     *   would_fail_on_skipped_managed_files:bool
+     * } $report
      */
-    private function printCheckOnlyResult(array $latestRelease): void
+    public function printCheckOnlyResult(array $report): void
     {
-        fwrite(STDOUT, sprintf("Installed wp-core-base: %s\n", $this->framework->version));
-        fwrite(STDOUT, sprintf("Latest available release: %s\n", $latestRelease['version']));
+        fwrite(STDOUT, sprintf("Installed wp-core-base: %s\n", $report['installed_version']));
+        fwrite(STDOUT, sprintf("Latest available release: %s\n", $report['latest_version']));
 
-        if (version_compare((string) $latestRelease['version'], $this->framework->version, '>')) {
-            fwrite(STDOUT, "Framework update available.\n");
+        if (! $report['update_available']) {
+            fwrite(STDOUT, "Framework is already up to date.\n");
             return;
         }
 
-        fwrite(STDOUT, "Framework is already up to date.\n");
+        fwrite(STDOUT, "Framework update available.\n");
+        fwrite(STDOUT, sprintf("Release scope: %s\n", $report['release_scope']));
+
+        if ($report['release_at'] !== '') {
+            fwrite(STDOUT, sprintf("Release published at: %s\n", $report['release_at']));
+        }
+
+        if ($report['release_url'] !== '') {
+            fwrite(STDOUT, sprintf("Release URL: %s\n", $report['release_url']));
+        }
+
+        fwrite(STDOUT, sprintf("Current WordPress core baseline: %s\n", $report['current_wordpress_core']));
+        fwrite(STDOUT, sprintf("Target WordPress core baseline: %s\n", $report['target_wordpress_core']));
+        $this->printCheckOnlyFileSection('Planned refreshed managed files', $report['refreshed_files']);
+        $this->printCheckOnlyFileSection('Planned removed managed files', $report['removed_files']);
+        $this->printCheckOnlyFileSection('Planned skipped managed files', $report['skipped_files']);
+
+        if ($report['would_fail_on_skipped_managed_files']) {
+            fwrite(STDOUT, "Strict mode would fail because one or more framework-managed files would be skipped.\n");
+        }
     }
 
     private function beginBranchRollbackGuard(string $branch): BranchRollbackGuard
@@ -644,5 +744,31 @@ final class FrameworkSyncer
         $baseFullName = strtolower((string) ($baseRepo['full_name'] ?? ''));
 
         return $headRef !== '' && $headFullName !== '' && $headFullName === $baseFullName;
+    }
+
+    /**
+     * @param list<string> $paths
+     */
+    private function printCheckOnlyFileSection(string $heading, array $paths): void
+    {
+        fwrite(STDOUT, sprintf("%s: %d\n", $heading, count($paths)));
+
+        foreach ($paths as $path) {
+            fwrite(STDOUT, sprintf("- %s\n", $path));
+        }
+    }
+
+    /**
+     * @param list<string> $skippedFiles
+     */
+    private function strictSkippedManagedFilesMessage(string $targetVersion, array $skippedFiles): string
+    {
+        $targetLabel = trim($targetVersion) === '' ? 'the requested framework release' : sprintf('wp-core-base %s', $targetVersion);
+
+        return sprintf(
+            'Strict framework-sync aborted because %s would skip customized framework-managed files: %s. Reconcile those files manually or rerun without --fail-on-skipped-managed-files.',
+            $targetLabel,
+            implode(', ', $skippedFiles)
+        );
     }
 }

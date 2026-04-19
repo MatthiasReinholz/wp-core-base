@@ -13,6 +13,7 @@ final class CommandHelp
             'add-dependency' => self::addDependency($commandPrefix),
             'adopt-dependency' => self::adoptDependency($commandPrefix),
             'remove-dependency' => self::removeDependency($commandPrefix),
+            'framework-sync' => self::frameworkSync($phpCommandPrefix),
             'scaffold-premium-provider' => self::scaffoldPremiumProvider($commandPrefix),
             'sync' => self::sync($phpCommandPrefix),
             default => self::general($commandPrefix, $phpCommandPrefix),
@@ -32,7 +33,7 @@ Usage:
   {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime] [--json]
   {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
   {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--automation-provider=github|gitlab] [--force] [--adopt-existing-managed-files]
-  {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only]
+  {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only] [--fail-on-skipped-managed-files] [--json]
   {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
   {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--json]
   {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
@@ -51,8 +52,39 @@ Use:
   {$commandPrefix} help add-dependency
   {$commandPrefix} help adopt-dependency
   {$commandPrefix} help remove-dependency
+  {$commandPrefix} help framework-sync
   {$commandPrefix} help scaffold-premium-provider
   {$commandPrefix} help sync
+
+TEXT;
+    }
+
+    private static function frameworkSync(string $phpCommandPrefix): string
+    {
+        return <<<TEXT
+framework-sync
+
+Purpose:
+  Update the vendored wp-core-base framework snapshot in a downstream repository, or preflight the next framework release without mutating the repo.
+
+Common flags:
+  --repo-root=PATH
+  --check-only
+  --fail-on-skipped-managed-files
+  --json
+
+Notes:
+  - `--check-only` inspects the next available framework release and reports whether an update is available.
+  - `--check-only --json` emits machine-readable preflight output including `refreshed_files`, `removed_files`, and `skipped_files`.
+  - `--fail-on-skipped-managed-files` makes preflight and real sync fail when customized framework-managed files would be left untouched instead of refreshed or removed.
+  - use strict mode in CI when framework-managed workflow drift must block rollout.
+  - `framework-sync` updates `.wp-core-base/framework.php` and the vendored `wp-core-base` snapshot. It does not mutate the dependency manifest.
+
+Examples:
+  {$phpCommandPrefix} framework-sync --repo-root=. --check-only
+  {$phpCommandPrefix} framework-sync --repo-root=. --check-only --json
+  {$phpCommandPrefix} framework-sync --repo-root=. --check-only --fail-on-skipped-managed-files --json
+  {$phpCommandPrefix} framework-sync --repo-root=.
 
 TEXT;
     }

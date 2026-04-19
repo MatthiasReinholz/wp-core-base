@@ -104,6 +104,7 @@ $knownOptions = [
     'distribution-path',
     'dry-run',
     'fail-on-source-errors',
+    'fail-on-skipped-managed-files',
     'force',
     'from-source',
     'github',
@@ -241,7 +242,7 @@ try {
         exit($runtimeMaintenanceExitCode);
     }
 
-    if (isset($options['help']) && in_array($mode, ['scaffold-premium-provider', 'sync'], true)) {
+    if (isset($options['help']) && in_array($mode, ['scaffold-premium-provider', 'sync', 'framework-sync'], true)) {
         fwrite(STDOUT, CommandHelp::render($mode, $commandPrefix, $phpCommandPrefix));
         exit(0);
     }
@@ -275,7 +276,7 @@ try {
             $mutationLock,
             $repoRoot
         ),
-        new FrameworkSyncModeHandler($config, $httpClient, $mutationLock, $repoRoot),
+        new FrameworkSyncModeHandler($config, $httpClient, $mutationLock, $repoRoot, $jsonOutput, $emitJson),
     ]);
     $syncExitCode = $syncDispatcher->dispatch($mode, $options);
 
