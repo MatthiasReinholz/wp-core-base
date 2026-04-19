@@ -1231,6 +1231,7 @@ final class EnvironmentDoctor
 
     private function ok(string $message): void
     {
+        $message = OutputRedactor::redact($message);
         $this->messages[] = ['level' => 'ok', 'message' => $message];
 
         if (! $this->emitOutput) {
@@ -1243,6 +1244,7 @@ final class EnvironmentDoctor
     private function warn(string $message): void
     {
         $this->warnings++;
+        $message = OutputRedactor::redact($message);
         $this->messages[] = ['level' => 'warn', 'message' => $message];
 
         if (! $this->emitOutput) {
@@ -1255,6 +1257,7 @@ final class EnvironmentDoctor
     private function error(string $message): void
     {
         $this->errors++;
+        $message = OutputRedactor::redact($message);
         $this->messages[] = ['level' => 'error', 'message' => $message];
 
         if (! $this->emitOutput) {
@@ -1266,6 +1269,7 @@ final class EnvironmentDoctor
 
     private function note(string $message): void
     {
+        $message = OutputRedactor::redact($message);
         $this->messages[] = ['level' => 'note', 'message' => $message];
 
         if (! $this->emitOutput) {
