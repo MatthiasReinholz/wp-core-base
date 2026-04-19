@@ -4,19 +4,19 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'release_source' =>
-  array (
-    'provider' => 'github-release',
-    'reference' => 'MatthiasReinholz/wp-core-base',
-    'api_base' => 'https://api.github.com',
-  ),
-  'version' => '1.3.3',
+  'version' => '1.4.0',
   'release_channel' => 'stable',
   'distribution' => 
   array (
     'mode' => 'vendor-snapshot',
     'path' => '.',
     'asset_name' => 'wp-core-base-vendor-snapshot.zip',
+  ),
+  'release_source' => 
+  array (
+    'provider' => 'github-release',
+    'reference' => 'MatthiasReinholz/wp-core-base',
+    'api_base' => 'https://api.github.com',
   ),
   'baseline' => 
   array (
