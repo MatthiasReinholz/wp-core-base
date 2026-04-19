@@ -63,6 +63,14 @@ final class DependencyAuthoringSupport
             throw new RuntimeException('GitHub release additions are only supported for plugin and theme kinds.');
         }
 
+        if ($source === 'gitlab-release' && ! in_array($kind, ['plugin', 'theme'], true)) {
+            throw new RuntimeException('GitLab release additions are only supported for plugin and theme kinds.');
+        }
+
+        if ($source === 'generic-json' && ! in_array($kind, ['plugin', 'theme'], true)) {
+            throw new RuntimeException('Generic JSON additions are only supported for plugin and theme kinds.');
+        }
+
         if (PremiumSourceResolver::isPremiumSource($source) && $kind !== 'plugin') {
             throw new RuntimeException(sprintf('%s additions are only supported for plugin kind.', $source));
         }
@@ -200,7 +208,7 @@ final class DependencyAuthoringSupport
         $policy = [
             'class' => match (true) {
                 $management === 'managed' && $source === 'wordpress.org' => 'managed-upstream',
-                $management === 'managed' && $source === 'github-release' => 'managed-private',
+                $management === 'managed' && in_array($source, ['github-release', 'gitlab-release', 'generic-json'], true) => 'managed-private',
                 $management === 'managed' && PremiumSourceResolver::isPremiumSource($source) => 'managed-premium',
                 $management === 'ignored' => 'ignored',
                 default => 'local-owned',

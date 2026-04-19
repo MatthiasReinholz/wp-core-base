@@ -402,6 +402,11 @@ final class ConfigNormalizer
             $githubRepository = self::nullableString($sourceConfig['github_repository'] ?? null);
             $githubReleaseAssetPattern = self::nullableString($sourceConfig['github_release_asset_pattern'] ?? null);
             $githubTokenEnv = self::nullableString($sourceConfig['github_token_env'] ?? null);
+            $gitlabProject = self::nullableString($sourceConfig['gitlab_project'] ?? null);
+            $gitlabReleaseAssetPattern = self::nullableString($sourceConfig['gitlab_release_asset_pattern'] ?? null);
+            $gitlabTokenEnv = self::nullableString($sourceConfig['gitlab_token_env'] ?? null);
+            $gitlabApiBase = self::nullableString($sourceConfig['gitlab_api_base'] ?? null);
+            $genericJsonUrl = self::nullableString($sourceConfig['generic_json_url'] ?? null);
             $minReleaseAgeHours = isset($sourceConfig['min_release_age_hours']) && $sourceConfig['min_release_age_hours'] !== ''
                 ? self::nonNegativeInt($sourceConfig['min_release_age_hours'], sprintf('dependencies[%s].source_config.min_release_age_hours', $slug))
                 : null;
@@ -427,9 +432,46 @@ final class ConfigNormalizer
                 ));
             }
 
+            if ($source === 'gitlab-release' && $gitlabProject === null) {
+                throw new RuntimeException(sprintf('GitLab release dependency %s must define source_config.gitlab_project.', $slug));
+            }
+
+            if ($source === 'gitlab-release' && $gitlabReleaseAssetPattern === null) {
+                throw new RuntimeException(sprintf(
+                    'GitLab release dependency %s must define source_config.gitlab_release_asset_pattern.',
+                    $slug
+                ));
+            }
+
+            if ($source === 'generic-json' && ! in_array($kind, ['plugin', 'theme'], true)) {
+                throw new RuntimeException(sprintf('Generic JSON source is only supported for plugin and theme dependencies (%s).', $slug));
+            }
+
+            if ($source === 'generic-json' && $genericJsonUrl === null) {
+                throw new RuntimeException(sprintf('Generic JSON dependency %s must define source_config.generic_json_url.', $slug));
+            }
+
+            if ($source === 'generic-json' && $genericJsonUrl !== null && ! self::isHttpsUrl($genericJsonUrl)) {
+                throw new RuntimeException(sprintf('Generic JSON dependency %s must use an HTTPS source_config.generic_json_url.', $slug));
+            }
+
             if (! in_array($verificationMode, ['inherit', 'none', 'checksum-sidecar-optional', 'checksum-sidecar-required'], true)) {
                 throw new RuntimeException(sprintf(
                     'Dependency %s must use source_config.verification_mode of inherit, none, checksum-sidecar-optional, or checksum-sidecar-required.',
+                    $slug
+                ));
+            }
+
+            if ($source === 'generic-json' && ! in_array($verificationMode, ['inherit', 'none'], true)) {
+                throw new RuntimeException(sprintf(
+                    'Generic JSON dependency %s may only use source_config.verification_mode of inherit or none.',
+                    $slug
+                ));
+            }
+
+            if ($source === 'generic-json' && $checksumAssetPattern !== null) {
+                throw new RuntimeException(sprintf(
+                    'Generic JSON dependency %s may not define source_config.checksum_asset_pattern.',
                     $slug
                 ));
             }
@@ -465,6 +507,11 @@ final class ConfigNormalizer
                     'github_repository' => $githubRepository,
                     'github_release_asset_pattern' => $githubReleaseAssetPattern,
                     'github_token_env' => $githubTokenEnv,
+                    'gitlab_project' => $gitlabProject,
+                    'gitlab_release_asset_pattern' => $gitlabReleaseAssetPattern,
+                    'gitlab_token_env' => $gitlabTokenEnv,
+                    'gitlab_api_base' => $gitlabApiBase,
+                    'generic_json_url' => $genericJsonUrl,
                     'min_release_age_hours' => $minReleaseAgeHours,
                     'verification_mode' => $verificationMode,
                     'checksum_asset_pattern' => $checksumAssetPattern,
@@ -561,11 +608,22 @@ final class ConfigNormalizer
         return match (true) {
             $management === 'managed' && $source === 'wordpress.org' => 'managed-upstream',
             $management === 'managed' && $source === 'github-release' => 'managed-private',
+            $management === 'managed' && $source === 'gitlab-release' => 'managed-private',
+            $management === 'managed' && $source === 'generic-json' => 'managed-private',
             $management === 'managed' && PremiumSourceResolver::isPremiumSource($source) => 'managed-premium',
             $management === 'local' && $source === 'local' => 'local-owned',
             $management === 'ignored' && $source === 'local' => 'ignored',
             default => throw new RuntimeException(sprintf('Invalid management/source combination: %s/%s', $management, $source)),
         };
+    }
+
+    private static function isHttpsUrl(string $url): bool
+    {
+        $parts = parse_url($url);
+
+        return is_array($parts)
+            && strtolower((string) ($parts['scheme'] ?? '')) === 'https'
+            && trim((string) ($parts['host'] ?? '')) !== '';
     }
 
     private static function string(mixed $value, string $key): string

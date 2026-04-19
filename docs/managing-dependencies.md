@@ -135,6 +135,43 @@ If the upstream project also publishes a checksum sidecar for the ZIP, add the m
 - `source_config.verification_mode`
 - optionally `source_config.min_release_age_hours`
 
+## Add A Generic JSON Plugin
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency \
+  --repo-root=. \
+  --source=generic-json \
+  --kind=plugin \
+  --slug=example-plugin \
+  --generic-json-url=https://updates.example.com/example-plugin/info.json
+```
+
+Optional flags:
+
+- `--version=1.2.3`
+- `--archive-subdir=plugin`
+- `--plan`, `--preview`, or `--dry-run`
+
+Important constraints:
+
+- the metadata endpoint must be HTTPS
+- the metadata endpoint must advertise a valid `release_at`, `published_at`, `last_updated`, or `updated` timestamp
+- `generic-json` resolves only the latest version currently advertised by that endpoint
+- `--preserve-version` or an explicit older `--version` only works when the endpoint still advertises that same version
+- checksum-sidecar verification is not supported for `generic-json` today
+
+This is the built-in interop path for plugins that publish a stable update metadata document instead of GitHub or GitLab Releases.
+
+## `wp-plugin-base` Interop
+
+When you consume a plugin built on `wp-plugin-base`, prefer these source choices in order:
+
+1. `github-release` when the plugin is published through GitHub Releases
+2. `gitlab-release` when the plugin is published through GitLab Releases
+3. `generic-json` only when the plugin’s public update surface is a JSON metadata endpoint instead of a release-backed archive catalog
+
+The repo automation host used by the plugin project is not the part that matters to `wp-core-base`. The part that matters is the installable distribution surface we can resolve deterministically in CI.
+
 ### Agent-ready GitHub release hardening workflow
 
 If an AI coding agent is upgrading a downstream repo to use hosted release trust checks, it should follow this order exactly. The same sequence applies to GitLab Releases.

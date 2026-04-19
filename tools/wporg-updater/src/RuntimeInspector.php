@@ -152,29 +152,60 @@ final class RuntimeInspector
             return;
         }
 
-        $entries = scandir($path);
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
 
-        if ($entries === false) {
-            throw new RuntimeException(sprintf('Failed to list directory: %s', $path));
-        }
-
-        foreach ($entries as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
-            }
-
-            $entryPath = $path . '/' . $entry;
-            $relative = ltrim(str_replace('\\', '/', substr($entryPath, strlen($path))), '/');
+        foreach ($iterator as $item) {
+            $relative = ltrim(str_replace('\\', '/', $iterator->getSubPathName()), '/');
 
             if ($relative !== '' && $this->isExcluded($relative, $excludedPaths)) {
                 continue;
             }
 
-            $this->clearPath($entryPath);
+            $itemPath = $item->getPathname();
+
+            if ($item->isLink() || $item->isFile()) {
+                if (! unlink($itemPath)) {
+                    throw new RuntimeException(sprintf('Failed to remove file: %s', $itemPath));
+                }
+                continue;
+            }
+
+            $this->removeDirectory($itemPath, $this->hasExcludedDescendant($relative, $excludedPaths));
         }
 
-        if (! rmdir($path)) {
-            throw new RuntimeException(sprintf('Failed to remove directory: %s', $path));
+        $this->removeDirectory($path, $excludedPaths !== []);
+    }
+
+    private function removeDirectory(string $path, bool $allowNonEmpty): void
+    {
+        for ($attempt = 0; $attempt < 3; $attempt++) {
+            if (@rmdir($path)) {
+                return;
+            }
+
+            $remainingEntries = $this->visibleEntries($path);
+
+            if ($remainingEntries === []) {
+                continue;
+            }
+
+            if ($allowNonEmpty) {
+                return;
+            }
+
+            if ($attempt < 2) {
+                usleep(10000);
+                continue;
+            }
+
+            throw new RuntimeException(sprintf(
+                'Failed to remove directory: %s (remaining entries: %s)',
+                $path,
+                implode(', ', $remainingEntries)
+            ));
         }
     }
 
@@ -445,6 +476,38 @@ final class RuntimeInspector
         }
 
         return false;
+    }
+
+    /**
+     * @param list<string> $excludedPaths
+     */
+    private function hasExcludedDescendant(string $relativePath, array $excludedPaths): bool
+    {
+        foreach ($excludedPaths as $excludedPath) {
+            if ($relativePath !== '' && str_starts_with($excludedPath, $relativePath . '/')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function visibleEntries(string $path): array
+    {
+        if (! is_dir($path)) {
+            return [];
+        }
+
+        $entries = scandir($path);
+
+        if ($entries === false) {
+            throw new RuntimeException(sprintf('Failed to list directory: %s', $path));
+        }
+
+        return array_values(array_filter($entries, static fn (string $entry): bool => $entry !== '.' && $entry !== '..'));
     }
 
     /**

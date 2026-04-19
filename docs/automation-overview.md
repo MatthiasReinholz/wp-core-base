@@ -77,6 +77,7 @@ Supported automated sources:
 - `WordPress.org`
 - `github-release`
 - `gitlab-release`
+- `generic-json`
 - `premium`
 
 Hosted release source handling uses stable Releases as the source of truth. It does not infer release state from raw tags or commit history.
@@ -93,6 +94,12 @@ Private GitLab release assets are supported through:
 - `source_config.gitlab_release_asset_pattern`
 - `source_config.gitlab_token_env`
 - optionally `source_config.gitlab_api_base` for self-managed GitLab
+
+Generic JSON metadata endpoints are supported through:
+
+- `source_config.generic_json_url`
+
+This source is latest-only and does not support forum sync or checksum-sidecar verification today.
 
 The download flow never forwards authorization headers to redirected CDN URLs.
 

@@ -7,7 +7,7 @@ namespace WpOrgPluginUpdater;
 use JsonException;
 use RuntimeException;
 
-final class HttpClient implements ArchiveDownloader
+final class HttpClient implements ArchiveDownloader, JsonHttpTransport
 {
     public const DEFAULT_MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
     public const DEFAULT_MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;

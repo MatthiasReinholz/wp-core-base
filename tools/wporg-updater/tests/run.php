@@ -74,6 +74,7 @@ require __DIR__ . '/integration/cli_json_contracts.php';
 require __DIR__ . '/integration/blocker_states.php';
 require __DIR__ . '/integration/followups.php';
 require __DIR__ . '/integration/multi_host_contracts.php';
+require __DIR__ . '/integration/generic_json_contracts.php';
 
 final class ExamplePremiumManagedSource extends AbstractPremiumManagedSource
 {
@@ -2550,6 +2551,13 @@ run_dependency_authoring_contract_tests($assert, [
     'gitHubReleaseClient' => $gitHubReleaseClient,
     'premiumCredentialsStore' => $premiumCredentialsStore,
     'supportClient' => $supportClient,
+]);
+
+run_generic_json_contract_tests($assert, [
+    'repoRoot' => $repoRoot,
+    'writeManifest' => $writeManifest,
+    'createPluginArchive' => $createPluginArchive,
+    'httpClient' => $httpClient,
 ]);
 
 run_cli_json_contract_tests(

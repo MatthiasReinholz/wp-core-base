@@ -25,6 +25,7 @@ Managed dependencies may come from:
 - WordPress.org
 - GitHub Releases
 - GitLab Releases
+- generic JSON metadata endpoints
 - downstream-registered premium providers
 
 Hosted release downloads can be hardened with:
@@ -42,6 +43,8 @@ Rules:
 - do not treat redirected CDN URLs as trusted origins for auth forwarding
 
 The repo-level `security.github_release_verification` key keeps its historical name for backward compatibility, but it currently applies to both `github-release` and `gitlab-release` dependencies that inherit verification mode from the repo default.
+
+`generic-json` is currently metadata-only. It can resolve and download installable archives when the endpoint advertises a valid release timestamp, but it does not support checksum-sidecar hardening or release-side provenance checks today.
 
 ## Runtime Integrity
 

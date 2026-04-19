@@ -93,6 +93,7 @@ Do not blur those contracts when reasoning about the system.
 - downstream-owned premium provider registrations live in `.wp-core-base/premium-providers.php`.
 - workflow-managed plugins may intentionally look non-updateable inside wp-admin because the governance MU plugin suppresses misleading in-dashboard update actions for them.
 - hosted release dependencies may opt into download-time trust checks through `security.github_release_verification`, `security.managed_release_min_age_hours`, `source_config.verification_mode`, `source_config.checksum_asset_pattern`, and `source_config.min_release_age_hours`.
+- `generic-json` is a built-in latest-version metadata source for public HTTPS plugin or theme feeds, not a historical release catalog.
 
 ## Unsafe Assumptions
 
@@ -105,6 +106,7 @@ Do not assume:
 - symlinks are acceptable runtime inputs
 - a GitHub repository without GitHub Releases is a supported `github-release` source
 - a GitLab project without GitLab Releases is a supported `gitlab-release` source
+- a `generic-json` endpoint necessarily supports historical version pinning or checksum-sidecar verification
 - WooCommerce.com extensions are already supported as native workflow-managed sources
 - every GitHub release-backed dependency publishes a checksum sidecar
 - every GitLab release-backed dependency publishes a checksum sidecar

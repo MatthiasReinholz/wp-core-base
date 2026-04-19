@@ -128,6 +128,17 @@ function run_config_runtime_contract_tests(
     $runtimeInspector->assertPathIsClean($nestedSanitizeRoot, [], [], ['**/docs']);
     $runtimeInspector->clearPath($nestedSanitizeRoot);
 
+    $excludedCleanupRoot = sys_get_temp_dir() . '/wporg-clear-excluded-' . bin2hex(random_bytes(4));
+    mkdir($excludedCleanupRoot . '/keep/subtree', 0777, true);
+    mkdir($excludedCleanupRoot . '/drop/subtree', 0777, true);
+    file_put_contents($excludedCleanupRoot . '/keep/subtree/keep.php', "<?php\n");
+    file_put_contents($excludedCleanupRoot . '/drop/subtree/drop.php', "<?php\n");
+    $runtimeInspector->clearDirectory($excludedCleanupRoot, ['keep']);
+    $assert(is_dir($excludedCleanupRoot), 'Expected clearDirectory with exclusions to keep the root directory when excluded paths remain.');
+    $assert(is_file($excludedCleanupRoot . '/keep/subtree/keep.php'), 'Expected clearDirectory exclusions to preserve the excluded subtree.');
+    $assert(! file_exists($excludedCleanupRoot . '/drop'), 'Expected clearDirectory exclusions to remove non-excluded sibling directories.');
+    $runtimeInspector->clearPath($excludedCleanupRoot);
+
     $stageDir = '.wp-core-base/build/test-runtime';
     $stagedPaths = (new RuntimeStager($config, $runtimeInspector))->stage($stageDir);
     $assert(in_array('wp-content/plugins/woocommerce', $stagedPaths, true), 'Expected runtime staging to include managed plugin paths.');
