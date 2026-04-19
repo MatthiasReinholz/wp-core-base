@@ -168,8 +168,15 @@ foreach ($arguments as $argument) {
 
 try {
     if (in_array($mode, ['help', '--help', '-h'], true)) {
-        $topic = $arguments[0] ?? null;
-        $topic = is_string($topic) && ! str_starts_with($topic, '--') ? $topic : null;
+        $topic = null;
+
+        foreach ($arguments as $argument) {
+            if (! str_starts_with($argument, '--')) {
+                $topic = $argument;
+                break;
+            }
+        }
+
         fwrite(STDOUT, CommandHelp::render($topic, $commandPrefix, $phpCommandPrefix));
         exit(0);
     }
