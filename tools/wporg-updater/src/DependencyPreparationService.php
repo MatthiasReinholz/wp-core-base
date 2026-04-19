@@ -77,6 +77,47 @@ final class DependencyPreparationService
                     throw $exception;
                 }
             }
+        } elseif ($rawEntry['source'] === 'gitlab-release') {
+            $project = $this->support->requiredString($options, 'gitlab-project');
+            $tokenEnv = $this->support->nullableString($options['gitlab-token-env'] ?? null);
+            $defaultTokenEnv = DependencyAuthoringService::defaultGitLabTokenEnv((string) $rawEntry['slug'], $project);
+
+            $rawEntry['source_config']['gitlab_project'] = $project;
+            $rawEntry['source_config']['gitlab_release_asset_pattern'] = $this->support->nullableString($options['gitlab-release-asset-pattern'] ?? null);
+            $rawEntry['source_config']['gitlab_token_env'] = $tokenEnv;
+            $rawEntry['source_config']['gitlab_api_base'] = $this->support->nullableString($options['gitlab-api-base'] ?? null);
+
+            if ($tokenEnv !== null && getenv($tokenEnv) === false) {
+                throw new RuntimeException(sprintf(
+                    'Environment variable %s is required to add private GitLab dependency %s. Export it locally, then rerun.',
+                    $tokenEnv,
+                    $rawEntry['slug']
+                ));
+            }
+
+            try {
+                $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
+            } catch (RuntimeException $exception) {
+                if ($tokenEnv === null && (($options['private'] ?? false) === true || $this->looksLikeGitLabAuthFailure($exception))) {
+                    $rawEntry['source_config']['gitlab_token_env'] = $defaultTokenEnv;
+                    $envValue = getenv($defaultTokenEnv);
+
+                    if (! is_string($envValue) || $envValue === '') {
+                        throw new RuntimeException(sprintf(
+                            'GitLab release access for %s may require authentication. Export %s locally, or pass --gitlab-token-env=YOUR_TOKEN_ENV. If the project is public, verify that --gitlab-project is correct.',
+                            $project,
+                            $defaultTokenEnv
+                        ), previous: $exception);
+                    }
+
+                    $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
+                } else {
+                    throw $exception;
+                }
+            }
+        } elseif ($rawEntry['source'] === 'generic-json') {
+            $rawEntry['source_config']['generic_json_url'] = $this->support->requiredString($options, 'generic-json-url');
+            $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
         } else {
             $rawEntry['source_config']['credential_key'] = $this->support->nullableString($options['credential-key'] ?? null);
             $provider = $this->support->nullableString($options['provider'] ?? null);
@@ -211,6 +252,15 @@ final class DependencyPreparationService
     }
 
     private function looksLikeGitHubAuthFailure(RuntimeException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+
+        return str_contains($message, 'status 401')
+            || str_contains($message, 'status 403')
+            || str_contains($message, 'status 404');
+    }
+
+    private function looksLikeGitLabAuthFailure(RuntimeException $exception): bool
     {
         $message = strtolower($exception->getMessage());
 

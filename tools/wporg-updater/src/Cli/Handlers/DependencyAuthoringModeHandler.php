@@ -257,7 +257,7 @@ final class DependencyAuthoringModeHandler implements CliModeHandler
         if ($source === null || $source === '') {
             $options['source'] = $prompter->choose(
                 'Select dependency source',
-                ['wordpress.org', 'github-release', 'gitlab-release', 'premium', 'local'],
+                ['wordpress.org', 'github-release', 'gitlab-release', 'generic-json', 'premium', 'local'],
                 'local'
             );
             $source = $options['source'];
@@ -321,6 +321,12 @@ final class DependencyAuthoringModeHandler implements CliModeHandler
                 if ($tokenEnv !== '') {
                     $options['gitlab-token-env'] = $tokenEnv;
                 }
+            }
+        }
+
+        if ($source === 'generic-json') {
+            if (! isset($options['generic-json-url']) || ! is_string($options['generic-json-url']) || trim($options['generic-json-url']) === '') {
+                $options['generic-json-url'] = $prompter->ask('Generic JSON metadata URL');
             }
         }
 

@@ -332,6 +332,7 @@ final class DependencyAuthoringService
                 'gitlab_release_asset_pattern' => null,
                 'gitlab_token_env' => null,
                 'gitlab_api_base' => null,
+                'generic_json_url' => null,
                 'credential_key' => null,
                 'provider' => null,
                 'provider_product_id' => null,
@@ -577,6 +578,9 @@ final class DependencyAuthoringService
                     throw $exception;
                 }
             }
+        } elseif ($rawEntry['source'] === 'generic-json') {
+            $rawEntry['source_config']['generic_json_url'] = $this->requiredString($options, 'generic-json-url');
+            $catalog = $this->managedSourceRegistry->for($rawEntry)->fetchCatalog($rawEntry);
         } else {
             $rawEntry['source_config']['credential_key'] = $this->nullableString($options['credential-key'] ?? null);
             $provider = $this->nullableString($options['provider'] ?? null);
@@ -803,6 +807,10 @@ final class DependencyAuthoringService
             throw new RuntimeException('GitLab release additions are only supported for plugin and theme kinds.');
         }
 
+        if ($source === 'generic-json' && ! in_array($kind, ['plugin', 'theme'], true)) {
+            throw new RuntimeException('Generic JSON additions are only supported for plugin and theme kinds.');
+        }
+
         if (PremiumSourceResolver::isPremiumSource($source) && $kind !== 'plugin') {
             throw new RuntimeException(sprintf('%s additions are only supported for plugin kind.', $source));
         }
@@ -942,6 +950,7 @@ final class DependencyAuthoringService
                 $management === 'managed' && $source === 'wordpress.org' => 'managed-upstream',
                 $management === 'managed' && $source === 'github-release' => 'managed-private',
                 $management === 'managed' && $source === 'gitlab-release' => 'managed-private',
+                $management === 'managed' && $source === 'generic-json' => 'managed-private',
                 $management === 'managed' && PremiumSourceResolver::isPremiumSource($source) => 'managed-premium',
                 $management === 'ignored' => 'ignored',
                 default => 'local-owned',

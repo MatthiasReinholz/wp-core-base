@@ -66,6 +66,7 @@ This document lists what `wp-core-base` supports today, what it supports with co
 | private GitHub Releases | Supported with constraints | Requires token env and release-backed artifacts. |
 | public GitLab Releases | Supported | Requires stable Releases with linked package artifacts. |
 | private GitLab Releases | Supported with constraints | Requires token env and release-backed artifacts. |
+| public HTTPS generic JSON metadata endpoints | Supported with constraints | Uses `source: generic-json` and `source_config.generic_json_url`. Requires a valid release timestamp field. Latest-version only; no forum sync. |
 | downstream-registered premium providers | Supported with constraints | Uses `source: premium`, a provider registered in `.wp-core-base/premium-providers.php`, and `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`. |
 | raw GitHub tags without Releases | Not supported | GitHub Releases are the source of truth. |
 | raw GitLab tags without Releases | Not supported | GitLab Releases are the source of truth. |

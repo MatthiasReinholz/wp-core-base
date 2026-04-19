@@ -15,6 +15,7 @@ use WpOrgPluginUpdater\Cli\Handlers\SyncModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\SyncReportModeHandler;
 use WpOrgPluginUpdater\Cli\ModeDispatcher;
 use WpOrgPluginUpdater\AdminGovernanceExporter;
+use WpOrgPluginUpdater\GenericJsonManagedSource;
 use WpOrgPluginUpdater\GitLabReleaseClient;
 use WpOrgPluginUpdater\GitLabReleaseManagedSource;
 use WpOrgPluginUpdater\GitHubReleaseClient;
@@ -113,6 +114,7 @@ $knownOptions = [
     'gitlab-project',
     'gitlab-release-asset-pattern',
     'gitlab-token-env',
+    'generic-json-url',
     'help',
     'interactive',
     'json',
@@ -219,6 +221,7 @@ try {
         new WordPressOrgManagedSource(new WordPressOrgClient($httpClient), $httpClient),
         new GitHubReleaseManagedSource(new GitHubReleaseClient($httpClient, $config->githubApiBase())),
         new GitLabReleaseManagedSource(new GitLabReleaseClient($httpClient, $config->gitlabApiBase())),
+        new GenericJsonManagedSource($httpClient),
         ...array_values($premiumProviderRegistry->instantiate($httpClient, new PremiumCredentialsStore(), $config->managedDependencies()))
     );
     $adminGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));

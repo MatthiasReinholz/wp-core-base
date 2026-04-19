@@ -91,6 +91,7 @@ final class Updater
             'source:wordpress.org' => ['color' => '0e8a16', 'description' => 'Update sourced from WordPress.org'],
             'source:github-release' => ['color' => '24292f', 'description' => 'Update sourced from GitHub releases'],
             'source:gitlab-release' => ['color' => 'fc6d26', 'description' => 'Update sourced from GitLab releases'],
+            'source:generic-json' => ['color' => '1f6feb', 'description' => 'Update sourced from a generic JSON metadata endpoint'],
             'source:premium' => ['color' => '7c3aed', 'description' => 'Update sourced from a premium provider integration'],
             'release:patch' => ['color' => '5319e7', 'description' => 'Patch release'],
             'release:minor' => ['color' => 'fbca04', 'description' => 'Minor release'],
@@ -129,6 +130,7 @@ final class Updater
             }
         }
 
+        $plannedPrs = $this->pruneHistoricalPullRequestsForLatestOnlySource($dependency, $plannedPrs, $latestVersion);
         [$plannedPrs, $duplicatePrs] = $this->partitionPullRequestsByTargetVersion($plannedPrs);
 
         foreach ($duplicatePrs as $duplicatePr) {
@@ -232,6 +234,40 @@ final class Updater
         $pullRequest['requires_branch_refresh'] = $requiresBranchRefresh;
 
         return $pullRequest;
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param list<array<string, mixed>> $plannedPrs
+     * @return list<array<string, mixed>>
+     */
+    private function pruneHistoricalPullRequestsForLatestOnlySource(array $dependency, array $plannedPrs, string $latestVersion): array
+    {
+        if ($this->sourceSupportsHistoricalVersions($dependency)) {
+            return $plannedPrs;
+        }
+
+        $remaining = [];
+
+        foreach ($plannedPrs as $plannedPr) {
+            $plannedTargetVersion = (string) ($plannedPr['planned_target_version'] ?? '');
+
+            if ($plannedTargetVersion !== '' && version_compare($plannedTargetVersion, $latestVersion, '<')) {
+                $this->closeSupersededPullRequest(
+                    (int) ($plannedPr['number'] ?? 0),
+                    sprintf(
+                        'This automation source only resolves the latest advertised version. `%s` now advertises `%s`, so this older PR has been closed and will be replaced by the current release if needed.',
+                        (string) $dependency['component_key'],
+                        $latestVersion
+                    )
+                );
+                continue;
+            }
+
+            $remaining[] = $plannedPr;
+        }
+
+        return $remaining;
     }
 
     /**
@@ -468,6 +504,14 @@ final class Updater
         } catch (\Throwable $throwable) {
             $branchGuard->rollback($throwable);
         }
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     */
+    private function sourceSupportsHistoricalVersions(array $dependency): bool
+    {
+        return (string) ($dependency['source'] ?? '') !== 'generic-json';
     }
 
     /**

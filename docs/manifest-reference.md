@@ -220,7 +220,7 @@ vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=.
   - `runtime-file`
   - `runtime-directory`
 - `management` must be `managed`, `local`, or `ignored`
-- `source` must be `wordpress.org`, `github-release`, `gitlab-release`, `premium`, or `local`
+- `source` must be `wordpress.org`, `github-release`, `gitlab-release`, `generic-json`, `premium`, or `local`
 - `managed` entries must define `version` and `checksum`
 - `local` entries may define `version`, but do not need `checksum`
 - `ignored` entries are excluded from runtime staging
@@ -357,6 +357,55 @@ Then choose either:
 If you want to rely on GitLab CI's built-in job token for release access, set `source_config.gitlab_token_env` to `CI_JOB_TOKEN`.
 
 Concrete hardened example:
+
+## Generic JSON Dependencies
+
+For a public JSON metadata endpoint, use:
+
+- `source: 'generic-json'`
+- `source_config.generic_json_url`
+- optionally `source_config.min_release_age_hours`
+
+The metadata URL must be HTTPS and should expose, at minimum:
+
+- `version`
+- `download_url`
+- one valid release timestamp field: `release_at`, `published_at`, `last_updated`, or `updated`
+- `requires`
+- `tested`
+- `requires_php`
+
+`generic-json` is a latest-version source. The endpoint is expected to advertise the current installable release, not a historical release catalog. If you request or preserve an older version that the endpoint no longer advertises, authoring or sync will fail fast.
+
+`generic-json` does not support checksum-sidecar verification today. Leave `source_config.verification_mode` at `inherit` or set it to `none`.
+
+Concrete example:
+
+```php
+[
+    'name' => 'Example JSON Plugin',
+    'slug' => 'example-json-plugin',
+    'kind' => 'plugin',
+    'management' => 'managed',
+    'source' => 'generic-json',
+    'path' => 'cms/plugins/example-json-plugin',
+    'main_file' => 'example-json-plugin.php',
+    'version' => '1.2.3',
+    'checksum' => 'sha256:...',
+    'archive_subdir' => '',
+    'extra_labels' => ['plugin:example-json-plugin'],
+    'source_config' => [
+        'generic_json_url' => 'https://updates.example.com/example-json-plugin/info.json',
+        'verification_mode' => 'none',
+    ],
+    'policy' => [
+        'class' => 'managed-private',
+        'allow_runtime_paths' => [],
+        'sanitize_paths' => [],
+        'sanitize_files' => [],
+    ],
+],
+```
 
 ```php
 'security' => [

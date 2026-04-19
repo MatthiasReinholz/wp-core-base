@@ -74,7 +74,7 @@ return [
 Rules:
 
 - provider keys must use lowercase letters, numbers, and hyphens
-- provider keys may not collide with reserved built-in source names such as `wordpress.org`, `github-release`, `gitlab-release`, `premium`, or `local`
+- provider keys may not collide with reserved built-in source names such as `wordpress.org`, `github-release`, `gitlab-release`, `generic-json`, `premium`, or `local`
 - the class must be constructible with `(HttpClient, PremiumCredentialsStore)`
 - the class must implement `PremiumManagedDependencySource`
 - the class `key()` must match the registry key

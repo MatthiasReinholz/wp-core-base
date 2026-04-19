@@ -40,7 +40,7 @@ Usage:
   {$phpCommandPrefix} suggest-manifest [--repo-root=/path]
   {$phpCommandPrefix} format-manifest [--repo-root=/path]
   {$phpCommandPrefix} add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
-  {$phpCommandPrefix} adopt-dependency [--repo-root=/path] --source=wordpress.org|github-release|gitlab-release|premium --kind=... --slug=... [--preserve-version]
+  {$phpCommandPrefix} adopt-dependency [--repo-root=/path] --source=wordpress.org|github-release|gitlab-release|generic-json|premium --kind=... --slug=... [--preserve-version]
   {$phpCommandPrefix} remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
   {$phpCommandPrefix} list-dependencies [--repo-root=/path]
   {$phpCommandPrefix} scaffold-premium-provider [--repo-root=/path] --provider=your-provider [--class=Project\\WpCoreBase\\Premium\\YourProviderManagedSource] [--path=.wp-core-base/premium-providers/your-provider.php]
@@ -67,7 +67,7 @@ Purpose:
 
 Common flags:
   --repo-root=PATH
-  --source=wordpress.org|github-release|gitlab-release|premium|local
+  --source=wordpress.org|github-release|gitlab-release|generic-json|premium|local
   --kind=plugin|theme|mu-plugin-package|mu-plugin-file|runtime-file|runtime-directory
   --slug=SLUG
   --path=PATH
@@ -81,6 +81,7 @@ Common flags:
   --gitlab-release-asset-pattern=PATTERN
   --gitlab-token-env=ENV_NAME
   --gitlab-api-base=URL
+  --generic-json-url=URL
   --credential-key=LOOKUP_KEY
   --provider=KEY
   --provider-product-id=ID
@@ -97,6 +98,7 @@ Notes:
   - --archive-subdir is only needed when the archive payload is not selected correctly by default.
   - --version pins adoption to a specific upstream release instead of latest.
   - `--source=premium` requires `--provider=KEY` where `KEY` is registered in `.wp-core-base/premium-providers.php`.
+  - `--source=generic-json` requires `--generic-json-url=https://...` and resolves only the latest version currently advertised by that metadata endpoint.
   - premium sources use the fixed JSON secret/env contract: `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`.
   - --plan, --preview, and --dry-run are preview aliases; they do not mutate the repo.
   - add `--json` to preview flows when a machine-readable plan is preferred.
@@ -108,6 +110,7 @@ Examples:
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --github-release-asset-pattern='*.zip' --private
   {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --github-release-asset-pattern='*.zip' --archive-subdir=private-plugin
   {$commandPrefix} add-dependency --repo-root=. --source=gitlab-release --kind=plugin --slug=private-plugin --gitlab-project=group/private-plugin --gitlab-release-asset-pattern='*.zip'
+  {$commandPrefix} add-dependency --repo-root=. --source=generic-json --kind=plugin --slug=example-plugin --generic-json-url=https://updates.example.com/example-plugin/info.json
   {$commandPrefix} scaffold-premium-provider --repo-root=. --provider=example-vendor
   {$commandPrefix} add-dependency --repo-root=. --source=premium --provider=example-vendor --kind=plugin --slug=premium-plugin
   {$commandPrefix} add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
@@ -129,6 +132,7 @@ Current scope:
   - local -> wordpress.org
   - local -> github-release
   - local -> gitlab-release
+  - local -> generic-json
   - local -> premium
 
 Common flags:
@@ -137,7 +141,7 @@ Common flags:
   --slug=SLUG
   --kind=KIND
   --from-source=local
-  --source=wordpress.org|github-release|gitlab-release|premium
+  --source=wordpress.org|github-release|gitlab-release|generic-json|premium
   --version=VERSION
   --preserve-version
   --github-repository=OWNER/REPO
@@ -147,6 +151,7 @@ Common flags:
   --gitlab-release-asset-pattern=PATTERN
   --gitlab-token-env=ENV_NAME
   --gitlab-api-base=URL
+  --generic-json-url=URL
   --credential-key=LOOKUP_KEY
   --provider=KEY
   --provider-product-id=ID
@@ -159,6 +164,7 @@ Common flags:
 Notes:
   - adopt-dependency keeps the existing runtime path.
   - --preserve-version keeps the currently installed local version instead of jumping to latest upstream.
+  - `--source=generic-json` is latest-only. `--preserve-version` works only if the metadata endpoint still advertises that same version.
   - the operation is atomic for a single dependency: if adoption fails, the existing runtime tree is restored.
   - multi-command migration batches are still not atomic across separate invocations.
   - add `--json` to preview flows when a machine-readable plan is preferred.
@@ -168,6 +174,7 @@ Examples:
   {$commandPrefix} adopt-dependency --repo-root=. --component-key=plugin:local:woocommerce --source=wordpress.org --version=10.6.2
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=private-plugin --source=github-release --github-repository=owner/private-plugin --github-release-asset-pattern='*.zip' --preserve-version
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=private-plugin --source=gitlab-release --gitlab-project=group/private-plugin --gitlab-release-asset-pattern='*.zip' --preserve-version
+  {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=example-plugin --source=generic-json --generic-json-url=https://updates.example.com/example-plugin/info.json
   {$commandPrefix} scaffold-premium-provider --repo-root=. --provider=example-vendor
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=premium-plugin --source=premium --provider=example-vendor --preserve-version
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=blocksy-companion --source=wordpress.org --preserve-version --archive-subdir=blocksy-companion

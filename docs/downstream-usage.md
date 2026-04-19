@@ -79,6 +79,7 @@ These map to manifest values like this:
 
 - `management: managed` + `source: wordpress.org` => `managed-upstream`
 - `management: managed` + `source: github-release` => `managed-private`
+- `management: managed` + `source: generic-json` => `managed-private`
 - `management: managed` + `source: premium` => `managed-premium`
 - `management: local` + `source: local` => `local-owned`
 - `management: ignored` + `source: local` => `ignored`
@@ -90,9 +91,12 @@ Today the framework supports automated updates from:
 - `WordPress.org`
 - `github-release`
 - `gitlab-release`
+- `generic-json`
 - `premium`
 
 Hosted release support is release-backed. The upstream project must publish stable GitHub or GitLab Releases. Raw tags without Releases are not treated as the source of truth.
+
+`generic-json` is the host-agnostic alternative when a dependency publishes a stable HTTPS metadata endpoint instead of release-backed artifacts. It is a latest-version contract, not a historical release catalog.
 
 For private GitHub dependencies, the manifest should point to an environment variable through `source_config.github_token_env`.
 For private GitLab dependencies, the manifest should point to an environment or CI/CD variable through `source_config.gitlab_token_env`.

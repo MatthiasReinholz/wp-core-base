@@ -13,7 +13,7 @@ final class PremiumSourceResolver
      */
     public static function allowedSources(): array
     {
-        return ['wordpress.org', 'github-release', 'gitlab-release', 'premium', 'local'];
+        return ['wordpress.org', 'github-release', 'gitlab-release', 'generic-json', 'premium', 'local'];
     }
 
     public static function isPremiumSource(string $source): bool

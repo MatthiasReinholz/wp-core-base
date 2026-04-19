@@ -18,7 +18,7 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 - explicit framework release metadata at `.wp-core-base/framework.php`
 - scheduled GitHub or GitLab update PRs for WordPress core and managed dependencies
 - scheduled GitHub or GitLab PRs when a newer `wp-core-base` framework release is available
-- support for WordPress.org, GitHub Release, GitLab Release, and downstream-registered premium plugin sources
+- support for WordPress.org, GitHub Release, GitLab Release, generic JSON metadata endpoints, and downstream-registered premium plugin sources
 - support for project-owned custom code as first-class `local` runtime entries
 - optional staged-clean runtime assembly for richer local source trees
 - managed-dependency sanitation during update ingestion when upstream archives contain non-runtime metadata

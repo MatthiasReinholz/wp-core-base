@@ -104,6 +104,7 @@ Supported automated source types today:
 - `WordPress.org`
 - `github-release`
 - `gitlab-release`
+- `generic-json`
 
 Not every possible WordPress dependency source is supported by automation.
 
