@@ -6,12 +6,11 @@ namespace WpOrgPluginUpdater\Cli\Handlers;
 
 use WpOrgPluginUpdater\Cli\CliModeHandler;
 use WpOrgPluginUpdater\Config;
+use WpOrgPluginUpdater\AutomationClientFactory;
 use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkReleaseClient;
 use WpOrgPluginUpdater\FrameworkSyncer;
 use WpOrgPluginUpdater\GitCommandRunner;
-use WpOrgPluginUpdater\GitHubClient;
-use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\MutationLock;
 use WpOrgPluginUpdater\PrBodyRenderer;
@@ -46,19 +45,17 @@ final class FrameworkSyncModeHandler implements CliModeHandler
 
         $framework = FrameworkConfig::load($this->repoRoot);
         $checkOnly = isset($options['check-only']);
-        $gitHubClient = $checkOnly
+        $automationClient = $checkOnly
             ? null
-            : GitHubClient::fromEnvironment($this->httpClient, $this->config->githubApiBase(), $this->config->dryRun());
+            : AutomationClientFactory::fromEnvironment($this->config, $this->httpClient);
         $frameworkSyncer = new FrameworkSyncer(
             framework: $framework,
             repoRoot: $this->repoRoot,
             config: $this->config,
-            frameworkReleaseClient: new FrameworkReleaseClient(
-                new GitHubReleaseClient($this->httpClient, $this->config->githubApiBase())
-            ),
+            frameworkReleaseClient: new FrameworkReleaseClient($this->httpClient),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),
-            gitHubClient: $gitHubClient,
+            automationClient: $automationClient,
             gitRunner: new GitCommandRunner($this->repoRoot, $this->config->dryRun()),
             runtimeInspector: new RuntimeInspector($this->config->runtime),
         );

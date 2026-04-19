@@ -78,9 +78,8 @@ return [
         'api_base' => getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4',
     ],
     'automation' => [
-        // This example keeps automation on GitHub. See downstream-manifest-gitlab.php for a GitLab-first setup.
-        'provider' => 'github',
-        'api_base' => getenv('GITHUB_API_URL') ?: 'https://api.github.com',
+        'provider' => 'gitlab',
+        'api_base' => getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4',
         'base_branch' => null,
         'dry_run' => (bool) getenv('WPORG_UPDATE_DRY_RUN'),
         'managed_kinds' => ['plugin', 'theme'],
@@ -139,7 +138,6 @@ return [
             ],
         ],
         [
-            // Dependency source is independent from the automation host.
             'name' => 'Example GitLab Plugin',
             'slug' => 'example-gitlab-plugin',
             'kind' => 'plugin',

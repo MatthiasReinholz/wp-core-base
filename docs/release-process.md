@@ -14,6 +14,16 @@ Each release should be a deliberate, validated framework state that downstream u
 - the bundled WordPress baseline remains separate metadata in `.wp-core-base/framework.php` and in the release notes
 
 The source of truth for framework release identity is `.wp-core-base/framework.php`.
+It records exactly one authoritative official release source at a time.
+
+## Backward Compatibility
+
+The multi-host refactor keeps GitHub behavior as the compatibility baseline:
+
+- GitHub remains the default automation provider
+- existing `github-release` dependency definitions remain valid
+- legacy framework metadata that only records `repository` still loads
+- the framework release source stays singular, and the current official source remains GitHub Releases
 
 ## Required Release Files
 
@@ -52,8 +62,6 @@ php scripts/ci/verify_downstream_fixture.php --profile=full-core
 php scripts/ci/verify_downstream_fixture.php --profile=content-only
 ```
 
-Keep `stage-runtime --output` repo-relative. Absolute paths and traversal-style overrides are rejected.
-
 `release-verify` checks:
 
 - `.wp-core-base/framework.php` exists and is coherent
@@ -62,7 +70,7 @@ Keep `stage-runtime --output` repo-relative. Absolute paths and traversal-style 
 - required release-note sections are present
 - the bundled WordPress baseline is mentioned in the release notes
 - the public contract is coherent across README, framework metadata, manifest-managed dependency versions, and the current release notes
-- when `--artifact`, `--checksum-file`, and `--signature-file` are provided, the JSON checksum sidecar signature is verified with OpenSSL against the framework release public key before the artifact checksum is trusted
+- when `--artifact`, `--checksum-file`, and `--signature-file` are provided, the checksum sidecar signature verifies against the framework release public key before the artifact checksum is trusted
 - the built vendored snapshot checksum matches and the artifact installs into a temporary downstream copy
 
 ## GitHub Flow
@@ -75,11 +83,30 @@ The release flow is intentionally staged:
 - both publish workflows verify that the GitHub Release assets match the freshly built local snapshot after publication
 - `release-wp-core-base` is the manual recovery workflow for publishing a GitHub Release from an already existing tag after a failed finalize run, including checksum-sidecar signing and asset freshness checks against the current tag build
 
-The detached signature sidecar is a JSON document that records the checksum filename, its SHA-256 digest, the signature context, the `sha256` algorithm, and the base64 signature. The verification flow uses OpenSSL and the configured public key search path; it does not assume a specific key type in the docs contract.
-
 This keeps release intent reviewable in a PR instead of bundling version bumps, tagging, and publishing into one manual step.
 
 The artifact builder applies explicit exclusions for non-release material such as temp paths, CI-only scripts, and framework tests so the vendored snapshot boundary stays predictable.
+
+## Authoritative Source Changes
+
+The framework release source is intentionally singular.
+
+- `.wp-core-base/framework.php` records exactly one authoritative official release source at a time
+- downstream `framework-sync` follows the source recorded in the installed framework metadata
+- current upstream publication remains GitHub-specific until maintainers intentionally migrate that official source
+
+If the authoritative source ever moves to a different Git platform, treat it as a coordinated maintainer migration:
+
+1. prepare the future source host and confirm its API base, repository/project identifier, and release publication flow
+2. update `.wp-core-base/framework.php` in the migration release so the installed framework metadata points at the future source
+3. coordinate adoption of that release across downstreams before depending on the new host operationally
+4. publish all subsequent framework releases only on the new authoritative source
+
+Practical implication:
+
+- downstreams only follow the authoritative source recorded in their installed framework metadata
+- provider-neutral code does not make source moves transparent by itself
+- if the project ever develops long-lived downstreams that cannot move in coordination, add an explicit bridge-release process before attempting a host migration
 
 ## Release Signing
 
@@ -113,7 +140,7 @@ Key selection order during verification:
 - `--public-key` CLI override (if passed)
 - `tools/wporg-updater/keys/framework-release-public.pem`
 - `tools/wporg-updater/keys/framework-release-public-*.pem`
-- absolute paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated; relative paths are rejected)
+- absolute paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated)
 
 Emergency rotation (suspected compromise):
 

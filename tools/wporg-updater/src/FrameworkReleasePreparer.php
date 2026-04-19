@@ -136,7 +136,7 @@ final class FrameworkReleasePreparer
 
         $operationalNotes = sprintf(
             'The published framework asset for this release is `%s`.' . "\n\n" .
-            'Normal release flow: run `prepare-wp-core-base-release`, review and merge `release/v%s`, then let `finalize-wp-core-base-release` create the tag and publish the GitHub Release.',
+            'Normal release flow: run `prepare-wp-core-base-release`, review and merge `release/v%s`, then let `finalize-wp-core-base-release` create the tag and publish the authoritative framework release artifact.',
             $framework->assetName(),
             $targetVersion
         );

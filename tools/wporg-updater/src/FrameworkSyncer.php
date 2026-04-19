@@ -19,7 +19,7 @@ final class FrameworkSyncer
         private readonly FrameworkReleaseSource $frameworkReleaseClient,
         private readonly ReleaseClassifier $releaseClassifier,
         private readonly PrBodyRenderer $prBodyRenderer,
-        private readonly ?GitHubAutomationClient $gitHubClient,
+        private readonly ?AutomationClient $automationClient,
         private readonly GitRunnerInterface $gitRunner,
         private readonly RuntimeInspector $runtimeInspector,
     ) {
@@ -50,15 +50,15 @@ final class FrameworkSyncer
             return;
         }
 
-        if ($this->gitHubClient === null) {
-            throw new RuntimeException('framework-sync requires GITHUB_REPOSITORY and GITHUB_TOKEN unless --check-only is used.');
+        if ($this->automationClient === null) {
+            throw new RuntimeException('framework-sync requires the configured automation environment unless --check-only is used.');
         }
 
         $this->gitRunner->assertCleanWorktree();
-        $defaultBranch = $this->config?->baseBranch() ?? $this->gitHubClient->getDefaultBranch();
+        $defaultBranch = $this->config?->baseBranch() ?? $this->automationClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
-        $this->gitHubClient->ensureLabels(self::labelDefinitions());
-        $openPrs = $this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests('automation:framework-update'));
+        $this->automationClient->ensureLabels(self::labelDefinitions());
+        $openPrs = $this->indexFrameworkPullRequests($this->automationClient->listOpenPullRequests('automation:framework-update'));
         $plannedPrs = [];
 
         foreach ($openPrs as $pr) {
@@ -90,7 +90,7 @@ final class FrameworkSyncer
 
         foreach ($plannedPrs as $plannedPr) {
             $blockedBy = ManagedPullRequestQueue::blockedByForPlannedPullRequest(
-                $this->gitHubClient,
+                $this->automationClient,
                 (array) (($plannedPr['metadata']['blocked_by'] ?? [])),
                 $activePlannedPrs
             );
@@ -141,7 +141,7 @@ final class FrameworkSyncer
             throw new RuntimeException(sprintf('Managed framework pull request #%d has incomplete metadata.', $pullRequest['number']));
         }
 
-        $requiresCodeUpdate = AutomationPullRequestGuard::branchRefreshRequired($metadata, $baseRevision);
+        $requiresCodeUpdate = $this->branchRefreshRequired($metadata, $baseRevision);
 
         if (
             $this->releaseClassifier->samePatchLine($targetVersion, $latestVersion) &&
@@ -181,7 +181,7 @@ final class FrameworkSyncer
             throw new RuntimeException(sprintf('Managed framework pull request #%d is missing a branch name.', $plannedPr['number']));
         }
 
-        AutomationPullRequestGuard::assertRefreshable($plannedPr, $branch, $defaultBranch, 'Framework automation PR');
+        $this->assertRefreshableAutomationPullRequest($plannedPr, $branch, $defaultBranch);
 
         $branchGuard = (bool) $plannedPr['requires_code_update'] ? $this->beginBranchRollbackGuard($branch) : null;
 
@@ -251,7 +251,9 @@ final class FrameworkSyncer
                 releaseScope: $scope,
                 releaseAt: $releaseAt,
                 labels: $labels,
-                sourceRepository: $this->framework->repository,
+                sourceReferenceLabel: $this->framework->releaseSourceReferenceLabel(),
+                sourceReference: $this->framework->releaseSourceReference(),
+                sourceReferenceUrl: $this->framework->releaseSourceReferenceUrl(),
                 releaseUrl: (string) $releaseData['release_url'],
                 currentBaseline: (string) ($metadata['base_wordpress_core'] ?? $this->framework->baseline['wordpress_core']),
                 targetBaseline: (string) $releaseData['target_wordpress_core'],
@@ -260,9 +262,9 @@ final class FrameworkSyncer
                 metadata: $metadata,
             );
 
-            $this->gitHubClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
-            $this->gitHubClient->setLabels((int) $plannedPr['number'], $labels);
-            ManagedPullRequestQueue::syncDraftState($this->gitHubClient, $plannedPr, $blockedBy);
+            $this->automationClient->updatePullRequest((int) $plannedPr['number'], $title, $body);
+            $this->automationClient->setPullRequestLabels((int) $plannedPr['number'], $labels);
+            ManagedPullRequestQueue::syncDraftState($this->automationClient, $plannedPr, $blockedBy);
 
             if ($branchGuard !== null) {
                 $branchGuard->complete();
@@ -343,7 +345,9 @@ final class FrameworkSyncer
                 releaseScope: $scope,
                 releaseAt: (string) $latestRelease['release_at'],
                 labels: $labels,
-                sourceRepository: $this->framework->repository,
+                sourceReferenceLabel: $this->framework->releaseSourceReferenceLabel(),
+                sourceReference: $this->framework->releaseSourceReference(),
+                sourceReferenceUrl: $this->framework->releaseSourceReferenceUrl(),
                 releaseUrl: (string) $latestRelease['release_url'],
                 currentBaseline: $baseFramework->baseline['wordpress_core'],
                 targetBaseline: $this->framework->baseline['wordpress_core'],
@@ -352,8 +356,8 @@ final class FrameworkSyncer
                 metadata: $metadata,
             );
 
-            $pullRequest = $this->gitHubClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
-            $this->gitHubClient->setLabels((int) $pullRequest['number'], $labels);
+            $pullRequest = $this->automationClient->createPullRequest($title, $branch, $defaultBranch, $body, $blockedBy !== []);
+            $this->automationClient->setPullRequestLabels((int) $pullRequest['number'], $labels);
             $branchGuard->complete();
         } catch (\Throwable $throwable) {
             $branchGuard->rollback($throwable);
@@ -506,7 +510,7 @@ final class FrameworkSyncer
         foreach ($pullRequests as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
-            if ($metadata === null || ($metadata['component_key'] ?? null) !== self::COMPONENT_KEY || ! AutomationPullRequestGuard::isSameRepositoryAutomationPullRequest($pullRequest)) {
+            if ($metadata === null || ($metadata['component_key'] ?? null) !== self::COMPONENT_KEY || ! $this->isManagedRepositoryPullRequest($pullRequest)) {
                 continue;
             }
 
@@ -539,7 +543,7 @@ final class FrameworkSyncer
     private function closeSupersededPullRequest(int $number, string $reason): void
     {
         fwrite(STDOUT, sprintf("Closing PR #%d: %s\n", $number, $reason));
-        $this->gitHubClient->closePullRequest($number, $reason);
+        $this->automationClient->closePullRequest($number, $reason);
     }
 
     /**
@@ -549,7 +553,7 @@ final class FrameworkSyncer
     {
         $matching = [];
 
-        foreach ($this->indexFrameworkPullRequests($this->gitHubClient->listOpenPullRequests('automation:framework-update')) as $pullRequest) {
+        foreach ($this->indexFrameworkPullRequests($this->automationClient->listOpenPullRequests('automation:framework-update')) as $pullRequest) {
             $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
 
             if (($metadata['target_version'] ?? null) === $targetVersion) {
@@ -587,4 +591,58 @@ final class FrameworkSyncer
         return $guard;
     }
 
+    /**
+     * @param array<string, mixed> $metadata
+     */
+    private function branchRefreshRequired(array $metadata, string $baseRevision): bool
+    {
+        if ($baseRevision === '') {
+            return false;
+        }
+
+        $recordedBaseRevision = $metadata['base_revision'] ?? null;
+
+        return ! is_string($recordedBaseRevision)
+            || $recordedBaseRevision === ''
+            || ! hash_equals($recordedBaseRevision, $baseRevision);
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function assertRefreshableAutomationPullRequest(array $pullRequest, string $branch, string $defaultBranch): void
+    {
+        $baseRef = (string) ($pullRequest['base']['ref'] ?? '');
+
+        if ($branch === $defaultBranch || ($baseRef !== '' && $branch === $baseRef)) {
+            throw new RuntimeException(sprintf(
+                'Framework automation PR #%d resolved to protected branch %s and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0),
+                $branch
+            ));
+        }
+
+        if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
+            throw new RuntimeException(sprintf(
+                'Framework automation PR #%d does not use a same-repository automation branch and will not be refreshed.',
+                (int) ($pullRequest['number'] ?? 0)
+            ));
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $pullRequest
+     */
+    private function isManagedRepositoryPullRequest(array $pullRequest): bool
+    {
+        $head = is_array($pullRequest['head'] ?? null) ? $pullRequest['head'] : [];
+        $base = is_array($pullRequest['base'] ?? null) ? $pullRequest['base'] : [];
+        $headRef = (string) ($head['ref'] ?? '');
+        $headRepo = is_array($head['repo'] ?? null) ? $head['repo'] : [];
+        $baseRepo = is_array($base['repo'] ?? null) ? $base['repo'] : [];
+        $headFullName = strtolower((string) ($headRepo['full_name'] ?? ''));
+        $baseFullName = strtolower((string) ($baseRepo['full_name'] ?? ''));
+
+        return $headRef !== '' && $headFullName !== '' && $headFullName === $baseFullName;
+    }
 }

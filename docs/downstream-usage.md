@@ -57,12 +57,14 @@ That is preferred over unignoring the whole `vendor/` tree. It keeps `framework-
 
 It:
 
-- checks GitHub Releases for a newer `wp-core-base` version
+- checks the authoritative `wp-core-base` release source declared in `.wp-core-base/framework.php` for a newer framework version
 - updates the vendored framework snapshot
 - refreshes framework-managed workflows when they still match the last managed version
 - leaves locally customized workflow files untouched and reports that drift in the PR
 
 The scaffolded downstream setup includes a weekly `wp-core-base` self-update workflow.
+
+The framework release source is singular. If upstream ever moves the official framework release source to another Git platform, downstreams will follow the source recorded in their installed `.wp-core-base/framework.php` only after they adopt the migration release that updates that metadata. The framework does not maintain parallel legacy-source discovery.
 
 ## Dependency Classes
 
@@ -87,13 +89,15 @@ Today the framework supports automated updates from:
 
 - `WordPress.org`
 - `github-release`
+- `gitlab-release`
 - `premium`
 
-GitHub support is release-backed. The repository must publish stable GitHub Releases. Raw tags without Releases are not treated as the source of truth.
+Hosted release support is release-backed. The upstream project must publish stable GitHub or GitLab Releases. Raw tags without Releases are not treated as the source of truth.
 
 For private GitHub dependencies, the manifest should point to an environment variable through `source_config.github_token_env`.
+For private GitLab dependencies, the manifest should point to an environment or CI/CD variable through `source_config.gitlab_token_env`.
 
-GitHub release-backed dependencies may also opt into two download-time trust controls:
+Hosted release-backed dependencies may also opt into two download-time trust controls:
 
 - release cooldowns through `security.managed_release_min_age_hours` or `source_config.min_release_age_hours`
 - checksum-sidecar verification through `security.github_release_verification`, `source_config.verification_mode`, and `source_config.checksum_asset_pattern`
@@ -102,7 +106,7 @@ Use those only after checking the real upstream release assets. The framework bi
 
 For AI coding agents working in a downstream repo, the safe sequence is:
 
-1. inspect the GitHub Release assets
+1. inspect the hosted Release assets
 2. confirm the ZIP asset glob
 3. confirm the checksum sidecar asset glob
 4. update the manifest
@@ -240,8 +244,6 @@ Typical command:
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 ```
 
-The `--output` override must stay repo-relative. Absolute paths and traversal-style values are rejected so staging cannot escape the repository boundary.
-
 Use the staged directory as the input to:
 
 - Docker `COPY`
@@ -284,7 +286,7 @@ Most downstream teams only need these commands:
 
 ```bash
 php tools/wporg-updater/bin/wporg-updater.php doctor
-php tools/wporg-updater/bin/wporg-updater.php doctor --github
+php tools/wporg-updater/bin/wporg-updater.php doctor --automation
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --output=.wp-core-base/build/runtime
 php tools/wporg-updater/tests/run.php
 ```
@@ -330,7 +332,8 @@ project/
 
 ## Examples
 
-- example downstream manifest: [examples/downstream-manifest.php](examples/downstream-manifest.php)
+- example downstream manifest (GitHub-first): [examples/downstream-manifest.php](examples/downstream-manifest.php)
+- example downstream manifest (GitLab-first): [examples/downstream-manifest-gitlab.php](examples/downstream-manifest-gitlab.php)
 - example scheduled/manual updates workflow: [examples/downstream-workflow.yml](examples/downstream-workflow.yml)
 - example merged-PR reconciliation workflow: [examples/downstream-updates-reconcile-workflow.yml](examples/downstream-updates-reconcile-workflow.yml)
 - example framework self-update workflow: [examples/downstream-framework-self-update-workflow.yml](examples/downstream-framework-self-update-workflow.yml)

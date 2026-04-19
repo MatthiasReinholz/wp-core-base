@@ -19,6 +19,7 @@ final class FrameworkInstaller
      * @return array{
      *   changed_paths:list<string>,
      *   refreshed_files:list<string>,
+     *   removed_files:list<string>,
      *   skipped_files:list<string>,
      *   framework_version:string,
      *   wordpress_core:string,
@@ -49,21 +50,70 @@ final class FrameworkInstaller
             $pathSwapper->swap($targetPath, $stagingPath, $backupPath, $this->repoRoot);
             $swappedIntoPlace = true;
             $downstreamConfig = Config::load($this->repoRoot);
-            $renderedFiles = (new DownstreamScaffolder($targetPath, $this->repoRoot))->renderFrameworkManagedFiles($distributionPath, [], $downstreamConfig->paths);
+            $renderedFiles = (new DownstreamScaffolder($targetPath, $this->repoRoot))->renderFrameworkManagedFiles(
+                $distributionPath,
+                [],
+                $downstreamConfig->paths,
+                $downstreamConfig->automationProvider()
+            );
+            $previousRenderedFiles = $this->previousRenderedFrameworkManagedFiles(
+                $backupPath,
+                $distributionPath,
+                $downstreamConfig
+            );
             $managedFileChecksums = [];
             $changedPaths = [$distributionPath];
             $refreshedFiles = [];
+            $removedFiles = [];
             $skippedFiles = [];
+            $staleManagedFiles = array_diff_key($currentFramework->managedFiles(), $renderedFiles);
+
+            foreach ($staleManagedFiles as $relativePath => $managedChecksum) {
+                $absolutePath = $this->repoRoot . '/' . $relativePath;
+
+                if (! file_exists($absolutePath) && ! is_link($absolutePath)) {
+                    continue;
+                }
+
+                if (is_file($absolutePath)) {
+                    $currentChecksum = $this->contentsChecksum((string) file_get_contents($absolutePath));
+
+                    if (! hash_equals((string) $managedChecksum, $currentChecksum)) {
+                        $skippedFiles[] = $relativePath;
+                        continue;
+                    }
+                }
+
+                $managedFileStates[$relativePath] ??= $this->captureFileState(
+                    $absolutePath,
+                    $stateBackupRoot . '/managed/' . str_replace('/', '--', $relativePath)
+                );
+                $this->runtimeInspector->clearPath($absolutePath);
+                $removedFiles[] = $relativePath;
+                $changedPaths[] = $relativePath;
+            }
 
             foreach ($renderedFiles as $relativePath => $contents) {
                 $absolutePath = $this->repoRoot . '/' . $relativePath;
                 $managedChecksum = $currentFramework->managedFiles()[$relativePath] ?? null;
+                $renderedChecksum = $this->contentsChecksum($contents);
 
                 if ($managedChecksum !== null && is_file($absolutePath)) {
                     $currentChecksum = $this->contentsChecksum((string) file_get_contents($absolutePath));
 
                     if (! hash_equals($managedChecksum, $currentChecksum)) {
                         $managedFileChecksums[$relativePath] = $managedChecksum;
+                        $skippedFiles[] = $relativePath;
+                        continue;
+                    }
+                } elseif ($managedChecksum === null && is_file($absolutePath)) {
+                    $currentChecksum = $this->contentsChecksum((string) file_get_contents($absolutePath));
+                    $previousRenderedChecksum = isset($previousRenderedFiles[$relativePath])
+                        ? $this->contentsChecksum($previousRenderedFiles[$relativePath])
+                        : null;
+
+                    if ($previousRenderedChecksum === null || ! hash_equals($previousRenderedChecksum, $currentChecksum)) {
+                        $managedFileChecksums[$relativePath] = $currentChecksum;
                         $skippedFiles[] = $relativePath;
                         continue;
                     }
@@ -81,7 +131,7 @@ final class FrameworkInstaller
                 );
                 (new AtomicFileWriter())->write($absolutePath, $contents);
 
-                $managedFileChecksums[$relativePath] = $this->contentsChecksum($contents);
+                $managedFileChecksums[$relativePath] = $renderedChecksum;
                 $refreshedFiles[] = $relativePath;
                 $changedPaths[] = $relativePath;
             }
@@ -91,6 +141,7 @@ final class FrameworkInstaller
                 wordPressCoreVersion: $payloadFramework->baseline['wordpress_core'],
                 managedComponents: $payloadFramework->baseline['managed_components'],
                 managedFiles: $managedFileChecksums,
+                releaseSource: $payloadFramework->releaseSource,
                 distributionPath: $distributionPath
             );
             $frameworkState = $this->captureFileState($framework->path, $stateBackupRoot . '/framework.php');
@@ -106,6 +157,7 @@ final class FrameworkInstaller
             return [
                 'changed_paths' => array_values(array_unique($changedPaths)),
                 'refreshed_files' => $refreshedFiles,
+                'removed_files' => $removedFiles,
                 'skipped_files' => $skippedFiles,
                 'framework_version' => $framework->version,
                 'wordpress_core' => $framework->baseline['wordpress_core'],
@@ -139,6 +191,27 @@ final class FrameworkInstaller
     private function contentsChecksum(string $contents): string
     {
         return 'sha256:' . hash('sha256', $contents);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function previousRenderedFrameworkManagedFiles(string $frameworkRoot, string $distributionPath, Config $config): array
+    {
+        if (! is_dir($frameworkRoot)) {
+            return [];
+        }
+
+        try {
+            return (new DownstreamScaffolder($frameworkRoot, $this->repoRoot))->renderFrameworkManagedFiles(
+                $distributionPath,
+                [],
+                $config->paths,
+                $config->automationProvider()
+            );
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     /**

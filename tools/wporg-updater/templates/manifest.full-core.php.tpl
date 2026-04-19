@@ -25,6 +25,8 @@ return [
             '.git',
             '.github',
             '.gitlab',
+            '.gitea',
+            '.forgejo',
             '.circleci',
             '.wordpress-org',
             'node_modules',
@@ -43,6 +45,8 @@ return [
             'CHANGELOG*',
             '.gitignore',
             '.gitattributes',
+            '.gitlab-ci.yml',
+            'bitbucket-pipelines.yml',
             'phpunit.xml*',
             'composer.json',
             'composer.lock',
@@ -60,7 +64,12 @@ return [
     'github' => [
         'api_base' => getenv('GITHUB_API_URL') ?: 'https://api.github.com',
     ],
+    'gitlab' => [
+        'api_base' => getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4',
+    ],
     'automation' => [
+        'provider' => '__AUTOMATION_PROVIDER__',
+        'api_base' => __AUTOMATION_API_BASE__,
         'base_branch' => null,
         'dry_run' => false,
         'managed_kinds' => __MANAGED_KINDS__,

@@ -23,29 +23,26 @@ final class CommandHelp
     {
         return <<<TEXT
 Usage:
-  Routine downstream commands (most users):
   {$commandPrefix} add-dependency --source=local --kind=plugin --path=wp-content/plugins/project-plugin
   {$commandPrefix} adopt-dependency --kind=plugin --slug=woocommerce --source=wordpress.org --preserve-version
-  {$phpCommandPrefix} doctor [--repo-root=/path] [--github] [--json]
-  {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime] [--json]
-  {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
-  {$phpCommandPrefix} suggest-manifest [--repo-root=/path]
-  {$phpCommandPrefix} format-manifest [--repo-root=/path]
-  {$phpCommandPrefix} add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
-  {$phpCommandPrefix} adopt-dependency [--repo-root=/path] --source=wordpress.org|github-release|premium --kind=... --slug=... [--preserve-version]
-  {$phpCommandPrefix} remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
-  {$phpCommandPrefix} list-dependencies [--repo-root=/path]
-  {$phpCommandPrefix} sync [--repo-root=/path] [--report-json=...] [--fail-on-source-errors]
-
-  Maintainer/workflow commands:
+  {$phpCommandPrefix} sync
   {$phpCommandPrefix} render-sync-report --report-json=.wp-core-base/build/sync-report.json [--summary-path=/tmp/summary.md]
   {$phpCommandPrefix} sync-report-issue --report-json=.wp-core-base/build/sync-report.json
-  {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--force] [--adopt-existing-managed-files]
+  {$phpCommandPrefix} doctor [--repo-root=/path] [--automation] [--github] [--json]
+  {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime] [--json]
+  {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
+  {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--automation-provider=github|gitlab] [--force] [--adopt-existing-managed-files]
   {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only]
-  {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1] [--allow-current-version]
+  {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
   {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--json]
   {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
   {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0] [--artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig [--public-key-file=/path/to/framework-release-public.pem]] [--json]
+  {$phpCommandPrefix} suggest-manifest [--repo-root=/path]
+  {$phpCommandPrefix} format-manifest [--repo-root=/path]
+  {$phpCommandPrefix} add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
+  {$phpCommandPrefix} adopt-dependency [--repo-root=/path] --source=wordpress.org|github-release|gitlab-release|premium --kind=... --slug=... [--preserve-version]
+  {$phpCommandPrefix} remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
+  {$phpCommandPrefix} list-dependencies [--repo-root=/path]
   {$phpCommandPrefix} scaffold-premium-provider [--repo-root=/path] --provider=your-provider [--class=Project\\WpCoreBase\\Premium\\YourProviderManagedSource] [--path=.wp-core-base/premium-providers/your-provider.php]
   {$phpCommandPrefix} pr-blocker [--pr-number=123] [--json]
   {$phpCommandPrefix} pr-blocker-reconcile [--json]
@@ -56,11 +53,6 @@ Use:
   {$commandPrefix} help remove-dependency
   {$commandPrefix} help scaffold-premium-provider
   {$commandPrefix} help sync
-
-Notes:
-  - Most downstream users only need the routine command group above.
-  - `stage-runtime --output` must stay repo-relative; absolute paths and traversal are rejected.
-  - `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` accepts comma-separated absolute paths only.
 
 TEXT;
     }
@@ -75,7 +67,7 @@ Purpose:
 
 Common flags:
   --repo-root=PATH
-  --source=wordpress.org|github-release|premium|local
+  --source=wordpress.org|github-release|gitlab-release|premium|local
   --kind=plugin|theme|mu-plugin-package|mu-plugin-file|runtime-file|runtime-directory
   --slug=SLUG
   --path=PATH
@@ -85,6 +77,10 @@ Common flags:
   --github-repository=OWNER/REPO
   --github-release-asset-pattern=PATTERN
   --github-token-env=ENV_NAME
+  --gitlab-project=GROUP/PROJECT
+  --gitlab-release-asset-pattern=PATTERN
+  --gitlab-token-env=ENV_NAME
+  --gitlab-api-base=URL
   --credential-key=LOOKUP_KEY
   --provider=KEY
   --provider-product-id=ID
@@ -107,10 +103,11 @@ Notes:
 
 Examples:
   {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce
-  {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce --version=10.7.0 --replace
-  {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin
-  {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --private
-  {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --archive-subdir=private-plugin
+  {$commandPrefix} add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=woocommerce --version=10.6.2 --replace
+  {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --github-release-asset-pattern='*.zip'
+  {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --github-release-asset-pattern='*.zip' --private
+  {$commandPrefix} add-dependency --repo-root=. --source=github-release --kind=plugin --slug=private-plugin --github-repository=owner/private-plugin --github-release-asset-pattern='*.zip' --archive-subdir=private-plugin
+  {$commandPrefix} add-dependency --repo-root=. --source=gitlab-release --kind=plugin --slug=private-plugin --gitlab-project=group/private-plugin --gitlab-release-asset-pattern='*.zip'
   {$commandPrefix} scaffold-premium-provider --repo-root=. --provider=example-vendor
   {$commandPrefix} add-dependency --repo-root=. --source=premium --provider=example-vendor --kind=plugin --slug=premium-plugin
   {$commandPrefix} add-dependency --repo-root=. --source=local --kind=plugin --path=cms/plugins/project-plugin
@@ -131,6 +128,7 @@ Purpose:
 Current scope:
   - local -> wordpress.org
   - local -> github-release
+  - local -> gitlab-release
   - local -> premium
 
 Common flags:
@@ -139,12 +137,16 @@ Common flags:
   --slug=SLUG
   --kind=KIND
   --from-source=local
-  --source=wordpress.org|github-release|premium
+  --source=wordpress.org|github-release|gitlab-release|premium
   --version=VERSION
   --preserve-version
   --github-repository=OWNER/REPO
   --github-release-asset-pattern=PATTERN
   --github-token-env=ENV_NAME
+  --gitlab-project=GROUP/PROJECT
+  --gitlab-release-asset-pattern=PATTERN
+  --gitlab-token-env=ENV_NAME
+  --gitlab-api-base=URL
   --credential-key=LOOKUP_KEY
   --provider=KEY
   --provider-product-id=ID
@@ -163,8 +165,9 @@ Notes:
 
 Examples:
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=woocommerce --source=wordpress.org --preserve-version
-  {$commandPrefix} adopt-dependency --repo-root=. --component-key=plugin:local:woocommerce --source=wordpress.org --version=10.7.0
-  {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=private-plugin --source=github-release --github-repository=owner/private-plugin --preserve-version
+  {$commandPrefix} adopt-dependency --repo-root=. --component-key=plugin:local:woocommerce --source=wordpress.org --version=10.6.2
+  {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=private-plugin --source=github-release --github-repository=owner/private-plugin --github-release-asset-pattern='*.zip' --preserve-version
+  {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=private-plugin --source=gitlab-release --gitlab-project=group/private-plugin --gitlab-release-asset-pattern='*.zip' --preserve-version
   {$commandPrefix} scaffold-premium-provider --repo-root=. --provider=example-vendor
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=premium-plugin --source=premium --provider=example-vendor --preserve-version
   {$commandPrefix} adopt-dependency --repo-root=. --kind=plugin --slug=blocksy-companion --source=wordpress.org --preserve-version --archive-subdir=blocksy-companion

@@ -24,10 +24,22 @@ final class OutputRedactor
 
         $redacted = self::redactBearerTokens($redacted);
         $redacted = self::redactAuthorizationHeaders($redacted);
+        $redacted = self::redactKnownTokenFormats($redacted);
         $redacted = self::redactKnownSecretEnvValues($redacted);
         $redacted = self::redactUrls($redacted);
 
         return $redacted;
+    }
+
+    public static function redactHttpBody(string $body, int $maxLength = 512): string
+    {
+        $redacted = trim(preg_replace('/\s+/', ' ', self::redact($body)) ?? self::redact($body));
+
+        if (strlen($redacted) <= $maxLength) {
+            return $redacted;
+        }
+
+        return substr($redacted, 0, $maxLength) . '...[truncated]';
     }
 
     /**
@@ -49,6 +61,21 @@ final class OutputRedactor
     {
         $message = preg_replace('/(Authorization:\s*Bearer\s+)[^\s]+/i', '$1[REDACTED]', $message) ?? $message;
         return preg_replace('/(Authorization:\s*Basic\s+)[^\s]+/i', '$1[REDACTED]', $message) ?? $message;
+    }
+
+    private static function redactKnownTokenFormats(string $message): string
+    {
+        $patterns = [
+            '/\bgh[pousr]_[A-Za-z0-9_]{20,}\b/' => '[REDACTED]',
+            '/\bgithub_pat_[A-Za-z0-9_]{20,}\b/' => '[REDACTED]',
+            '/\bgl(?:pat|oas|ptt|rt|dt)-[A-Za-z0-9._-]{10,}\b/' => '[REDACTED]',
+        ];
+
+        foreach ($patterns as $pattern => $replacement) {
+            $message = preg_replace($pattern, $replacement, $message) ?? $message;
+        }
+
+        return $message;
     }
 
     private static function redactKnownSecretEnvValues(string $message): string
@@ -76,7 +103,9 @@ final class OutputRedactor
 
     private static function isKnownSecretEnvName(string $name): bool
     {
-        if ($name === 'GITHUB_TOKEN' || $name === PremiumCredentialsStore::envName()) {
+        if (
+            in_array($name, ['GITHUB_TOKEN', 'GITLAB_TOKEN', 'CI_JOB_TOKEN', PremiumCredentialsStore::envName()], true)
+        ) {
             return true;
         }
 

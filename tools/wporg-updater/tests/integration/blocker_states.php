@@ -43,6 +43,27 @@ function run_blocker_state_tests(callable $assert): void
     $closedPredecessorStatus = (new PullRequestBlocker($closedPredecessorReader))->evaluateCurrentPullRequestStatus();
     $assert($closedPredecessorStatus['status'] !== PullRequestBlocker::STATUS_BLOCKED, 'Expected pr-blocker to ignore closed predecessors that were not merged.');
 
+    $metadataWithIdentityFields = '<!-- wporg-update-metadata: {"component_key":"plugin:premium:example-vendor:demo-plugin","kind":"plugin","source":"premium","slug":"demo-plugin","provider":"example-vendor","target_version":"2.1.0","blocked_by":[]} -->';
+    file_put_contents($eventPath, json_encode([
+        'pull_request' => [
+            'number' => 10,
+            'body' => $metadataWithIdentityFields,
+        ],
+    ], JSON_THROW_ON_ERROR));
+    putenv('GITHUB_EVENT_PATH=' . $eventPath);
+
+    $conflictingIdentityReader = new FakePullRequestReader(
+        openPullRequests: [
+            [
+                'number' => 8,
+                'body' => '<!-- wporg-update-metadata: {"component_key":"plugin:premium:example-vendor:demo-plugin","kind":"plugin","source":"premium","slug":"different-plugin","provider":"example-vendor","target_version":"2.0.5"} -->',
+            ],
+        ],
+        pullRequestsByNumber: []
+    );
+    $conflictingIdentityStatus = (new PullRequestBlocker($conflictingIdentityReader))->evaluateCurrentPullRequestStatus();
+    $assert($conflictingIdentityStatus['status'] === PullRequestBlocker::STATUS_CLEAR, 'Expected pr-blocker to ignore open PRs that share component_key but conflict on explicit identity fields.');
+
     $degradedReader = new FakePullRequestReader(
         openPullRequests: [],
         listFailure: new RuntimeException('GitHub API unavailable.')
@@ -50,6 +71,14 @@ function run_blocker_state_tests(callable $assert): void
     $degradedStatus = (new PullRequestBlocker($degradedReader))->evaluateCurrentPullRequestStatus();
     $assert($degradedStatus['status'] === PullRequestBlocker::STATUS_DEGRADED, 'Expected pr-blocker to report degraded status when GitHub verification fails.');
     $assert($degradedStatus['exit_code'] === 1, 'Expected degraded pr-blocker status to fail closed while GitHub verification is unavailable.');
+
+    file_put_contents($eventPath, json_encode([
+        'pull_request' => [
+            'number' => 9,
+            'body' => $metadataComment,
+        ],
+    ], JSON_THROW_ON_ERROR));
+    putenv('GITHUB_EVENT_PATH=' . $eventPath);
 
     $degradedPredecessorReader = new FakePullRequestReader(
         openPullRequests: [],

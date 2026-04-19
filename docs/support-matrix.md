@@ -2,24 +2,38 @@
 
 This document lists what `wp-core-base` supports today, what it supports with constraints, and what remains outside the current automation scope.
 
+## Automation Hosts
+
+| Host | Status | Notes |
+| --- | --- | --- |
+| GitHub.com | First-class | Default hosted automation path. |
+| GitLab.com | First-class | First-class hosted automation path. |
+| GitHub Enterprise | Supported with constraints | Set `github.api_base` and `automation.api_base` to the instance API. |
+| self-managed GitLab | Supported with constraints | Set `gitlab.api_base` and `automation.api_base` to the instance API, or rely on `CI_API_V4_URL`. |
+| other Git hosts, manual usage | Supported with constraints | Base/repo model works; first-class hosted PR automation does not. |
+| Gitea | Not yet supported | No native automation provider yet. |
+| Forgejo | Not yet supported | No native automation provider yet. |
+| Bitbucket | Not yet supported | No native automation provider yet. |
+
 ## Repository Profiles
 
 | Area | Status | Notes |
 | --- | --- | --- |
 | `full-core` downstreams | Supported | WordPress core is committed in the downstream repo. |
-| `content-only` downstreams | Supported | WordPress core is external to the downstream repo, and the framework stages content/runtime payloads rather than installing or bootstrapping core. |
-| image-first downstreams | Supported | `stage-runtime` is the intended build contract, and the image or platform layer still owns WordPress core bootstrap. |
-| multisite downstreams | Supported with constraints | Treat the repo-wide content roots, governance, and runtime rules as one network-wide posture. |
+| `content-only` downstreams | Supported | WordPress core is external to the downstream repo. |
+| image-first downstreams | Supported | `stage-runtime` is the intended build contract. |
 
 ## Deployment Models
 
 | Area | Status | Notes |
 | --- | --- | --- |
 | GitHub + CI/CD | Supported | Best fit for full automation. |
+| GitLab + CI/CD | Supported | First-class hosted automation path. |
 | GitHub + FTP/SFTP deployment | Supported | GitHub handles PR automation; FTP handles delivery. |
+| GitLab + FTP/SFTP deployment | Supported | GitLab handles PR automation; FTP handles delivery. |
 | GitHub + manual deployment | Supported | Review/update flow still works. |
-| no GitHub, manual usage | Supported with constraints | Base/repo model works; automated PRs do not. |
-| vendored `wp-core-base` self-update PRs | Supported | Uses `.wp-core-base/framework.php` plus GitHub Releases. |
+| GitLab + manual deployment | Supported | Review/update flow still works. |
+| vendored `wp-core-base` self-update PRs | Supported with constraints | Uses `.wp-core-base/framework.php`; downstream automation works on GitHub and GitLab, and the framework metadata records one authoritative official release source at a time. The current source is GitHub Releases. |
 
 ## Runtime Ownership
 
@@ -50,8 +64,12 @@ This document lists what `wp-core-base` supports today, what it supports with co
 | WordPress.org themes | Supported | First-class automated source. |
 | public GitHub Releases | Supported | Requires stable Releases. |
 | private GitHub Releases | Supported with constraints | Requires token env and release-backed artifacts. |
+| public GitLab Releases | Supported | Requires stable Releases with linked package artifacts. |
+| private GitLab Releases | Supported with constraints | Requires token env and release-backed artifacts. |
 | downstream-registered premium providers | Supported with constraints | Uses `source: premium`, a provider registered in `.wp-core-base/premium-providers.php`, and `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`. |
 | raw GitHub tags without Releases | Not supported | GitHub Releases are the source of truth. |
+| raw GitLab tags without Releases | Not supported | GitLab Releases are the source of truth. |
+| Bitbucket downloads | Not supported | No native automation path today. |
 | WooCommerce.com | Not supported | No native automation path today. |
 | Composer as managed source | Not supported | Can coexist downstream, but not as native updater source. |
 | manual vendoring / copy-paste as managed source | Not supported | Manual code can exist, but not as automated managed source. |

@@ -9,6 +9,16 @@ If you want the routine add/remove workflow, read [managing-dependencies.md](man
 
 The manifest remains the source of truth, but common entry creation does not need to be hand-written. Prefer the CLI for normal tasks such as adding a plugin, MU plugin file, or runtime directory.
 
+## Mental Model
+
+Treat these as separate decisions:
+
+- `automation.provider`: where update PR or MR automation runs
+- dependency `source`: where a managed dependency release archive comes from
+- `.wp-core-base/framework.php` `release_source`: where the framework itself is officially published
+
+They are intentionally orthogonal. A downstream can run automation on GitLab, consume a managed dependency from GitHub Releases, and still follow the current official `wp-core-base` framework release source.
+
 ## Top-Level Keys
 
 The manifest returns a PHP array with these sections:
@@ -18,6 +28,7 @@ The manifest returns a PHP array with these sections:
 - `core`
 - `runtime`
 - `github`
+- `gitlab`
 - `automation`
 - `security`
 - `dependencies`
@@ -29,10 +40,6 @@ Allowed values:
 - `full-core`
 - `content-only`
 
-Normalized parser default:
-
-- `full-core`
-
 ## `paths`
 
 Required keys:
@@ -42,54 +49,19 @@ Required keys:
 - `themes_root`
 - `mu_plugins_root`
 
-### Normalized parser defaults
-
-When `profile` is `full-core`, omitted path keys default to:
+Defaults for `full-core`:
 
 - `wp-content`
 - `wp-content/plugins`
 - `wp-content/themes`
 - `wp-content/mu-plugins`
 
-When `profile` is `content-only`, omitted path keys default to:
+Defaults for `content-only`:
 
 - `cms`
 - `cms/plugins`
 - `cms/themes`
 - `cms/mu-plugins`
-
-The generated admin-governance loader and data file follow `mu_plugins_root`. If you migrate any of the path roots, rerun `refresh-admin-governance` after updating the manifest so runtime governance metadata moves with the repo.
-
-### Scaffold And Example Defaults
-
-The scaffold templates and example manifests use the same path family, but they also set profile-specific runtime defaults.
-
-The committed example manifest in `docs/examples/downstream-manifest.php` follows the `content-only` path family and the strict/source-clean baseline.
-
-Scaffold defaults for `full-core`:
-
-- `core.mode`: `managed`
-- `core.enabled`: `true`
-- `runtime.manifest_mode`: `strict`
-- `runtime.validation_mode`: `source-clean`
-- `runtime.ownership_roots`: `plugins_root`, `themes_root`, `mu_plugins_root`
-- `automation.managed_kinds`: `plugin`, `theme`, `mu-plugin-package`
-- `runtime.staged_kinds`: all runtime kinds
-- `runtime.validated_kinds`: all runtime kinds
-
-Scaffold defaults for `content-only`:
-
-- `core.mode`: `external`
-- `core.enabled`: `false`
-- `runtime.manifest_mode`: `strict`
-- `runtime.validation_mode`: `source-clean`
-- `runtime.ownership_roots`: `plugins_root`, `themes_root`, `mu_plugins_root`
-- `automation.managed_kinds`: `plugin`, `theme`
-- `runtime.staged_kinds`: all runtime kinds
-- `runtime.validated_kinds`: all runtime kinds
-
-The `content-only-migration` scaffold preset keeps the same path family but switches `runtime.manifest_mode` to `relaxed` during migration.
-The `content-only-image-first` and `content-only-image-first-compact` presets keep `runtime.manifest_mode: strict`, switch `runtime.validation_mode` to `staged-clean`, and add `__CONTENT_ROOT__/languages` to `runtime.ownership_roots`.
 
 ## `core`
 
@@ -99,11 +71,6 @@ Keys:
 - `enabled`: `true` or `false`
 
 Use `managed` only when the repo actually contains WordPress core.
-
-Normalized parser defaults:
-
-- `core.mode`: `managed` when `profile` is `full-core`, `external` when `profile` is `content-only`
-- `core.enabled`: `true` when `core.mode` is `managed`, otherwise `false`
 
 ## `runtime`
 
@@ -125,33 +92,6 @@ Keys:
 
 These define the runtime hygiene contract for staging and validation.
 
-Normalized parser defaults:
-
-- `stage_dir`: `.wp-core-base/build/runtime`
-- `manifest_mode`: `strict`
-- `validation_mode`: `source-clean`
-- `ownership_roots`: `plugins_root`, `themes_root`, `mu_plugins_root`
-- `staged_kinds`: all runtime kinds
-- `validated_kinds`: all runtime kinds
-
-Default runtime hygiene lists:
-
-- `forbidden_paths`:
-  - `.git`, `.github`, `.gitlab`, `.circleci`, `.wordpress-org`, `node_modules`
-  - `docs`, `doc`, `tests`, `test`, `__tests__`
-  - `examples`, `example`, `demo`, `screenshots`
-- `forbidden_files`:
-  - `README*`, `CHANGELOG*`, `.gitignore`, `.gitattributes`
-  - `phpunit.xml*`, `composer.json`, `composer.lock`
-  - `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`
-- `managed_sanitize_paths`:
-  - For each root in `plugins_root`, `themes_root`, and `mu_plugins_root`, the normalizer adds:
-  - `.github`, `.gitlab`, `.circleci`, `.wordpress-org`, `node_modules`
-  - `docs`, `doc`, `tests`, `test`, `__tests__`
-  - `examples`, `example`, `demo`, `screenshots`
-- `managed_sanitize_files`:
-  - same list as `forbidden_files`
-
 `manifest_mode` may be:
 
 - `strict`: undeclared runtime paths under the managed roots are validation errors and are not staged
@@ -172,23 +112,37 @@ Keys:
 
 Use `getenv('GITHUB_API_URL') ?: 'https://api.github.com'` if you want GitHub Enterprise compatibility.
 
-Normalized parser default:
+## `gitlab`
 
-- `api_base`: `getenv('GITHUB_API_URL') ?: 'https://api.github.com'`
+Keys:
+
+- `api_base`
+
+Use `getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4'` for GitLab.com or GitLab CI. Override it for self-managed GitLab instances when `gitlab-release` dependencies should default to a different host.
 
 ## `automation`
 
 Keys:
 
+- `provider`
+- `api_base`
 - `base_branch`
 - `dry_run`
 - `managed_kinds`
 
+`provider` may be:
+
+- `github`
+- `gitlab`
+
+`api_base` should point at the automation host API for the selected provider.
+
+Examples:
+
+- GitHub.com: `getenv('GITHUB_API_URL') ?: 'https://api.github.com'`
+- GitLab.com: `getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4'`
+
 `managed_kinds` limits what `sync` may update. A dependency must be both `management: managed` and listed in `automation.managed_kinds` before the updater will touch it.
-
-Normalized parser default:
-
-- `managed_kinds`: `plugin`, `theme`, `mu-plugin-package`
 
 ## `security`
 
@@ -199,15 +153,13 @@ Keys:
 
 `managed_release_min_age_hours` defaults to `0`. Set it when you want `sync` to ignore very fresh upstream releases until they have aged for the configured number of hours.
 
-`github_release_verification` defaults to `checksum-sidecar-optional`. Set it to `none` if you do not want repo-level verification, or to `checksum-sidecar-required` if you want mandatory detached checksum sidecars for inherited `github-release` dependencies.
-
 `github_release_verification` may be:
 
 - `none`
 - `checksum-sidecar-optional`
 - `checksum-sidecar-required`
 
-This setting applies only to `github-release` dependencies that inherit verification mode from the repo-level default.
+This setting applies to hosted release dependencies that inherit verification mode from the repo-level default. The key name is kept for backward compatibility, but it currently covers both `github-release` and `gitlab-release`.
 
 ## Dependency Entry Shape
 
@@ -230,6 +182,10 @@ Each dependency entry supports:
         'github_repository' => null,
         'github_release_asset_pattern' => null,
         'github_token_env' => null,
+        'gitlab_project' => null,
+        'gitlab_release_asset_pattern' => null,
+        'gitlab_token_env' => null,
+        'gitlab_api_base' => null,
         'min_release_age_hours' => null,
         'verification_mode' => 'inherit',
         'checksum_asset_pattern' => null,
@@ -264,7 +220,7 @@ vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=.
   - `runtime-file`
   - `runtime-directory`
 - `management` must be `managed`, `local`, or `ignored`
-- `source` must be `wordpress.org`, `github-release`, `premium`, or `local`
+- `source` must be `wordpress.org`, `github-release`, `gitlab-release`, `premium`, or `local`
 - `managed` entries must define `version` and `checksum`
 - `local` entries may define `version`, but do not need `checksum`
 - `ignored` entries are excluded from runtime staging
@@ -373,6 +329,33 @@ Agent-safe rule:
 - use `checksum-sidecar-required` only when the checksum file exists and binds the digest to the ZIP filename
 - do not invent glob patterns from the tag name alone
 
+## Private GitLab Dependencies
+
+For a private GitLab release-backed dependency, use:
+
+- `source: 'gitlab-release'`
+- `source_config.gitlab_project`
+- `source_config.gitlab_release_asset_pattern`
+- `source_config.gitlab_token_env`
+- `source_config.gitlab_api_base` when the project is not on GitLab.com
+- `source_config.min_release_age_hours`
+- `source_config.verification_mode`
+- `source_config.checksum_asset_pattern`
+
+The token value itself should stay in environment or CI/CD variables, not in the manifest.
+
+If the upstream project publishes a detached checksum sidecar, set:
+
+- `source_config.gitlab_release_asset_pattern` to the actual ZIP asset
+- `source_config.checksum_asset_pattern` to the checksum sidecar asset
+
+Then choose either:
+
+- `source_config.verification_mode: checksum-sidecar-required`
+- or leave `inherit` and set `security.github_release_verification`
+
+If you want to rely on GitLab CI's built-in job token for release access, set `source_config.gitlab_token_env` to `CI_JOB_TOKEN`.
+
 Concrete hardened example:
 
 ```php
@@ -418,7 +401,7 @@ Concrete hardened example:
 
 ## Premium Managed Dependencies
 
-Premium managed plugin sources use one fixed env-var or GitHub secret contract:
+Premium managed plugin sources use one fixed env-var or CI/CD variable contract:
 
 - `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
 
@@ -455,4 +438,5 @@ Useful CLI helpers:
 
 ## Example
 
-Use [examples/downstream-manifest.php](examples/downstream-manifest.php) as the starting point.
+Use [examples/downstream-manifest.php](examples/downstream-manifest.php) as the GitHub-first starting point.
+Use [examples/downstream-manifest-gitlab.php](examples/downstream-manifest-gitlab.php) when the downstream automation host is GitLab.

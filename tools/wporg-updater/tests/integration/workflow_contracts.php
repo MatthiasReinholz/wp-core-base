@@ -40,7 +40,7 @@ function run_workflow_contract_tests(
     $assert(str_contains($scaffoldedUsage, '.wp-core-base/manifest.php'), 'Expected scaffolded usage guide to explain the manifest source of truth.');
     $assert(str_contains($scaffoldedAgents, '.wp-core-base/USAGE.md'), 'Expected scaffolded downstream AGENTS.md to point agents at the local usage guide first.');
     $assert(str_contains($scaffoldedAgents, 'Do not start by hand-editing `.wp-core-base/manifest.php`'), 'Expected scaffolded downstream AGENTS.md to steer agents toward the CLI-first workflow.');
-    $assert(str_contains($scaffoldedAgents, 'GitHub Release Trust Checks'), 'Expected scaffolded downstream AGENTS.md to include GitHub release trust-check guidance.');
+    $assert(str_contains($scaffoldedAgents, 'Hosted Release Trust Checks'), 'Expected scaffolded downstream AGENTS.md to include hosted release trust-check guidance.');
     $assert(str_contains($scaffoldedAgents, 'source_config.checksum_asset_pattern'), 'Expected scaffolded downstream AGENTS.md to tell agents where checksum sidecar patterns belong.');
     $assert(str_contains($scaffoldedAgents, 'Do not guess checksum patterns from tag names alone.'), 'Expected scaffolded downstream AGENTS.md to warn agents against guessing checksum patterns.');
     $assert(str_contains($scaffoldedWorkflow, 'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php sync'), 'Expected scaffolded workflow to target the configured tool path.');
@@ -70,7 +70,7 @@ function run_workflow_contract_tests(
     $assert(str_contains($scaffoldedFrameworkWorkflow, $checkoutActionSha), 'Expected scaffolded framework self-update workflow to pin actions/checkout by full commit SHA.');
     $assert(str_contains($scaffoldedFrameworkWorkflow, $setupPhpActionSha), 'Expected scaffolded framework self-update workflow to pin setup-php by full commit SHA.');
     $assert($normalizeWorkflowExample($scaffoldedFrameworkWorkflow) === $normalizeWorkflowExample($documentedFrameworkWorkflow), 'Expected downstream framework self-update example workflow to match scaffolded output.');
-    $renderedManagedFiles = (new DownstreamScaffolder(dirname(__DIR__, 4), $tempScaffoldRoot))->renderFrameworkManagedFiles('vendor/wp-core-base');
+    $renderedManagedFiles = (new DownstreamScaffolder(dirname(__DIR__, 4), $tempScaffoldRoot))->renderFrameworkManagedFiles('vendor/wp-core-base', [], null, 'github');
     $workflowExampleMap = [
         'docs/examples/downstream-workflow.yml' => '.github/workflows/wporg-updates.yml',
         'docs/examples/downstream-updates-reconcile-workflow.yml' => '.github/workflows/wporg-updates-reconcile.yml',

@@ -99,11 +99,11 @@ __WPORG_WRAPPER_PATH__ scaffold-premium-provider --repo-root=. --provider=exampl
 ```
 
 4. implement the provider class in `.wp-core-base/premium-providers/example-vendor.php`
-5. set `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON` locally or as a GitHub repository secret
+5. set `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON` locally or as a CI/CD secret
 6. verify the provider and credentials:
 
 ```bash
-__WPORG_PHP_PATH__ doctor --repo-root=. --github
+__WPORG_PHP_PATH__ doctor --repo-root=. --automation
 ```
 
 7. if the plugin already exists as a local dependency, adopt it; otherwise add it through that provider:
@@ -172,7 +172,7 @@ If a premium source does not expose a deterministic HTTP contract that can fetch
 Check the repo configuration:
 
 ```bash
-__WPORG_PHP_PATH__ doctor --repo-root=. --github
+__WPORG_PHP_PATH__ doctor --repo-root=. --automation
 ```
 
 Build the staged runtime payload:
@@ -181,14 +181,14 @@ Build the staged runtime payload:
 __WPORG_PHP_PATH__ stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 ```
 
-## GitHub Release Dependencies
+## Hosted Release Dependencies
 
-Private GitHub dependencies store only the token environment variable name in the manifest.
+Private hosted-release dependencies store only the token environment variable name in the manifest.
 
 If the CLI needs auth, it can generate a default token env name and tell you what to set:
 
 - locally: export the token in your shell
-- in GitHub Actions: add the same name as a repository secret
+- in CI: add the same name as a repository or project secret/variable
 
 ## More Detail
 

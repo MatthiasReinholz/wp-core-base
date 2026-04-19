@@ -36,6 +36,7 @@ final class SyncReport
         }
 
         return [
+            'generated_at' => gmdate(DATE_ATOM),
             'status' => $status,
             'fatal_errors' => array_values($fatalErrors),
             'dependency_warnings' => array_values($dependencyWarnings),
@@ -94,15 +95,12 @@ final class SyncReport
             '## wp-core-base Sync Report',
             '',
             sprintf('- Status: `%s`', $status),
+            sprintf('- Generated at: `%s`', $generatedAt === '' ? 'unknown' : $generatedAt),
             sprintf('- Dependency source warnings: `%d`', count($dependencyWarnings)),
             sprintf('- Fatal errors: `%d`', count($fatalErrors)),
             sprintf('- Trust records: `%d`', count($dependencyTrustStates)),
             '',
         ];
-
-        if ($generatedAt !== '') {
-            array_splice($lines, 3, 0, [sprintf('- Generated at: `%s`', $generatedAt)]);
-        }
 
         if ($dependencyWarnings !== []) {
             $lines[] = '### Dependency Source Warnings';
@@ -166,7 +164,7 @@ final class SyncReport
     /**
      * @param array<string, mixed> $report
      */
-    public static function syncIssue(GitHubAutomationClient $gitHubClient, array $report, ?string $runUrl = null): void
+    public static function syncIssue(AutomationClient $gitHubClient, array $report, ?string $runUrl = null): void
     {
         $warnings = self::stringList($report['dependency_warnings'] ?? []);
         $fatalErrors = self::stringList($report['fatal_errors'] ?? []);
@@ -198,7 +196,7 @@ final class SyncReport
         }
 
         $gitHubClient->updateIssue((int) $canonicalIssue['number'], self::ISSUE_TITLE, $body);
-        $gitHubClient->setLabels((int) $canonicalIssue['number'], [self::ISSUE_LABEL]);
+        $gitHubClient->setIssueLabels((int) $canonicalIssue['number'], [self::ISSUE_LABEL]);
 
         foreach ($openIssues as $duplicateIssue) {
             $gitHubClient->closeIssue(
@@ -222,13 +220,10 @@ final class SyncReport
             'One or more wp-core-base sync failures occurred during the latest run.',
             'Healthy components may still have been updated successfully.',
             '',
+            sprintf('- Generated at: `%s`', $generatedAt === '' ? 'unknown' : $generatedAt),
             sprintf('- Warning count: `%d`', count($warnings)),
             sprintf('- Fatal error count: `%d`', count($fatalErrors)),
         ];
-
-        if ($generatedAt !== '') {
-            array_splice($lines, 5, 0, [sprintf('- Generated at: `%s`', $generatedAt)]);
-        }
 
         if (is_string($runUrl) && $runUrl !== '') {
             $lines[] = sprintf('- Workflow run: [Open](%s)', $runUrl);
@@ -270,7 +265,7 @@ final class SyncReport
     /**
      * @return list<array<string, mixed>>
      */
-    private static function matchingOpenIssues(GitHubAutomationClient $gitHubClient): array
+    private static function matchingOpenIssues(AutomationClient $gitHubClient): array
     {
         $issues = [];
 

@@ -60,7 +60,8 @@ Treat `.wp-core-base/framework.php` as the installed framework lock file.
 For machine-readable automation around the CLI, prefer:
 
 - `doctor --json`
-- `doctor --github --json` when validating the GitHub automation contract
+- `doctor --automation --json` when validating the configured automation contract
+- `doctor --github --json` when validating the GitHub automation contract explicitly
 - `stage-runtime --json`
 - dependency preview flows with `--plan --json`
 - `release-verify --json`
@@ -81,20 +82,17 @@ Do not blur those contracts when reasoning about the system.
 
 ## Safe Assumptions
 
-- The framework requires PHP 8.1 or newer and is tested on PHP 8.1, 8.3, and 8.4.
 - `local` is a first-class long-term ownership model.
 - `managed` means overwrite-by-automation is acceptable.
 - `ignored` means documented but out of scope.
 - `full-core` and `content-only` are both first-class.
-- multisite is a repo-wide posture; keep content roots, ownership roots, and governance aligned across the network.
-- GitHub is required only for automated PR flows, not for using the code base itself.
+- GitHub or GitLab is required only for automated PR flows, not for using the code base itself.
 - `stage-runtime` is the deployment contract whenever staged runtime is part of the architecture.
 - `framework-sync` updates the vendored `wp-core-base` framework snapshot, not the runtime manifest.
-- there is no built-in WordPress `wp-cli` wrapper; use the PHP entrypoints or your own shell alias around them.
 - premium plugin credentials live in `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`, not in the manifest.
 - downstream-owned premium provider registrations live in `.wp-core-base/premium-providers.php`.
 - workflow-managed plugins may intentionally look non-updateable inside wp-admin because the governance MU plugin suppresses misleading in-dashboard update actions for them.
-- `github-release` dependencies may opt into download-time trust checks through `security.github_release_verification`, `security.managed_release_min_age_hours`, `source_config.verification_mode`, `source_config.checksum_asset_pattern`, and `source_config.min_release_age_hours`.
+- hosted release dependencies may opt into download-time trust checks through `security.github_release_verification`, `security.managed_release_min_age_hours`, `source_config.verification_mode`, `source_config.checksum_asset_pattern`, and `source_config.min_release_age_hours`.
 
 ## Unsafe Assumptions
 
@@ -106,19 +104,21 @@ Do not assume:
 - raw Git working trees are valid managed dependency inputs
 - symlinks are acceptable runtime inputs
 - a GitHub repository without GitHub Releases is a supported `github-release` source
+- a GitLab project without GitLab Releases is a supported `gitlab-release` source
 - WooCommerce.com extensions are already supported as native workflow-managed sources
 - every GitHub release-backed dependency publishes a checksum sidecar
+- every GitLab release-backed dependency publishes a checksum sidecar
 - checksum-sidecar verification can be enabled without first checking the exact asset names published by upstream
 
-## GitHub Release Trust Checks For Agents
+## Hosted Release Trust Checks For Agents
 
-When you add or harden a `github-release` managed dependency:
+When you add or harden a `github-release` or `gitlab-release` managed dependency:
 
-1. inspect the upstream GitHub Release assets first
+1. inspect the upstream hosted Release assets first
 2. confirm the real ZIP asset name or glob
 3. confirm whether a matching checksum sidecar asset exists
 4. only then set:
-   - `source_config.github_release_asset_pattern`
+   - `source_config.github_release_asset_pattern` or `source_config.gitlab_release_asset_pattern`
    - `source_config.checksum_asset_pattern`
    - `source_config.verification_mode`
    - optionally `source_config.min_release_age_hours`
@@ -152,8 +152,9 @@ Do not invent checksum asset patterns or enable required verification speculativ
 5. Identify dependency sources:
    - WordPress.org
    - GitHub Releases
+   - GitLab Releases
    - unsupported or manual source types
-6. Check whether GitHub is available for PR automation.
+6. Check whether GitHub or GitLab is available for PR automation.
 7. Recommend:
    - profile
    - framework consumption mode
@@ -173,7 +174,7 @@ When assessing the framework, focus on:
 - does the team need deterministic runtime staging?
 - can the project accept the managed/local/ignored ownership model?
 - are the dependency sources mostly supported?
-- is GitHub available if automated PRs are desired?
+- is GitHub or GitLab available if automated PRs are desired?
 
 Use [docs/support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md) and [docs/faq.md](/Users/matthias/DEV/wp-core-base/docs/faq.md) to address common objections.
 

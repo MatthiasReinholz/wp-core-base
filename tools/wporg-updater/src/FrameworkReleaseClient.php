@@ -9,7 +9,7 @@ use RuntimeException;
 final class FrameworkReleaseClient implements FrameworkReleaseSource
 {
     public function __construct(
-        private readonly GitHubReleaseClient $gitHubReleaseClient,
+        private readonly HttpClient $httpClient,
     ) {
     }
 
@@ -18,7 +18,14 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
      */
     public function fetchStableReleases(FrameworkConfig $framework): array
     {
-        return $this->gitHubReleaseClient->fetchStableReleases($this->dependencyShape($framework));
+        return match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => $this->gitLabReleaseClient($framework)->fetchStableReleases($this->dependencyShape($framework)),
+            'github-release' => $this->gitHubReleaseClient($framework)->fetchStableReleases($this->dependencyShape($framework)),
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
     }
 
     /**
@@ -27,8 +34,8 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
      */
     public function releaseData(FrameworkConfig $framework, array $release): array
     {
-        $version = $this->gitHubReleaseClient->latestVersion($release, $this->dependencyShape($framework));
-        $releaseNotes = trim((string) ($release['body'] ?? ''));
+        $version = $this->latestVersion($framework, $release);
+        $releaseNotes = $this->releaseNotesMarkdown($framework, $release, $version);
 
         if ($releaseNotes === '') {
             throw new RuntimeException(sprintf('Framework release v%s is missing release notes.', $version));
@@ -46,10 +53,10 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
 
         return [
             'version' => $version,
-            'release_at' => $this->gitHubReleaseClient->latestReleaseAt($release),
-            'release_url' => $this->gitHubReleaseClient->releaseUrl($release, $framework->repository),
+            'release_at' => $this->latestReleaseAt($framework, $release),
+            'release_url' => $this->releaseUrl($framework, $release),
             'notes_markdown' => $releaseNotes,
-            'notes_text' => $this->gitHubReleaseClient->markdownToText($releaseNotes),
+            'notes_text' => $this->markdownToText($framework, $releaseNotes),
             'notes_sections' => FrameworkReleaseNotes::parseSections($releaseNotes),
             'release' => $release,
         ];
@@ -60,7 +67,22 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
      */
     public function downloadReleaseAsset(FrameworkConfig $framework, array $release, string $destination): void
     {
-        $this->gitHubReleaseClient->downloadReleaseToFile($release, $this->dependencyShape($framework), $destination);
+        match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => $this->gitLabReleaseClient($framework)->downloadReleaseToFile(
+                $release,
+                $this->dependencyShape($framework),
+                $destination
+            ),
+            'github-release' => $this->gitHubReleaseClient($framework)->downloadReleaseToFile(
+                $release,
+                $this->dependencyShape($framework),
+                $destination
+            ),
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
     }
 
     /**
@@ -73,8 +95,8 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
 
         try {
             $this->downloadReleaseAsset($framework, $release, $destination);
-            $this->gitHubReleaseClient->downloadReleaseToFile($release, $this->checksumDependencyShape($framework), $checksumPath);
-            $this->gitHubReleaseClient->downloadReleaseToFile($release, $this->signatureDependencyShape($framework), $signaturePath);
+            $this->downloadAuxiliaryAsset($framework, $release, $framework->checksumAssetName(), $checksumPath);
+            $this->downloadAuxiliaryAsset($framework, $release, $framework->checksumSignatureAssetName(), $signaturePath);
             FrameworkReleaseSignature::verifyChecksumFileWithKeyPaths(
                 $checksumPath,
                 $signaturePath,
@@ -87,7 +109,7 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
                 throw new RuntimeException(sprintf('Unable to read framework release checksum file: %s', $checksumPath));
             }
 
-            $expectedChecksum = $this->extractChecksum($checksumContents, $framework->checksumAssetName());
+            $expectedChecksum = $this->extractChecksum($checksumContents, $framework->assetName());
             $actualChecksum = hash_file('sha256', $destination);
 
             if (! is_string($actualChecksum) || $actualChecksum === '') {
@@ -102,18 +124,103 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
                 ));
             }
         } finally {
-            if (is_file($signaturePath)) {
-                if (! unlink($signaturePath)) {
-                    fwrite(STDERR, sprintf("[warn] Failed to remove temporary signature file %s\n", $signaturePath));
-                }
+            if (is_file($signaturePath) && ! unlink($signaturePath)) {
+                fwrite(STDERR, sprintf("[warn] Failed to remove temporary signature file %s\n", $signaturePath));
             }
 
-            if (is_file($checksumPath)) {
-                if (! unlink($checksumPath)) {
-                    fwrite(STDERR, sprintf("[warn] Failed to remove temporary checksum file %s\n", $checksumPath));
-                }
+            if (is_file($checksumPath) && ! unlink($checksumPath)) {
+                fwrite(STDERR, sprintf("[warn] Failed to remove temporary checksum file %s\n", $checksumPath));
             }
         }
+    }
+
+    /**
+     * @param array<string, mixed> $release
+     */
+    private function latestVersion(FrameworkConfig $framework, array $release): string
+    {
+        return match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => $this->gitLabReleaseClient($framework)->latestVersion($release, $this->dependencyShape($framework)),
+            'github-release' => $this->gitHubReleaseClient($framework)->latestVersion($release, $this->dependencyShape($framework)),
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $release
+     */
+    private function latestReleaseAt(FrameworkConfig $framework, array $release): string
+    {
+        return match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => $this->gitLabReleaseClient($framework)->latestReleaseAt($release),
+            'github-release' => $this->gitHubReleaseClient($framework)->latestReleaseAt($release),
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $release
+     */
+    private function releaseUrl(FrameworkConfig $framework, array $release): string
+    {
+        return match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => $this->gitLabReleaseClient($framework)->releaseUrl($release, $this->dependencyShape($framework)),
+            'github-release' => $this->gitHubReleaseClient($framework)->releaseUrl($release, $framework->releaseSourceReference()),
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $release
+     */
+    private function releaseNotesMarkdown(FrameworkConfig $framework, array $release, string $version): string
+    {
+        return match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => trim($this->gitLabReleaseClient($framework)->releaseNotesMarkdown($release, $version)),
+            'github-release' => trim($this->gitHubReleaseClient($framework)->releaseNotesMarkdown($release, $version)),
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
+    }
+
+    private function markdownToText(FrameworkConfig $framework, string $markdown): string
+    {
+        return match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => $this->gitLabReleaseClient($framework)->markdownToText($markdown),
+            'github-release' => $this->gitHubReleaseClient($framework)->markdownToText($markdown),
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
+    }
+
+    /**
+     * @param array<string, mixed> $release
+     */
+    private function downloadAuxiliaryAsset(FrameworkConfig $framework, array $release, string $assetName, string $destination): void
+    {
+        $shape = $this->dependencyShape($framework);
+
+        if ($framework->releaseSourceProvider() === 'gitlab-release') {
+            $shape['source_config']['gitlab_release_asset_pattern'] = $assetName;
+            $this->gitLabReleaseClient($framework)->downloadReleaseToFile($release, $shape, $destination);
+            return;
+        }
+
+        $shape['source_config']['github_release_asset_pattern'] = $assetName;
+        $this->gitHubReleaseClient($framework)->downloadReleaseToFile($release, $shape, $destination);
     }
 
     /**
@@ -121,37 +228,41 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
      */
     private function dependencyShape(FrameworkConfig $framework): array
     {
-        return [
-            'slug' => 'wp-core-base',
-            'source_config' => [
-                'github_repository' => $framework->repository,
-                'github_release_asset_pattern' => $framework->assetName(),
-                'github_token_env' => null,
+        return match ($framework->releaseSourceProvider()) {
+            'gitlab-release' => [
+                'slug' => 'wp-core-base',
+                'source_config' => [
+                    'gitlab_project' => $framework->releaseSourceReference(),
+                    'gitlab_release_asset_pattern' => $framework->assetName(),
+                    'gitlab_token_env' => null,
+                    'gitlab_api_base' => $framework->releaseSourceApiBase(),
+                ],
+                'archive_subdir' => '',
             ],
-            'archive_subdir' => '',
-        ];
+            'github-release' => [
+                'slug' => 'wp-core-base',
+                'source_config' => [
+                    'github_repository' => $framework->releaseSourceReference(),
+                    'github_release_asset_pattern' => $framework->assetName(),
+                    'github_token_env' => null,
+                ],
+                'archive_subdir' => '',
+            ],
+            default => throw new RuntimeException(sprintf(
+                'Unsupported framework release source provider: %s',
+                $framework->releaseSourceProvider()
+            )),
+        };
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function checksumDependencyShape(FrameworkConfig $framework): array
+    private function gitHubReleaseClient(FrameworkConfig $framework): GitHubReleaseClient
     {
-        $shape = $this->dependencyShape($framework);
-        $shape['source_config']['github_release_asset_pattern'] = $framework->checksumAssetName();
-
-        return $shape;
+        return new GitHubReleaseClient($this->httpClient, $framework->releaseSourceApiBase());
     }
 
-    /**
-     * @return array<string, mixed>
-     */
-    private function signatureDependencyShape(FrameworkConfig $framework): array
+    private function gitLabReleaseClient(FrameworkConfig $framework): GitLabReleaseClient
     {
-        $shape = $this->dependencyShape($framework);
-        $shape['source_config']['github_release_asset_pattern'] = $framework->checksumSignatureAssetName();
-
-        return $shape;
+        return new GitLabReleaseClient($this->httpClient, $framework->releaseSourceApiBase());
     }
 
     private function extractChecksum(string $contents, string $assetName): string

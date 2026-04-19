@@ -100,6 +100,23 @@ function run_security_policy_contract_tests(callable $assert, string $repoRoot):
     $redacted = OutputRedactor::redact('Authorization: Bearer very-secret-token https://user:pass@example.com/path');
     $assert(! str_contains($redacted, 'very-secret-token'), 'Expected output redaction to scrub bearer tokens.');
     $assert(! str_contains($redacted, 'user:pass'), 'Expected output redaction to scrub basic-auth URL credentials.');
+    $previousGitLabToken = getenv('GITLAB_TOKEN');
+    $previousCiJobToken = getenv('CI_JOB_TOKEN');
+    putenv('GITLAB_TOKEN=gitlab-secret-token');
+    putenv('CI_JOB_TOKEN=gitlab-ci-job-token');
+    $gitLabRedacted = OutputRedactor::redact('GitLab token leak? gitlab-secret-token and gitlab-ci-job-token should never appear.');
+    $assert(! str_contains($gitLabRedacted, 'gitlab-secret-token'), 'Expected output redaction to scrub GITLAB_TOKEN values.');
+    $assert(! str_contains($gitLabRedacted, 'gitlab-ci-job-token'), 'Expected output redaction to scrub CI_JOB_TOKEN values.');
+    putenv($previousGitLabToken === false ? 'GITLAB_TOKEN' : 'GITLAB_TOKEN=' . $previousGitLabToken);
+    putenv($previousCiJobToken === false ? 'CI_JOB_TOKEN' : 'CI_JOB_TOKEN=' . $previousCiJobToken);
+    $hardcodedTokenRedacted = OutputRedactor::redact(
+        'Token formats like ghp_123456789012345678901234567890123456 and glpat-abcdefghijklmnopqrstuvwxyz123456 should be scrubbed.'
+    );
+    $assert(! str_contains($hardcodedTokenRedacted, 'ghp_123456789012345678901234567890123456'), 'Expected hardcoded GitHub token formats to be redacted.');
+    $assert(! str_contains($hardcodedTokenRedacted, 'glpat-abcdefghijklmnopqrstuvwxyz123456'), 'Expected hardcoded GitLab token formats to be redacted.');
+    $httpBody = OutputRedactor::redactHttpBody(str_repeat('prefix ', 40) . ' github_pat_abcdefghijklmnopqrstuvwxyz1234567890 ', 64);
+    $assert(! str_contains($httpBody, 'github_pat_abcdefghijklmnopqrstuvwxyz1234567890'), 'Expected redacted HTTP body summaries to scrub token-like content.');
+    $assert(str_contains($httpBody, '[truncated]'), 'Expected long HTTP body summaries to be truncated.');
     $benignUrlRedaction = OutputRedactor::redact('See https://wordpress.org/plugins/example-plugin/ for details.');
     $assert(str_contains($benignUrlRedaction, 'https://wordpress.org/plugins/example-plugin/'), 'Expected benign HTTPS URLs to remain visible in diagnostics.');
     $securityConfig = Config::fromArray($repoRoot, [

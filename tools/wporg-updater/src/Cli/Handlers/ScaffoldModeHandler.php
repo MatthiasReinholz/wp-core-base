@@ -37,6 +37,9 @@ final class ScaffoldModeHandler implements CliModeHandler
         if ($mode === 'scaffold-downstream') {
             $profile = $options['profile'] ?? 'content-only-default';
             $contentRoot = $options['content-root'] ?? null;
+            $automationProvider = isset($options['automation-provider']) && is_string($options['automation-provider'])
+                ? trim($options['automation-provider'])
+                : 'github';
             $scaffolder = new DownstreamScaffolder($this->frameworkRoot, $this->repoRoot);
             $adoptExistingManagedFiles = isset($options['adopt-existing-managed-files']);
 
@@ -47,7 +50,8 @@ final class ScaffoldModeHandler implements CliModeHandler
                     (string) $profile,
                     is_string($contentRoot) ? $contentRoot : null,
                     $this->force,
-                    $adoptExistingManagedFiles
+                    $adoptExistingManagedFiles,
+                    $automationProvider
                 ),
                 'scaffold-downstream'
             );

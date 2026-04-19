@@ -46,7 +46,7 @@ final class PremiumProviderRegistry
                 ));
             }
 
-            if (in_array($provider, ['wordpress.org', 'github-release', 'premium', 'local'], true)) {
+            if (in_array($provider, ['wordpress.org', 'github-release', 'gitlab-release', 'premium', 'local'], true)) {
                 throw new RuntimeException(sprintf(
                     'Premium provider key `%s` is reserved and may not be used in %s.',
                     $provider,

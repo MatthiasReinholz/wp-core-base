@@ -28,19 +28,19 @@ For routine plugin, theme, MU plugin, runtime-file, or runtime-directory changes
 
 Do not start by hand-editing `.wp-core-base/manifest.php` unless the change is unusual or clearly advanced.
 
-## GitHub Release Trust Checks
+## Hosted Release Trust Checks
 
-If a task involves a managed `github-release` dependency and you want stronger download-time trust checks:
+If a task involves a managed `github-release` or `gitlab-release` dependency and you want stronger download-time trust checks:
 
-1. inspect the real upstream GitHub Release assets first
+1. inspect the real upstream hosted Release assets first
 2. confirm the ZIP asset name or stable glob
 3. confirm whether a matching checksum sidecar asset exists
 4. only then edit `.wp-core-base/manifest.php` to set:
-   - `source_config.github_release_asset_pattern`
+   - `source_config.github_release_asset_pattern` or `source_config.gitlab_release_asset_pattern`
    - `source_config.checksum_asset_pattern`
    - `source_config.verification_mode`
    - optionally `source_config.min_release_age_hours`
-5. if several GitHub release dependencies should share the same default posture, prefer repo-level:
+5. if several hosted release dependencies should share the same default posture, prefer repo-level:
    - `security.github_release_verification`
    - `security.managed_release_min_age_hours`
 6. run `__WPORG_PHP_PATH__ doctor --repo-root=.`
@@ -58,8 +58,8 @@ If a task involves a premium plugin source:
 2. if a matching provider already exists, reuse it instead of inventing a second provider for the same upstream contract
 3. if no matching provider exists, scaffold one with `__WPORG_WRAPPER_PATH__ scaffold-premium-provider --repo-root=. --provider=your-provider`
 4. implement the provider class in `.wp-core-base/premium-providers/your-provider.php`
-5. configure `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON` locally or as a GitHub repository secret
-6. run `__WPORG_PHP_PATH__ doctor --repo-root=. --github`
+5. configure `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON` locally or as a CI/CD secret
+6. run `__WPORG_PHP_PATH__ doctor --repo-root=. --automation`
 7. if the plugin already exists in the repo as a `local` dependency, use `adopt-dependency`; otherwise use `add-dependency`
 8. run `__WPORG_PHP_PATH__ stage-runtime --repo-root=. --output=.wp-core-base/build/runtime`
 
@@ -118,7 +118,7 @@ Every runtime path should be treated as one of:
 Preferred checks:
 
 ```bash
-__WPORG_PHP_PATH__ doctor --repo-root=. --github
+__WPORG_PHP_PATH__ doctor --repo-root=. --automation
 __WPORG_PHP_PATH__ stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 ```
 
@@ -126,7 +126,7 @@ If a workflow or coding agent needs stable machine-readable output, prefer:
 
 ```bash
 __WPORG_PHP_PATH__ doctor --repo-root=. --json
-__WPORG_PHP_PATH__ doctor --repo-root=. --github --json
+__WPORG_PHP_PATH__ doctor --repo-root=. --automation --json
 __WPORG_PHP_PATH__ stage-runtime --repo-root=. --output=.wp-core-base/build/runtime --json
 __WPORG_WRAPPER_PATH__ add-dependency --repo-root=. --source=wordpress.org --kind=plugin --slug=example-plugin --plan --json
 __WPORG_PHP_PATH__ release-verify --repo-root=. --json

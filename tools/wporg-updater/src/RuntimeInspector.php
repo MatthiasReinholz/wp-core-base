@@ -200,10 +200,6 @@ final class RuntimeInspector
         }
 
         if (is_file($source)) {
-            if ($this->isExcluded(basename($source), $excludedPaths)) {
-                return;
-            }
-
             $targetDir = dirname($destination);
 
             if (! is_dir($targetDir) && ! mkdir($targetDir, 0775, true) && ! is_dir($targetDir)) {
@@ -412,7 +408,7 @@ final class RuntimeInspector
             }
         }
 
-        if (! $isDir && preg_match('/(^|\/)\.(github|gitlab|circleci)\//', $relativePath) === 1) {
+        if (! $isDir && preg_match('/(^|\/)\.(github|gitlab|gitea|forgejo|circleci)\//', $relativePath) === 1) {
             throw new RuntimeException(sprintf('Forbidden CI metadata detected: %s', $relativePath));
         }
     }

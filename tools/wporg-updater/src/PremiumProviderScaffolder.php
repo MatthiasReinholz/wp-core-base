@@ -69,7 +69,7 @@ final class PremiumProviderScaffolder
             throw new RuntimeException('Provider keys must use lowercase letters, numbers, and single hyphen separators.');
         }
 
-        if (in_array($normalized, ['wordpress.org', 'github-release', 'premium', 'local'], true)) {
+        if (in_array($normalized, ['wordpress.org', 'github-release', 'gitlab-release', 'premium', 'local'], true)) {
             throw new RuntimeException(sprintf('Provider key `%s` is reserved.', $normalized));
         }
 
