@@ -171,8 +171,9 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
      */
     private function requestWithRetry(string $method, string $url, array $headers = [], array $options = []): array
     {
-        $attempts = 3;
-        $delayMicroseconds = 250000;
+        $attempts = max(1, (int) ($options['retry_attempts'] ?? 3));
+        $delayMilliseconds = max(0, (int) ($options['retry_initial_delay_milliseconds'] ?? 250));
+        $delayMicroseconds = $delayMilliseconds * 1000;
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             try {
@@ -213,6 +214,8 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         int $redirectDepth = 0,
     ): array {
         $redirectLimit = (int) ($options['max_redirects'] ?? 5);
+        $timeoutSeconds = max(1, (int) ($options['timeout_seconds'] ?? $this->timeoutSeconds));
+        $connectTimeoutSeconds = max(1, (int) ($options['connect_timeout_seconds'] ?? min(10, $timeoutSeconds)));
 
         if ($redirectDepth > $redirectLimit) {
             throw new RuntimeException(sprintf('HTTP redirect limit exceeded for %s.', $url));
@@ -251,8 +254,8 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
             CURLOPT_CUSTOMREQUEST => strtoupper($method),
             CURLOPT_RETURNTRANSFER => false,
             CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_TIMEOUT => $this->timeoutSeconds,
-            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeoutSeconds),
+            CURLOPT_TIMEOUT => $timeoutSeconds,
+            CURLOPT_CONNECTTIMEOUT => $connectTimeoutSeconds,
             CURLOPT_USERAGENT => $this->userAgent,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
@@ -361,6 +364,8 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         int $redirectDepth = 0,
     ): array {
         $redirectLimit = (int) ($options['max_redirects'] ?? 5);
+        $timeoutSeconds = max(1, (int) ($options['timeout_seconds'] ?? $this->timeoutSeconds));
+        $connectTimeoutSeconds = max(1, (int) ($options['connect_timeout_seconds'] ?? min(10, $timeoutSeconds)));
 
         if ($redirectDepth > $redirectLimit) {
             throw new RuntimeException(sprintf('Download redirect limit exceeded for %s.', $url));
@@ -393,8 +398,8 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
             CURLOPT_CUSTOMREQUEST => 'GET',
             CURLOPT_RETURNTRANSFER => false,
             CURLOPT_FOLLOWLOCATION => false,
-            CURLOPT_TIMEOUT => $this->timeoutSeconds,
-            CURLOPT_CONNECTTIMEOUT => min(10, $this->timeoutSeconds),
+            CURLOPT_TIMEOUT => $timeoutSeconds,
+            CURLOPT_CONNECTTIMEOUT => $connectTimeoutSeconds,
             CURLOPT_USERAGENT => $this->userAgent,
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,

@@ -25,11 +25,16 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
      */
     protected function requestJson(string $method, string $url, array $headers = [], ?array $json = null, ?string $body = null): array
     {
-        $options = ['max_body_bytes' => 5 * 1024 * 1024];
+        $options = $this->premiumMetadataRequestOptions();
         $allowedHosts = $this->allowedApiHosts();
 
         if ($allowedHosts !== []) {
             $options['allowed_redirect_hosts'] = $allowedHosts;
+        }
+
+        // Route JSON GET requests through the retry-aware JSON transport path.
+        if (strtoupper($method) === 'GET' && $json === null && $body === null) {
+            return $this->httpClient->getJsonWithOptions($url, $headers, $options);
         }
 
         $response = $this->httpClient->requestWithOptions($method, $url, $headers, $json, $body, false, $options);
@@ -49,6 +54,48 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
         }
 
         return $decoded;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function premiumMetadataRequestOptions(): array
+    {
+        $options = ['max_body_bytes' => 5 * 1024 * 1024];
+        $timeoutSeconds = $this->premiumMetadataTimeoutSeconds();
+
+        if ($timeoutSeconds !== null && $timeoutSeconds > 0) {
+            $options['timeout_seconds'] = $timeoutSeconds;
+        }
+
+        $retryAttempts = $this->premiumMetadataRetryAttempts();
+
+        if ($retryAttempts !== null && $retryAttempts > 0) {
+            $options['retry_attempts'] = $retryAttempts;
+        }
+
+        $retryDelayMilliseconds = $this->premiumMetadataInitialRetryDelayMilliseconds();
+
+        if ($retryDelayMilliseconds !== null && $retryDelayMilliseconds >= 0) {
+            $options['retry_initial_delay_milliseconds'] = $retryDelayMilliseconds;
+        }
+
+        return $options;
+    }
+
+    protected function premiumMetadataTimeoutSeconds(): ?int
+    {
+        return null;
+    }
+
+    protected function premiumMetadataRetryAttempts(): ?int
+    {
+        return null;
+    }
+
+    protected function premiumMetadataInitialRetryDelayMilliseconds(): ?int
+    {
+        return null;
     }
 
     /**

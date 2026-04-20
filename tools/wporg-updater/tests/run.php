@@ -125,6 +125,51 @@ final class ExamplePremiumManagedSource extends AbstractPremiumManagedSource
     }
 }
 
+final class ConfigurablePremiumManagedSource extends AbstractPremiumManagedSource
+{
+    public function key(): string
+    {
+        return 'configurable-vendor';
+    }
+
+    public function fetchCatalog(array $dependency): array
+    {
+        return [];
+    }
+
+    public function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
+    {
+        return [];
+    }
+
+    public function downloadReleaseToFile(array $dependency, array $releaseData, string $destination): void
+    {
+    }
+
+    protected function premiumMetadataTimeoutSeconds(): ?int
+    {
+        return 90;
+    }
+
+    protected function premiumMetadataRetryAttempts(): ?int
+    {
+        return 5;
+    }
+
+    protected function premiumMetadataInitialRetryDelayMilliseconds(): ?int
+    {
+        return 750;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function metadataOptionsForTest(): array
+    {
+        return $this->premiumMetadataRequestOptions();
+    }
+}
+
 final class FakeGitRunner implements GitRunnerInterface
 {
     public ?string $currentBranch = 'main';
@@ -620,6 +665,34 @@ $assert = static function (bool $condition, string $message): void {
         throw new RuntimeException($message);
     }
 };
+
+$premiumMetadataDefaults = (new ExamplePremiumManagedSource(new HttpClient(), new PremiumCredentialsStore('{}')));
+$premiumMetadataDefaultsMethod = new ReflectionMethod(AbstractPremiumManagedSource::class, 'premiumMetadataRequestOptions');
+$premiumMetadataDefaultsMethod->setAccessible(true);
+$defaultMetadataOptions = $premiumMetadataDefaultsMethod->invoke($premiumMetadataDefaults);
+$assert(
+    is_array($defaultMetadataOptions) && ($defaultMetadataOptions['max_body_bytes'] ?? null) === 5 * 1024 * 1024,
+    'Expected premium metadata request options to enforce default JSON body limits.'
+);
+$assert(
+    ! isset($defaultMetadataOptions['timeout_seconds']) && ! isset($defaultMetadataOptions['retry_attempts']) && ! isset($defaultMetadataOptions['retry_initial_delay_milliseconds']),
+    'Expected premium metadata request options to omit retry/timeout overrides by default.'
+);
+
+$configurablePremiumSource = new ConfigurablePremiumManagedSource(new HttpClient(), new PremiumCredentialsStore('{}'));
+$configurableMetadataOptions = $configurablePremiumSource->metadataOptionsForTest();
+$assert(
+    ($configurableMetadataOptions['timeout_seconds'] ?? null) === 90,
+    'Expected premium metadata timeout override to flow into request options.'
+);
+$assert(
+    ($configurableMetadataOptions['retry_attempts'] ?? null) === 5,
+    'Expected premium metadata retry-attempt override to flow into request options.'
+);
+$assert(
+    ($configurableMetadataOptions['retry_initial_delay_milliseconds'] ?? null) === 750,
+    'Expected premium metadata retry-delay override to flow into request options.'
+);
 
 $runtimeDefaults = [
     'stage_dir' => '.wp-core-base/build/runtime',
