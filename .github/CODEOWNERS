@@ -1,0 +1,10 @@
+# Default ownership
+* @MatthiasReinholz
+
+# Security and release-critical paths
+/.github/workflows/** @MatthiasReinholz
+/.wp-core-base/framework.php @MatthiasReinholz
+/.wp-core-base/manifest.php @MatthiasReinholz
+/tools/wporg-updater/keys/** @MatthiasReinholz
+/docs/releases/** @MatthiasReinholz
+/SECURITY.md @MatthiasReinholz
