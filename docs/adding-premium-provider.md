@@ -94,8 +94,17 @@ You may also override:
 
 - `validateCredentialConfiguration()`
 - `requiredCredentialFields()`
+- `premiumMetadataTimeoutSeconds()`
+- `premiumMetadataRetryAttempts()`
+- `premiumMetadataInitialRetryDelayMilliseconds()`
 
 The default `validateCredentialConfiguration()` behavior only checks the fields returned by `requiredCredentialFields()`.
+
+`requestJson('GET', ...)` uses the HTTP client's built-in retry/backoff behavior by default. If your provider API is more latency-prone, tune that path by overriding:
+
+- `premiumMetadataTimeoutSeconds()` (per-request timeout for metadata calls)
+- `premiumMetadataRetryAttempts()` (retry budget for metadata calls)
+- `premiumMetadataInitialRetryDelayMilliseconds()` (initial backoff delay)
 
 ### Method Contracts
 

@@ -31,6 +31,22 @@ final class __CLASS_NAME__ extends AbstractPremiumManagedSource
         ];
     }
 
+    // Optional: override premium metadata HTTP behavior for this provider.
+    protected function premiumMetadataTimeoutSeconds(): ?int
+    {
+        return null;
+    }
+
+    protected function premiumMetadataRetryAttempts(): ?int
+    {
+        return null;
+    }
+
+    protected function premiumMetadataInitialRetryDelayMilliseconds(): ?int
+    {
+        return null;
+    }
+
     public function fetchCatalog(array $dependency): array
     {
         // Return at least:
