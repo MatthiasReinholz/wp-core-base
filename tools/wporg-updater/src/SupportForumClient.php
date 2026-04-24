@@ -241,7 +241,7 @@ final class SupportForumClient
             $oldest = $oldest === null || $openedAt < $oldest ? $openedAt : $oldest;
         }
 
-        return $oldest !== null && $oldest <= $releaseAt;
+        return $oldest <= $releaseAt;
     }
 
     /**

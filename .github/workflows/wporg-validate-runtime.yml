@@ -13,13 +13,20 @@ permissions:
 
 jobs:
   validate:
+    name: validate (${{ matrix.php-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        php-version:
-          - '8.1'
-          - '8.3'
-          - '8.4'
+        include:
+          - php-version: '8.1'
+            experimental: false
+          - php-version: '8.3'
+            experimental: false
+          - php-version: '8.4'
+            experimental: false
+          - php-version: '8.5'
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

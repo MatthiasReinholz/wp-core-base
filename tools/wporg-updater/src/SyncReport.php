@@ -38,11 +38,11 @@ final class SyncReport
         return [
             'generated_at' => gmdate(DATE_ATOM),
             'status' => $status,
-            'fatal_errors' => array_values($fatalErrors),
-            'dependency_warnings' => array_values($dependencyWarnings),
+            'fatal_errors' => $fatalErrors,
+            'dependency_warnings' => $dependencyWarnings,
             'warning_count' => count($dependencyWarnings),
             'fatal_error_count' => count($fatalErrors),
-            'dependency_trust_states' => array_values($dependencyTrustStates),
+            'dependency_trust_states' => $dependencyTrustStates,
         ];
     }
 

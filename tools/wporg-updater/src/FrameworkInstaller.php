@@ -129,7 +129,7 @@ final class FrameworkInstaller
             $changedPaths[] = '.wp-core-base/framework.php';
             $governancePath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($downstreamConfig);
             $governanceState = $this->captureFileState($governancePath, $stateBackupRoot . '/admin-governance.php');
-            (new AdminGovernanceExporter($this->runtimeInspector))->refresh($downstreamConfig);
+            (new AdminGovernanceExporter())->refresh($downstreamConfig);
             $changedPaths[] = FrameworkRuntimeFiles::governanceDataPath($downstreamConfig);
             $pathSwapper->finalize($backupPath);
             $swappedIntoPlace = false;

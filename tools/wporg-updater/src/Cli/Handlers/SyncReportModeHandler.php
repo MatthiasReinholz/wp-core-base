@@ -16,9 +16,10 @@ final class SyncReportModeHandler implements CliModeHandler
 {
     public function __construct(
         private readonly string $repoRoot,
-        private readonly bool $jsonOutput,
-        private readonly Closure $emitJson,
+        bool $jsonOutput = false,
+        ?Closure $emitJson = null,
     ) {
+        unset($jsonOutput, $emitJson);
     }
 
     public function supports(string $mode): bool

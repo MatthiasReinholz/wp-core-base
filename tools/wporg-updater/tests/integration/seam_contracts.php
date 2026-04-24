@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use WpOrgPluginUpdater\AdminGovernanceExporter;
 use WpOrgPluginUpdater\Config;
-use WpOrgPluginUpdater\ConfigNormalizer;
 use WpOrgPluginUpdater\ConfigMutationStateManager;
 use WpOrgPluginUpdater\DependencyScanner;
 use WpOrgPluginUpdater\FrameworkRuntimeFiles;
@@ -14,6 +13,7 @@ use WpOrgPluginUpdater\HttpStatusRuntimeException;
 use WpOrgPluginUpdater\ManifestSuggester;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\PhpArrayFileWriter;
+use WpOrgPluginUpdater\RuntimeHygieneDefaults;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\Cli\CliModeHandler;
 use WpOrgPluginUpdater\Cli\ModeDispatcher;
@@ -124,7 +124,7 @@ function run_seam_contract_tests(callable $assert, string $repoRoot): void
         ]],
     ]);
     $governanceConfig = Config::load($governanceRoot);
-    $governanceExporter = new AdminGovernanceExporter(new RuntimeInspector($governanceConfig->runtime));
+    $governanceExporter = new AdminGovernanceExporter();
     $governanceExporter->refresh($governanceConfig);
     $governanceDataPath = $governanceRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($governanceConfig);
     $governanceFirst = (string) file_get_contents($governanceDataPath);
@@ -140,7 +140,7 @@ function run_seam_contract_tests(callable $assert, string $repoRoot): void
     $stateManager = new ConfigMutationStateManager(
         new ManifestWriter(),
         new RuntimeInspector($governanceConfig->runtime),
-        new AdminGovernanceExporter(new RuntimeInspector($governanceConfig->runtime))
+        new AdminGovernanceExporter()
     );
     $trackedState = $stateManager->snapshot($governanceConfig, $nextGovernanceConfig);
     $stateManager->persist($nextGovernanceConfig, $governanceConfig);
@@ -284,6 +284,30 @@ function run_seam_contract_tests(callable $assert, string $repoRoot): void
 
     $assert($requestBodyLimitRejected, 'Expected HttpClient request options to reject oversized outbound request bodies.');
 
+    $initialGetHostRejected = false;
+
+    try {
+        $httpClient->getWithOptions('https://disallowed.example/payload.txt', [], [
+            'allowed_redirect_hosts' => ['allowed.example'],
+        ]);
+    } catch (RuntimeException $exception) {
+        $initialGetHostRejected = str_contains($exception->getMessage(), 'Request target host disallowed.example is not allowed');
+    }
+
+    $assert($initialGetHostRejected, 'Expected HttpClient GET helpers to enforce allowed hosts before the initial request.');
+
+    $initialJsonHostRejected = false;
+
+    try {
+        $httpClient->getJsonWithOptions('https://metadata.example/payload.json', [], [
+            'allowed_redirect_hosts' => ['api.example'],
+        ]);
+    } catch (RuntimeException $exception) {
+        $initialJsonHostRejected = str_contains($exception->getMessage(), 'Request target host metadata.example is not allowed');
+    }
+
+    $assert($initialJsonHostRejected, 'Expected HttpClient JSON helpers to enforce allowed hosts before the initial request.');
+
     $jsonDepthRejected = false;
     $tooDeepPayload = '"leaf"';
 
@@ -301,26 +325,41 @@ function run_seam_contract_tests(callable $assert, string $repoRoot): void
 
     $manifestReference = (string) file_get_contents($repoRoot . '/docs/manifest-reference.md');
 
-    foreach (ConfigNormalizer::DEFAULT_FORBIDDEN_PATHS as $pathEntry) {
+    foreach (RuntimeHygieneDefaults::FORBIDDEN_PATHS as $pathEntry) {
         $assert(
             str_contains($manifestReference, "`{$pathEntry}`"),
             sprintf('Expected manifest reference defaults section to list forbidden path `%s`.', $pathEntry)
         );
     }
 
-    foreach (ConfigNormalizer::DEFAULT_FORBIDDEN_FILES as $filePattern) {
+    foreach (RuntimeHygieneDefaults::FORBIDDEN_FILES as $filePattern) {
         $assert(
             str_contains($manifestReference, "`{$filePattern}`"),
             sprintf('Expected manifest reference defaults section to list forbidden file pattern `%s`.', $filePattern)
         );
     }
 
-    foreach (ConfigNormalizer::DEFAULT_MANAGED_SANITIZE_PATH_SUFFIXES as $sanitizeSuffix) {
+    foreach (RuntimeHygieneDefaults::MANAGED_SANITIZE_PATH_SUFFIXES as $sanitizeSuffix) {
         $assert(
             str_contains($manifestReference, "`{$sanitizeSuffix}`"),
             sprintf('Expected manifest reference defaults section to list managed sanitize path suffix `%s`.', $sanitizeSuffix)
         );
     }
+
+    $repoManifest = require $repoRoot . '/.wp-core-base/manifest.php';
+    $assert(is_array($repoManifest), 'Expected repository manifest to be loadable for runtime hygiene coherence checks.');
+    $repoPaths = is_array($repoManifest['paths'] ?? null) ? $repoManifest['paths'] : [];
+    $repoRuntime = is_array($repoManifest['runtime'] ?? null) ? $repoManifest['runtime'] : [];
+    $expectedSanitizePaths = RuntimeHygieneDefaults::managedSanitizePaths([
+        'content_root' => (string) ($repoPaths['content_root'] ?? 'wp-content'),
+        'plugins_root' => (string) ($repoPaths['plugins_root'] ?? 'wp-content/plugins'),
+        'themes_root' => (string) ($repoPaths['themes_root'] ?? 'wp-content/themes'),
+        'mu_plugins_root' => (string) ($repoPaths['mu_plugins_root'] ?? 'wp-content/mu-plugins'),
+    ]);
+    $assert(($repoRuntime['forbidden_paths'] ?? null) === RuntimeHygieneDefaults::FORBIDDEN_PATHS, 'Expected repository manifest forbidden paths to match runtime hygiene defaults.');
+    $assert(($repoRuntime['forbidden_files'] ?? null) === RuntimeHygieneDefaults::FORBIDDEN_FILES, 'Expected repository manifest forbidden files to match runtime hygiene defaults.');
+    $assert(($repoRuntime['managed_sanitize_paths'] ?? null) === $expectedSanitizePaths, 'Expected repository manifest managed sanitize paths to match runtime hygiene defaults.');
+    $assert(($repoRuntime['managed_sanitize_files'] ?? null) === RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES, 'Expected repository manifest managed sanitize files to match runtime hygiene defaults.');
 }
 
 /**

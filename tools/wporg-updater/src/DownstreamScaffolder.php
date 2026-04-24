@@ -107,7 +107,7 @@ final class DownstreamScaffolder
                     (string) $write['rendered'],
                     $write['target'],
                     $force,
-                    (bool) ($write['managed'] ?? false),
+                    (bool) $write['managed'],
                     $adoptExistingManagedFiles
                 );
             } else {
@@ -138,7 +138,7 @@ final class DownstreamScaffolder
         fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/.wp-core-base/framework.php'));
 
         $config = Config::load($this->repoRoot);
-        (new AdminGovernanceExporter(new RuntimeInspector($config->runtime)))->refresh($config);
+        (new AdminGovernanceExporter())->refresh($config);
         fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config)));
 
         fwrite(STDOUT, "\n");
@@ -502,6 +502,8 @@ YAML;
      */
     private function presetForProfile(string $profile): array
     {
+        $defaultManagedSanitizePaths = $this->defaultManagedSanitizePathPlaceholders();
+
         return match ($profile) {
             'full-core' => [
                 'template' => 'full-core',
@@ -514,8 +516,8 @@ YAML;
                 'managed_kinds' => ['plugin', 'theme', 'mu-plugin-package'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.gitlab', '__PLUGINS_ROOT__/.gitea', '__PLUGINS_ROOT__/.forgejo', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.gitlab', '__THEMES_ROOT__/.gitea', '__THEMES_ROOT__/.forgejo', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.gitlab', '__MU_PLUGINS_ROOT__/.gitea', '__MU_PLUGINS_ROOT__/.forgejo', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
-                'managed_sanitize_files' => ['README*', 'CHANGELOG*', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'managed_sanitize_paths' => $defaultManagedSanitizePaths,
+                'managed_sanitize_files' => RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
                 'include_runtime_validation' => true,
             ],
             'content-only', 'content-only-default', 'content-only-local-mu' => [
@@ -529,8 +531,8 @@ YAML;
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.gitlab', '__PLUGINS_ROOT__/.gitea', '__PLUGINS_ROOT__/.forgejo', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.gitlab', '__THEMES_ROOT__/.gitea', '__THEMES_ROOT__/.forgejo', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.gitlab', '__MU_PLUGINS_ROOT__/.gitea', '__MU_PLUGINS_ROOT__/.forgejo', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
-                'managed_sanitize_files' => ['README*', 'CHANGELOG*', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'managed_sanitize_paths' => $defaultManagedSanitizePaths,
+                'managed_sanitize_files' => RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
                 'include_runtime_validation' => true,
             ],
             'content-only-migration' => [
@@ -544,8 +546,8 @@ YAML;
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => ['__PLUGINS_ROOT__/.github', '__PLUGINS_ROOT__/.gitlab', '__PLUGINS_ROOT__/.gitea', '__PLUGINS_ROOT__/.forgejo', '__PLUGINS_ROOT__/.wordpress-org', '__PLUGINS_ROOT__/node_modules', '__PLUGINS_ROOT__/docs', '__PLUGINS_ROOT__/tests', '__THEMES_ROOT__/.github', '__THEMES_ROOT__/.gitlab', '__THEMES_ROOT__/.gitea', '__THEMES_ROOT__/.forgejo', '__THEMES_ROOT__/.wordpress-org', '__THEMES_ROOT__/node_modules', '__THEMES_ROOT__/docs', '__THEMES_ROOT__/tests', '__MU_PLUGINS_ROOT__/.github', '__MU_PLUGINS_ROOT__/.gitlab', '__MU_PLUGINS_ROOT__/.gitea', '__MU_PLUGINS_ROOT__/.forgejo', '__MU_PLUGINS_ROOT__/.wordpress-org', '__MU_PLUGINS_ROOT__/node_modules', '__MU_PLUGINS_ROOT__/docs', '__MU_PLUGINS_ROOT__/tests'],
-                'managed_sanitize_files' => ['README*', 'CHANGELOG*', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+                'managed_sanitize_paths' => $defaultManagedSanitizePaths,
+                'managed_sanitize_files' => RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
                 'include_runtime_validation' => true,
             ],
             'content-only-image-first' => [
@@ -559,53 +561,8 @@ YAML;
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => [
-                    '__PLUGINS_ROOT__/docs',
-                    '__PLUGINS_ROOT__/.github',
-                    '__PLUGINS_ROOT__/.gitlab',
-                    '__PLUGINS_ROOT__/.gitea',
-                    '__PLUGINS_ROOT__/.forgejo',
-                    '__PLUGINS_ROOT__/.wordpress-org',
-                    '__PLUGINS_ROOT__/node_modules',
-                    '__PLUGINS_ROOT__/doc',
-                    '__PLUGINS_ROOT__/tests',
-                    '__PLUGINS_ROOT__/test',
-                    '__PLUGINS_ROOT__/__tests__',
-                    '__PLUGINS_ROOT__/examples',
-                    '__PLUGINS_ROOT__/example',
-                    '__PLUGINS_ROOT__/demo',
-                    '__PLUGINS_ROOT__/screenshots',
-                    '__THEMES_ROOT__/docs',
-                    '__THEMES_ROOT__/.github',
-                    '__THEMES_ROOT__/.gitlab',
-                    '__THEMES_ROOT__/.gitea',
-                    '__THEMES_ROOT__/.forgejo',
-                    '__THEMES_ROOT__/.wordpress-org',
-                    '__THEMES_ROOT__/node_modules',
-                    '__THEMES_ROOT__/doc',
-                    '__THEMES_ROOT__/tests',
-                    '__THEMES_ROOT__/test',
-                    '__THEMES_ROOT__/__tests__',
-                    '__THEMES_ROOT__/examples',
-                    '__THEMES_ROOT__/example',
-                    '__THEMES_ROOT__/demo',
-                    '__THEMES_ROOT__/screenshots',
-                ],
-                'managed_sanitize_files' => [
-                    'README*',
-                    'CHANGELOG*',
-                    '.gitignore',
-                    '.gitattributes',
-                    '.gitlab-ci.yml',
-                    'bitbucket-pipelines.yml',
-                    'phpunit.xml*',
-                    'composer.json',
-                    'composer.lock',
-                    'package.json',
-                    'package-lock.json',
-                    'pnpm-lock.yaml',
-                    'yarn.lock',
-                ],
+                'managed_sanitize_paths' => $defaultManagedSanitizePaths,
+                'managed_sanitize_files' => RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
                 'include_runtime_validation' => true,
             ],
             'content-only-image-first-compact' => [
@@ -619,57 +576,28 @@ YAML;
                 'managed_kinds' => ['plugin', 'theme'],
                 'staged_kinds' => Config::runtimeKinds(),
                 'validated_kinds' => Config::runtimeKinds(),
-                'managed_sanitize_paths' => [
-                    '__PLUGINS_ROOT__/docs',
-                    '__PLUGINS_ROOT__/.github',
-                    '__PLUGINS_ROOT__/.gitlab',
-                    '__PLUGINS_ROOT__/.gitea',
-                    '__PLUGINS_ROOT__/.forgejo',
-                    '__PLUGINS_ROOT__/.wordpress-org',
-                    '__PLUGINS_ROOT__/node_modules',
-                    '__PLUGINS_ROOT__/doc',
-                    '__PLUGINS_ROOT__/tests',
-                    '__PLUGINS_ROOT__/test',
-                    '__PLUGINS_ROOT__/__tests__',
-                    '__PLUGINS_ROOT__/examples',
-                    '__PLUGINS_ROOT__/example',
-                    '__PLUGINS_ROOT__/demo',
-                    '__PLUGINS_ROOT__/screenshots',
-                    '__THEMES_ROOT__/docs',
-                    '__THEMES_ROOT__/.github',
-                    '__THEMES_ROOT__/.gitlab',
-                    '__THEMES_ROOT__/.gitea',
-                    '__THEMES_ROOT__/.forgejo',
-                    '__THEMES_ROOT__/.wordpress-org',
-                    '__THEMES_ROOT__/node_modules',
-                    '__THEMES_ROOT__/doc',
-                    '__THEMES_ROOT__/tests',
-                    '__THEMES_ROOT__/test',
-                    '__THEMES_ROOT__/__tests__',
-                    '__THEMES_ROOT__/examples',
-                    '__THEMES_ROOT__/example',
-                    '__THEMES_ROOT__/demo',
-                    '__THEMES_ROOT__/screenshots',
-                ],
-                'managed_sanitize_files' => [
-                    'README*',
-                    'CHANGELOG*',
-                    '.gitignore',
-                    '.gitattributes',
-                    '.gitlab-ci.yml',
-                    'bitbucket-pipelines.yml',
-                    'phpunit.xml*',
-                    'composer.json',
-                    'composer.lock',
-                    'package.json',
-                    'package-lock.json',
-                    'pnpm-lock.yaml',
-                    'yarn.lock',
-                ],
+                'managed_sanitize_paths' => $defaultManagedSanitizePaths,
+                'managed_sanitize_files' => RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
                 'include_runtime_validation' => false,
             ],
             default => throw new RuntimeException(sprintf('Invalid scaffold profile: %s', $profile)),
         };
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function defaultManagedSanitizePathPlaceholders(): array
+    {
+        $entries = [];
+
+        foreach (['__PLUGINS_ROOT__', '__THEMES_ROOT__', '__MU_PLUGINS_ROOT__'] as $root) {
+            foreach (RuntimeHygieneDefaults::MANAGED_SANITIZE_PATH_SUFFIXES as $suffix) {
+                $entries[] = $root . '/' . $suffix;
+            }
+        }
+
+        return $entries;
     }
 
     /**

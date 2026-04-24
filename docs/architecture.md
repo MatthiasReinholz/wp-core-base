@@ -18,7 +18,8 @@ Everything else exists to load, validate, project, or automate those contracts.
 ### Config and contract loading
 
 - `Config` loads and normalizes the downstream manifest
-- `ConfigNormalizer` and `ConfigSerializer` keep manifest normalization and serialization logic out of the runtime query object
+- `RuntimeHygieneDefaults` is the canonical source for default forbidden and managed-sanitation runtime hygiene lists
+- `ManifestWriter` and `PhpArrayFileWriter` serialize normalized manifests deterministically
 - `FrameworkConfig` loads and normalizes framework metadata
 - these classes are the canonical schema boundaries for the framework
 
@@ -34,7 +35,7 @@ Core invariant:
 ### Dependency authoring and ingestion
 
 - `DependencyAuthoringService` owns add/adopt/remove workflows
-- `DependencyAuthoringSupport`, `DependencyPreparationService`, and `DependencyManifestMutator` isolate option resolution, payload preparation, and manifest mutation
+- `DependencyAuthoringSupport` isolates shared option and classification helpers
 - `DependencyScanner` and `DependencyMetadataResolver` infer local runtime metadata
 - managed-source adapters resolve WordPress.org, GitHub release, and premium-provider inputs
 
@@ -43,8 +44,8 @@ Core invariant:
 
 ### Automation and PR lifecycle
 
-- `Updater` orchestrates managed dependency update PRs with `ManagedDependencyPullRequestPlanner`, `ManagedDependencyReleaseResolver`, and `ManagedDependencyInstaller`
-- `CoreUpdater` handles WordPress core PRs and delegates archive application to `CoreArchiveApplier`
+- `Updater` orchestrates managed dependency update PRs, including release resolution, installation, branch updates, and PR lifecycle checks
+- `CoreUpdater` handles WordPress core PRs and archive application
 - `FrameworkSyncer` handles vendored framework self-update PRs
 - `PullRequestBlocker` enforces blocked-by queueing rules
 

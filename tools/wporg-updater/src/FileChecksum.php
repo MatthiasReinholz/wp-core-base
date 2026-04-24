@@ -10,9 +10,9 @@ final class FileChecksum
 {
     public static function sha256(string $path): string
     {
-        $checksum = hash_file('sha256', $path);
+        $checksum = @hash_file('sha256', $path);
 
-        if (! is_string($checksum) || $checksum === '') {
+        if ($checksum === false) {
             throw new RuntimeException(sprintf('Unable to hash file: %s', $path));
         }
 

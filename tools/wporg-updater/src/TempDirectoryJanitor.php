@@ -97,7 +97,7 @@ final class TempDirectoryJanitor
     private function matchesPrefix(string $entry): bool
     {
         foreach ($this->prefixes as $prefix) {
-            if (is_string($prefix) && $prefix !== '' && str_starts_with($entry, $prefix)) {
+            if ($prefix !== '' && str_starts_with($entry, $prefix)) {
                 return true;
             }
         }
@@ -134,4 +134,3 @@ final class TempDirectoryJanitor
         return rmdir($path);
     }
 }
-

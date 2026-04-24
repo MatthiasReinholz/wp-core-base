@@ -97,9 +97,9 @@ final class WordPressCoreClient
                 throw new RuntimeException(sprintf('WordPress core checksum verification failed: missing file %s.', $relativePath));
             }
 
-            $actualChecksum = hash_file('md5', $absolutePath);
+            $actualChecksum = @hash_file('md5', $absolutePath);
 
-            if (! is_string($actualChecksum) || $actualChecksum === '') {
+            if ($actualChecksum === false) {
                 throw new RuntimeException(sprintf('WordPress core checksum verification failed: unable to hash %s.', $relativePath));
             }
 

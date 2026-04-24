@@ -228,15 +228,45 @@ final class DependencyAuthoringService
         ];
     }
 
-    public function renderDependencyList(): string
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function dependencyList(bool $includeFreshness = false, bool $failOnSourceErrors = false): array
+    {
+        $items = [];
+
+        foreach ($this->config->dependencies() as $dependency) {
+            $item = [
+                'component_key' => $dependency['component_key'],
+                'name' => $dependency['name'],
+                'slug' => $dependency['slug'],
+                'kind' => $dependency['kind'],
+                'management' => $dependency['management'],
+                'source' => $dependency['source'],
+                'path' => $dependency['path'],
+                'version' => $dependency['version'],
+            ];
+
+            if ($includeFreshness) {
+                $item['freshness'] = $this->dependencyFreshness($dependency, $failOnSourceErrors);
+            }
+
+            $items[] = $item;
+        }
+
+        return $items;
+    }
+
+    public function renderDependencyList(bool $includeFreshness = false, bool $failOnSourceErrors = false): string
     {
         $lines = [];
         $lines[] = 'Configured dependencies:';
         $lines[] = '';
+        $dependencies = $this->dependencyList($includeFreshness, $failOnSourceErrors);
 
         foreach (['managed', 'local', 'ignored'] as $management) {
             $group = array_values(array_filter(
-                $this->config->dependencies(),
+                $dependencies,
                 static fn (array $dependency): bool => $dependency['management'] === $management
             ));
 
@@ -247,7 +277,7 @@ final class DependencyAuthoringService
             $lines[] = strtoupper($management);
 
             foreach ($group as $dependency) {
-                $lines[] = sprintf(
+                $line = sprintf(
                     '- %s | %s | %s | %s | %s',
                     $dependency['kind'],
                     $dependency['source'],
@@ -255,12 +285,80 @@ final class DependencyAuthoringService
                     $dependency['path'],
                     $dependency['version'] ?? '-'
                 );
+
+                if ($includeFreshness) {
+                    $freshness = is_array($dependency['freshness'] ?? null) ? $dependency['freshness'] : [];
+                    $line .= sprintf(
+                        ' | latest:%s | %s',
+                        (string) ($freshness['latest_version'] ?? '-'),
+                        (string) ($freshness['status'] ?? 'unknown')
+                    );
+
+                    if (isset($freshness['error'])) {
+                        $line .= sprintf(' (%s)', (string) $freshness['error']);
+                    }
+                }
+
+                $lines[] = $line;
             }
 
             $lines[] = '';
         }
 
         return rtrim(implode("\n", $lines)) . "\n";
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @return array<string, mixed>|null
+     */
+    private function dependencyFreshness(array $dependency, bool $failOnSourceErrors): ?array
+    {
+        if ($dependency['management'] !== 'managed' || $dependency['source'] === 'local') {
+            return null;
+        }
+
+        try {
+            $catalog = $this->managedSourceRegistry->for($dependency)->fetchCatalog($dependency);
+        } catch (RuntimeException $exception) {
+            if ($failOnSourceErrors) {
+                throw $exception;
+            }
+
+            return [
+                'status' => 'source-error',
+                'latest_version' => null,
+                'latest_release_at' => null,
+                'error' => OutputRedactor::redact($exception->getMessage()),
+            ];
+        }
+
+        $currentVersion = is_string($dependency['version'] ?? null) && $dependency['version'] !== ''
+            ? (string) $dependency['version']
+            : null;
+        $latestVersion = is_string($catalog['latest_version'] ?? null) && $catalog['latest_version'] !== ''
+            ? (string) $catalog['latest_version']
+            : null;
+        $latestReleaseAt = is_string($catalog['latest_release_at'] ?? null) && $catalog['latest_release_at'] !== ''
+            ? (string) $catalog['latest_release_at']
+            : null;
+
+        if ($currentVersion === null || $latestVersion === null) {
+            $status = 'unknown';
+        } elseif (version_compare($currentVersion, $latestVersion, '<')) {
+            $status = 'outdated';
+        } elseif (version_compare($currentVersion, $latestVersion, '>')) {
+            $status = 'ahead';
+        } else {
+            $status = 'current';
+        }
+
+        return [
+            'status' => $status,
+            'current_version' => $currentVersion,
+            'latest_version' => $latestVersion,
+            'latest_release_at' => $latestReleaseAt,
+        ];
     }
 
     public static function defaultGitHubTokenEnv(string $slug, ?string $repository = null): string
@@ -748,7 +846,7 @@ final class DependencyAuthoringService
             $dependencies[] = $entry;
         }
 
-        $manifest['dependencies'] = array_values($dependencies);
+        $manifest['dependencies'] = $dependencies;
 
         return Config::fromArray($this->config->repoRoot, $manifest, $this->config->manifestPath);
     }
@@ -836,7 +934,6 @@ final class DependencyAuthoringService
     }
 
     /**
-     * @param array<string, mixed> $dependency
      * @param array<string, mixed> $options
      */
     private function resolvedPremiumProviderFromOptions(string $source, array $options): ?string

@@ -98,12 +98,12 @@ final class FrameworkSyncer
             ];
         });
 
-        $installPlan = (array) ($inspection['install_plan'] ?? []);
-        $report['target_wordpress_core'] = (string) ($inspection['target_wordpress_core'] ?? $this->framework->baseline['wordpress_core']);
-        $report['changed_paths'] = array_values(array_map('strval', (array) ($installPlan['changed_paths'] ?? [])));
-        $report['refreshed_files'] = array_values(array_map('strval', (array) ($installPlan['refreshed_files'] ?? [])));
-        $report['removed_files'] = array_values(array_map('strval', (array) ($installPlan['removed_files'] ?? [])));
-        $report['skipped_files'] = array_values(array_map('strval', (array) ($installPlan['skipped_files'] ?? [])));
+        $installPlan = $inspection['install_plan'];
+        $report['target_wordpress_core'] = (string) $inspection['target_wordpress_core'];
+        $report['changed_paths'] = $installPlan['changed_paths'];
+        $report['refreshed_files'] = $installPlan['refreshed_files'];
+        $report['removed_files'] = $installPlan['removed_files'];
+        $report['skipped_files'] = $installPlan['skipped_files'];
         $report['would_fail_on_skipped_managed_files'] = $failOnSkippedManagedFiles && $report['skipped_files'] !== [];
 
         return $report;
@@ -178,7 +178,7 @@ final class FrameworkSyncer
             $this->createPullRequestForLatest(
                 $latestRelease,
                 $scope,
-                array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
+                array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs),
                 $defaultBranch,
                 $baseRevision,
                 $failOnSkippedManagedFiles
@@ -452,8 +452,8 @@ final class FrameworkSyncer
             );
         });
 
-        $changedPaths = array_values(array_map('strval', (array) ($installerResult['changed_paths'] ?? [])));
-        $skippedFiles = array_values(array_map('strval', (array) ($installerResult['skipped_files'] ?? [])));
+        $changedPaths = $installerResult['changed_paths'];
+        $skippedFiles = $installerResult['skipped_files'];
 
         if ($failOnSkippedManagedFiles && $skippedFiles !== []) {
             throw new RuntimeException($this->strictSkippedManagedFilesMessage((string) ($releaseData['version'] ?? ''), $skippedFiles));
@@ -625,7 +625,7 @@ final class FrameworkSyncer
 
             if (($metadata['target_version'] ?? null) === $targetVersion) {
                 $pullRequest['metadata'] = $metadata;
-                $pullRequest['planned_target_version'] = (string) ($metadata['target_version'] ?? '');
+                $pullRequest['planned_target_version'] = (string) $metadata['target_version'];
                 $pullRequest['planned_release_at'] = (string) ($metadata['release_at'] ?? '');
                 $matching[] = $pullRequest;
             }

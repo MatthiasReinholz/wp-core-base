@@ -237,6 +237,30 @@ function run_cli_json_contract_tests(
     $assert(($adoptPlanJson['adopted_from'] ?? null) === 'plugin:local:premium-plan-plugin', 'Expected adopt-dependency --plan --json to identify the source dependency.');
     $assert(($adoptPlanJson['selected_version'] ?? null) === '2.3.4', 'Expected adopt-dependency --plan --json to preserve the current local version through the plan.');
 
+    $listDependenciesJson = run_command_json($adoptJsonRoot, [
+        'php',
+        $repoRoot . '/tools/wporg-updater/bin/wporg-updater.php',
+        'list-dependencies',
+        '--repo-root=.',
+        '--freshness',
+        '--json',
+    ]);
+    $assert(($listDependenciesJson['operation'] ?? null) === 'list-dependencies', 'Expected list-dependencies --json to report the operation type.');
+    $assert(is_array($listDependenciesJson['dependencies'] ?? null), 'Expected list-dependencies --json to include structured dependencies.');
+    $firstListedDependency = is_array($listDependenciesJson['dependencies'][0] ?? null) ? $listDependenciesJson['dependencies'][0] : [];
+    $assert(array_key_exists('freshness', $firstListedDependency) && $firstListedDependency['freshness'] === null, 'Expected local entries to use null freshness in freshness reports.');
+
+    $inspectReleaseAssetsMissingRepository = run_command_json_allow_failure($repoRoot, [
+        'php',
+        'tools/wporg-updater/bin/wporg-updater.php',
+        'inspect-release-assets',
+        '--repo-root=.',
+        '--source=github-release',
+        '--json',
+    ]);
+    $assert($inspectReleaseAssetsMissingRepository['exit_code'] === 1, 'Expected inspect-release-assets --json to fail when required source options are missing.');
+    $assert(str_contains((string) ($inspectReleaseAssetsMissingRepository['payload']['error'] ?? ''), '--github-repository'), 'Expected inspect-release-assets --json to identify the missing GitHub repository option.');
+
     ZipExtractor::assertSafeEntryName('wordpress/wp-includes/version.php');
     $zipTraversalRejected = false;
 

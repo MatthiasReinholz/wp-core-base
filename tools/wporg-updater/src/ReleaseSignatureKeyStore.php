@@ -35,7 +35,7 @@ final class ReleaseSignatureKeyStore
         $keyringPaths = [$defaultPath];
 
         foreach ($rotatedKeys as $rotatedKeyPath) {
-            if (is_string($rotatedKeyPath) && trim($rotatedKeyPath) !== '') {
+            if (trim($rotatedKeyPath) !== '') {
                 $keyringPaths[] = $rotatedKeyPath;
             }
         }
@@ -53,7 +53,7 @@ final class ReleaseSignatureKeyStore
         $paths[] = $defaultPath;
 
         foreach ($rotatedKeys as $rotatedKeyPath) {
-            if (is_string($rotatedKeyPath) && trim($rotatedKeyPath) !== '') {
+            if (trim($rotatedKeyPath) !== '') {
                 $paths[] = $rotatedKeyPath;
             }
         }

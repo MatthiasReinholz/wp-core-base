@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 return array (
-  'manifest_checksum' => 'sha256:5f18f2d0b5f4a60884b965998841e4df344af851cad2e7f99a442b74e851b029',
-  'plugins' => 
+  'manifest_checksum' => 'sha256:9526cd91b8457a86792da2bed24bfe3a4343f0ab2131a0ade783f78df1214c93',
+  'plugins' =>
   array (
-    'akismet/akismet.php' => 
+    'akismet/akismet.php' =>
     array (
       'component_key' => 'plugin:local:akismet',
       'management' => 'local',
@@ -14,7 +14,7 @@ return array (
       'workflow_managed' => false,
       'label' => 'Local code managed in-repo',
     ),
-    'contact-form-7/wp-contact-form-7.php' => 
+    'contact-form-7/wp-contact-form-7.php' =>
     array (
       'component_key' => 'plugin:wordpress.org:contact-form-7',
       'management' => 'managed',
@@ -22,7 +22,7 @@ return array (
       'workflow_managed' => true,
       'label' => 'Managed by wp-core-base workflows',
     ),
-    'jetpack/jetpack.php' => 
+    'jetpack/jetpack.php' =>
     array (
       'component_key' => 'plugin:wordpress.org:jetpack',
       'management' => 'managed',
@@ -30,7 +30,7 @@ return array (
       'workflow_managed' => true,
       'label' => 'Managed by wp-core-base workflows',
     ),
-    'redirection/redirection.php' => 
+    'redirection/redirection.php' =>
     array (
       'component_key' => 'plugin:wordpress.org:redirection',
       'management' => 'managed',
@@ -38,7 +38,7 @@ return array (
       'workflow_managed' => true,
       'label' => 'Managed by wp-core-base workflows',
     ),
-    'woocommerce/woocommerce.php' => 
+    'woocommerce/woocommerce.php' =>
     array (
       'component_key' => 'plugin:wordpress.org:woocommerce',
       'management' => 'managed',
@@ -47,7 +47,7 @@ return array (
       'label' => 'Managed by wp-core-base workflows',
     ),
   ),
-  'mu_plugins' => 
+  'mu_plugins' =>
   array (
   ),
 );

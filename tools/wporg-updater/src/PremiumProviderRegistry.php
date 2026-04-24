@@ -212,10 +212,6 @@ final class PremiumProviderRegistry
         $lookupKeys = [];
 
         foreach ($dependencies as $dependency) {
-            if (! is_array($dependency)) {
-                continue;
-            }
-
             $source = $dependency['source'] ?? null;
 
             if (! is_string($source) || ! PremiumSourceResolver::isPremiumSource($source)) {

@@ -109,7 +109,19 @@ final class DependencyAuthoringModeHandler implements CliModeHandler
             return 0;
         }
 
-        fwrite(STDOUT, $authoringService->renderDependencyList());
+        $includeFreshness = isset($options['freshness']);
+        $failOnSourceErrors = isset($options['fail-on-source-errors']);
+
+        if ($this->jsonOutput) {
+            ($this->emitJson)([
+                'status' => 'success',
+                'operation' => 'list-dependencies',
+                'freshness' => $includeFreshness,
+                'dependencies' => $authoringService->dependencyList($includeFreshness, $failOnSourceErrors),
+            ]);
+        }
+
+        fwrite(STDOUT, $authoringService->renderDependencyList($includeFreshness, $failOnSourceErrors));
 
         return 0;
     }

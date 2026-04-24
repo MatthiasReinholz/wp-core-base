@@ -125,7 +125,7 @@ Do not assume:
 
 When you add or harden a `github-release` or `gitlab-release` managed dependency:
 
-1. inspect the upstream hosted Release assets first
+1. inspect the upstream hosted Release assets first, preferably with `inspect-release-assets --json`
 2. confirm the real ZIP asset name or glob
 3. confirm whether a matching checksum sidecar asset exists
 4. only then set:

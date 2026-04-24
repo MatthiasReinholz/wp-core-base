@@ -18,10 +18,10 @@ final class ManagedPullRequestQueue
     ): array {
         return array_values(array_unique(array_merge(
             self::unresolvedBlockedBy($gitHubClient, $blockedBy),
-            array_values(array_map(
+            array_map(
                 static fn (array $previous): int => (int) $previous['number'],
                 $activePlannedPrs
-            ))
+            )
         )));
     }
 

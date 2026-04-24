@@ -20,9 +20,10 @@ final class BranchRollbackGuard
     private bool $completed = false;
 
     public function __construct(
-        private readonly string $repoRoot,
+        string $repoRoot,
         private readonly GitRunnerInterface $gitRunner,
     ) {
+        unset($repoRoot);
     }
 
     public function begin(): void

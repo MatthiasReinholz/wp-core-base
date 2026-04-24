@@ -171,6 +171,8 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
      */
     private function requestWithRetry(string $method, string $url, array $headers = [], array $options = []): array
     {
+        $this->assertAllowedUrl($url, $options);
+
         $attempts = max(1, (int) ($options['retry_attempts'] ?? 3));
         $delayMilliseconds = max(0, (int) ($options['retry_initial_delay_milliseconds'] ?? 250));
         $delayMicroseconds = $delayMilliseconds * 1000;
@@ -292,7 +294,7 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
 
         if ($result === false) {
             $error = curl_error($curl);
-            curl_close($curl);
+            $this->closeCurl($curl);
 
             if ($bodyLimitExceeded) {
                 throw new RuntimeException(sprintf('HTTP response body exceeded the configured byte limit for %s.', $url));
@@ -302,7 +304,7 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         }
 
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
+        $this->closeCurl($curl);
 
         if ($followRedirects && in_array($status, self::REDIRECT_STATUSES, true)) {
             $location = $responseHeaders['location'] ?? null;
@@ -432,7 +434,7 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
 
         if ($result === false) {
             $error = curl_error($curl);
-            curl_close($curl);
+            $this->closeCurl($curl);
             fclose($fileHandle);
 
             if ($downloadLimitExceeded) {
@@ -443,7 +445,7 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         }
 
         $status = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
+        $this->closeCurl($curl);
         fclose($fileHandle);
 
         if (in_array($status, self::REDIRECT_STATUSES, true)) {
@@ -575,10 +577,7 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         return false;
     }
 
-    /**
-     * @param resource $curl
-     */
-    private function applyProtocolRestrictions($curl, bool $followRedirects): void
+    private function applyProtocolRestrictions(\CurlHandle $curl, bool $followRedirects): void
     {
         if (defined('CURLOPT_PROTOCOLS_STR') && defined('CURLOPT_REDIR_PROTOCOLS_STR')) {
             curl_setopt($curl, CURLOPT_PROTOCOLS_STR, 'https');
@@ -588,6 +587,13 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
 
         curl_setopt($curl, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
         curl_setopt($curl, CURLOPT_REDIR_PROTOCOLS, $followRedirects ? CURLPROTO_HTTPS : 0);
+    }
+
+    private function closeCurl(\CurlHandle $curl): void
+    {
+        if (PHP_VERSION_ID < 80500) {
+            curl_close($curl);
+        }
     }
 
     /**

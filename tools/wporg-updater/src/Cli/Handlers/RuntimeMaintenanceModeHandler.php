@@ -36,7 +36,7 @@ final class RuntimeMaintenanceModeHandler implements CliModeHandler
      */
     public function handle(string $mode, array $options): int
     {
-        $adminGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector($this->config->runtime));
+        $adminGovernanceExporter = new AdminGovernanceExporter();
 
         if ($mode === 'stage-runtime') {
             $runtimeInspector = new RuntimeInspector($this->config->runtime);

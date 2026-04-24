@@ -104,6 +104,13 @@ These define the runtime hygiene contract for staging and validation.
 
 `managed_sanitize_paths` and `managed_sanitize_files` define which non-runtime files the framework may remove from managed dependencies during `sync` before validation, replacement, and checksum calculation.
 
+Default runtime hygiene values:
+
+- `forbidden_paths`: `.git`, `.github`, `.gitlab`, `.gitea`, `.forgejo`, `.circleci`, `.wordpress-org`, `node_modules`, `docs`, `doc`, `tests`, `test`, `__tests__`, `examples`, `example`, `demo`, `screenshots`
+- `forbidden_files`: `README*`, `CHANGELOG*`, `.gitignore`, `.gitattributes`, `.gitlab-ci.yml`, `bitbucket-pipelines.yml`, `phpunit.xml*`, `composer.json`, `composer.lock`, `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`
+- `managed_sanitize_paths`: each managed runtime root plus `.github`, `.gitlab`, `.gitea`, `.forgejo`, `.circleci`, `.wordpress-org`, `node_modules`, `docs`, `doc`, `tests`, `test`, `__tests__`, `examples`, `example`, `demo`, `screenshots`
+- `managed_sanitize_files`: `README*`, `CHANGELOG*`, `.gitignore`, `.gitattributes`, `.gitlab-ci.yml`, `bitbucket-pipelines.yml`, `phpunit.xml*`, `composer.json`, `composer.lock`, `package.json`, `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`
+
 ## `github`
 
 Keys:

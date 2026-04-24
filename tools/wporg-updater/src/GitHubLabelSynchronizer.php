@@ -14,7 +14,7 @@ final class GitHubLabelSynchronizer
 
     /**
      * @param array<string, array{color:string, description:string}> $definitions
-     * @param callable(string,string,?array<string,mixed>=): array<string, mixed>|list<mixed> $requestJson
+     * @param callable(string,string,?array<string,mixed>=):(array<string, mixed>|list<mixed>) $requestJson
      */
     public function ensureLabels(array $definitions, callable $requestJson): void
     {

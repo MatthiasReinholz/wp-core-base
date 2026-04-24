@@ -96,7 +96,7 @@ final class CoreUpdater
                 currentVersion: $current['version'],
                 release: $release,
                 scope: $scope,
-                blockedBy: array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
+                blockedBy: array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs),
                 defaultBranch: $defaultBranch,
                 baseRevision: $baseRevision,
             );

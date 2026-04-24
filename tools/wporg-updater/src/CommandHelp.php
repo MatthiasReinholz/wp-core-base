@@ -14,6 +14,7 @@ final class CommandHelp
             'adopt-dependency' => self::adoptDependency($commandPrefix),
             'remove-dependency' => self::removeDependency($commandPrefix),
             'framework-sync' => self::frameworkSync($phpCommandPrefix),
+            'inspect-release-assets' => self::inspectReleaseAssets($phpCommandPrefix),
             'scaffold-premium-provider' => self::scaffoldPremiumProvider($commandPrefix),
             'sync' => self::sync($phpCommandPrefix),
             default => self::general($commandPrefix, $phpCommandPrefix),
@@ -43,7 +44,8 @@ Usage:
   {$phpCommandPrefix} add-dependency [--repo-root=/path] --source=... --kind=... [--slug=...] [--path=...]
   {$phpCommandPrefix} adopt-dependency [--repo-root=/path] --source=wordpress.org|github-release|gitlab-release|generic-json|premium --kind=... --slug=... [--preserve-version]
   {$phpCommandPrefix} remove-dependency [--repo-root=/path] [--component-key=...] [--slug=...] [--kind=...] [--source=...] [--delete-path]
-  {$phpCommandPrefix} list-dependencies [--repo-root=/path]
+  {$phpCommandPrefix} list-dependencies [--repo-root=/path] [--freshness] [--json]
+  {$phpCommandPrefix} inspect-release-assets [--repo-root=/path] --source=github-release --github-repository=owner/repo [--github-release-asset-pattern='*.zip'] [--checksum-asset-pattern='*.sha256'] [--json]
   {$phpCommandPrefix} scaffold-premium-provider [--repo-root=/path] --provider=your-provider [--class=Project\\WpCoreBase\\Premium\\YourProviderManagedSource] [--path=.wp-core-base/premium-providers/your-provider.php]
   {$phpCommandPrefix} pr-blocker [--pr-number=123] [--json]
   {$phpCommandPrefix} pr-blocker-reconcile [--json]
@@ -53,8 +55,43 @@ Use:
   {$commandPrefix} help adopt-dependency
   {$commandPrefix} help remove-dependency
   {$commandPrefix} help framework-sync
+  {$commandPrefix} help inspect-release-assets
   {$commandPrefix} help scaffold-premium-provider
   {$commandPrefix} help sync
+
+TEXT;
+    }
+
+    private static function inspectReleaseAssets(string $phpCommandPrefix): string
+    {
+        return <<<TEXT
+inspect-release-assets
+
+Purpose:
+  Inspect GitHub or GitLab Release assets without downloading or mutating runtime code.
+
+Common flags:
+  --repo-root=PATH
+  --source=github-release|gitlab-release
+  --github-repository=OWNER/REPO
+  --github-release-asset-pattern=PATTERN
+  --github-token-env=ENV_NAME
+  --gitlab-project=GROUP/PROJECT
+  --gitlab-release-asset-pattern=PATTERN
+  --gitlab-token-env=ENV_NAME
+  --gitlab-api-base=URL
+  --checksum-asset-pattern=PATTERN
+  --tag=v1.2.3
+  --version=1.2.3
+  --json
+
+Notes:
+  - use this before enabling checksum-sidecar verification for hosted release dependencies.
+  - the command reports which assets match archive and checksum patterns and whether the repo-level release age default is satisfied.
+
+Examples:
+  {$phpCommandPrefix} inspect-release-assets --repo-root=. --source=github-release --github-repository=owner/plugin --github-release-asset-pattern='*.zip' --checksum-asset-pattern='*.sha256' --json
+  {$phpCommandPrefix} inspect-release-assets --repo-root=. --source=gitlab-release --gitlab-project=group/plugin --gitlab-release-asset-pattern='*.zip' --checksum-asset-pattern='*.sha256'
 
 TEXT;
     }

@@ -30,7 +30,6 @@ function run_security_framework_contract_tests(
 ): void {
     $verifierReflection = new ReflectionClass(\WpOrgPluginUpdater\FrameworkReleaseVerifier::class);
     $extractChecksum = $verifierReflection->getMethod('extractChecksum');
-    $extractChecksum->setAccessible(true);
     $checksumRejected = false;
 
     try {
@@ -300,7 +299,6 @@ function run_security_framework_contract_tests(
     $assert($strictReport['would_fail_on_skipped_managed_files'] === true, 'Expected strict framework-sync check-only mode to report a failing preflight when managed files would be skipped.');
     $strictSyncerReflection = new ReflectionClass(FrameworkSyncer::class);
     $strictApplyMethod = $strictSyncerReflection->getMethod('checkoutAndApplyFrameworkVersion');
-    $strictApplyMethod->setAccessible(true);
     $strictFailureRaised = false;
 
     try {
