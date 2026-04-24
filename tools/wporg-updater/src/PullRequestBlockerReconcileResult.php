@@ -26,11 +26,11 @@ final class PullRequestBlockerReconcileResult
         return [
             'status' => $this->status,
             'exit_code' => $this->exitCode,
-            'results' => array_values(array_map(
+            'results' => array_map(
                 static fn (PullRequestBlockerResult $result): array => $result->toArray(),
                 $this->results
-            )),
-            'warnings' => array_values($this->warnings),
+            ),
+            'warnings' => $this->warnings,
         ];
     }
 }

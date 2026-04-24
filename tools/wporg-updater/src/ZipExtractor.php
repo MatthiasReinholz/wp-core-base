@@ -40,8 +40,8 @@ final class ZipExtractor
                 throw new RuntimeException(sprintf('Archive entry %s is missing stat metadata.', $entryName));
             }
 
-            $entrySize = (int) ($stat['size'] ?? 0);
-            $compressedSize = (int) ($stat['comp_size'] ?? 0);
+            $entrySize = (int) $stat['size'];
+            $compressedSize = (int) $stat['comp_size'];
             $totalUncompressedBytes += $entrySize;
 
             if ($totalUncompressedBytes > self::MAX_TOTAL_UNCOMPRESSED_BYTES) {

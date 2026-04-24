@@ -653,117 +653,22 @@ final class Config
             'staged_kinds' => self::kindList($value['staged_kinds'] ?? self::RUNTIME_KINDS, 'runtime.staged_kinds'),
             'validated_kinds' => self::kindList($value['validated_kinds'] ?? self::RUNTIME_KINDS, 'runtime.validated_kinds'),
             'forbidden_paths' => self::stringList(
-                $value['forbidden_paths'] ?? [
-                    '.git',
-                    '.github',
-                    '.gitlab',
-                    '.gitea',
-                    '.forgejo',
-                    '.circleci',
-                    '.wordpress-org',
-                    'node_modules',
-                    'docs',
-                    'doc',
-                    'tests',
-                    'test',
-                    '__tests__',
-                    'examples',
-                    'example',
-                    'demo',
-                    'screenshots',
-                ],
+                $value['forbidden_paths'] ?? RuntimeHygieneDefaults::FORBIDDEN_PATHS,
                 'runtime.forbidden_paths'
             ),
             'forbidden_files' => self::stringList(
-                $value['forbidden_files'] ?? [
-                    'README*',
-                    'CHANGELOG*',
-                    '.gitignore',
-                    '.gitattributes',
-                    '.gitlab-ci.yml',
-                    'bitbucket-pipelines.yml',
-                    'phpunit.xml*',
-                    'composer.json',
-                    'composer.lock',
-                    'package.json',
-                    'package-lock.json',
-                    'pnpm-lock.yaml',
-                    'yarn.lock',
-                ],
+                $value['forbidden_files'] ?? RuntimeHygieneDefaults::FORBIDDEN_FILES,
                 'runtime.forbidden_files'
             ),
             'allow_runtime_paths' => $allowRuntimePaths,
             'strip_paths' => self::normalizedPathList($value['strip_paths'] ?? [], 'runtime.strip_paths'),
             'strip_files' => self::stringList($value['strip_files'] ?? [], 'runtime.strip_files'),
             'managed_sanitize_paths' => self::normalizedPathList(
-                $value['managed_sanitize_paths'] ?? [
-                    $paths['plugins_root'] . '/.github',
-                    $paths['plugins_root'] . '/.gitlab',
-                    $paths['plugins_root'] . '/.gitea',
-                    $paths['plugins_root'] . '/.forgejo',
-                    $paths['plugins_root'] . '/.circleci',
-                    $paths['plugins_root'] . '/.wordpress-org',
-                    $paths['plugins_root'] . '/node_modules',
-                    $paths['plugins_root'] . '/docs',
-                    $paths['plugins_root'] . '/doc',
-                    $paths['plugins_root'] . '/tests',
-                    $paths['plugins_root'] . '/test',
-                    $paths['plugins_root'] . '/__tests__',
-                    $paths['plugins_root'] . '/examples',
-                    $paths['plugins_root'] . '/example',
-                    $paths['plugins_root'] . '/demo',
-                    $paths['plugins_root'] . '/screenshots',
-                    $paths['themes_root'] . '/.github',
-                    $paths['themes_root'] . '/.gitlab',
-                    $paths['themes_root'] . '/.gitea',
-                    $paths['themes_root'] . '/.forgejo',
-                    $paths['themes_root'] . '/.circleci',
-                    $paths['themes_root'] . '/.wordpress-org',
-                    $paths['themes_root'] . '/node_modules',
-                    $paths['themes_root'] . '/docs',
-                    $paths['themes_root'] . '/doc',
-                    $paths['themes_root'] . '/tests',
-                    $paths['themes_root'] . '/test',
-                    $paths['themes_root'] . '/__tests__',
-                    $paths['themes_root'] . '/examples',
-                    $paths['themes_root'] . '/example',
-                    $paths['themes_root'] . '/demo',
-                    $paths['themes_root'] . '/screenshots',
-                    $paths['mu_plugins_root'] . '/.github',
-                    $paths['mu_plugins_root'] . '/.gitlab',
-                    $paths['mu_plugins_root'] . '/.gitea',
-                    $paths['mu_plugins_root'] . '/.forgejo',
-                    $paths['mu_plugins_root'] . '/.circleci',
-                    $paths['mu_plugins_root'] . '/.wordpress-org',
-                    $paths['mu_plugins_root'] . '/node_modules',
-                    $paths['mu_plugins_root'] . '/docs',
-                    $paths['mu_plugins_root'] . '/doc',
-                    $paths['mu_plugins_root'] . '/tests',
-                    $paths['mu_plugins_root'] . '/test',
-                    $paths['mu_plugins_root'] . '/__tests__',
-                    $paths['mu_plugins_root'] . '/examples',
-                    $paths['mu_plugins_root'] . '/example',
-                    $paths['mu_plugins_root'] . '/demo',
-                    $paths['mu_plugins_root'] . '/screenshots',
-                ],
+                $value['managed_sanitize_paths'] ?? RuntimeHygieneDefaults::managedSanitizePaths($paths),
                 'runtime.managed_sanitize_paths'
             ),
             'managed_sanitize_files' => self::stringList(
-                $value['managed_sanitize_files'] ?? [
-                    'README*',
-                    'CHANGELOG*',
-                    '.gitignore',
-                    '.gitattributes',
-                    '.gitlab-ci.yml',
-                    'bitbucket-pipelines.yml',
-                    'phpunit.xml*',
-                    'composer.json',
-                    'composer.lock',
-                    'package.json',
-                    'package-lock.json',
-                    'pnpm-lock.yaml',
-                    'yarn.lock',
-                ],
+                $value['managed_sanitize_files'] ?? RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
                 'runtime.managed_sanitize_files'
             ),
         ];
@@ -992,7 +897,7 @@ final class Config
                 throw new RuntimeException(sprintf('Generic JSON dependency %s must define source_config.generic_json_url.', $slug));
             }
 
-            if ($source === 'generic-json' && $genericJsonUrl !== null && ! self::isHttpsUrl($genericJsonUrl)) {
+            if ($source === 'generic-json' && ! self::isHttpsUrl($genericJsonUrl)) {
                 throw new RuntimeException(sprintf('Generic JSON dependency %s must use an HTTPS source_config.generic_json_url.', $slug));
             }
 
@@ -1106,10 +1011,10 @@ final class Config
             }
         }
 
-        $dependencyPaths = array_values(array_map(
+        $dependencyPaths = array_map(
             static fn (array $dependency): string => (string) $dependency['path'],
             $dependencies
-        ));
+        );
         sort($dependencyPaths);
 
         for ($index = 0, $count = count($dependencyPaths); $index < $count; $index++) {

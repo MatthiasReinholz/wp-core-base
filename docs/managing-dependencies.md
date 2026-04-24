@@ -107,6 +107,18 @@ Recommended hardened setup:
 
 That makes `sync` verify the downloaded archive before extraction. If you prefer a repo-wide default, set `security.github_release_verification` and `security.managed_release_min_age_hours` in the manifest instead.
 
+Before enabling checksum-sidecar verification, inspect the release assets:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base inspect-release-assets \
+  --repo-root=. \
+  --source=github-release \
+  --github-repository=owner/example-plugin \
+  --github-release-asset-pattern='*.zip' \
+  --checksum-asset-pattern='*.sha256' \
+  --json
+```
+
 ## Add A GitLab Release Plugin
 
 ```bash
@@ -189,6 +201,8 @@ If an AI coding agent is upgrading a downstream repo to use hosted release trust
 7. run `doctor --repo-root=.`
 8. run `sync`
 9. only keep `checksum-sidecar-required` if the upstream checksum file really binds the digest to the ZIP filename
+
+Use `inspect-release-assets --json` for step 1 when the source is a GitHub or GitLab Release.
 
 Recommended hosted GitHub release manifest shape:
 
@@ -565,6 +579,12 @@ This prints configured dependencies grouped by:
 - `managed`
 - `local`
 - `ignored`
+
+Add `--freshness --json` to compare managed entries with their latest source catalog without creating branches or pull requests:
+
+```bash
+vendor/wp-core-base/bin/wp-core-base list-dependencies --repo-root=. --freshness --json
+```
 
 ## Interactive Mode
 

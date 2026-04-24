@@ -49,6 +49,7 @@ use WpOrgPluginUpdater\PrBodyRenderer;
 use WpOrgPluginUpdater\PullRequestBlocker;
 use WpOrgPluginUpdater\ReleaseClassifier;
 use WpOrgPluginUpdater\ReleaseSignatureKeyStore;
+use WpOrgPluginUpdater\RuntimeHygieneDefaults;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeOwnershipInspector;
 use WpOrgPluginUpdater\RuntimeStager;
@@ -56,6 +57,7 @@ use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\SyncReport;
 use WpOrgPluginUpdater\TempDirectoryJanitor;
 use WpOrgPluginUpdater\ArchiveDownloader;
+use WpOrgPluginUpdater\Cli\Handlers\ReleaseAssetInspectionModeHandler;
 use WpOrgPluginUpdater\WordPressCoreClient;
 use WpOrgPluginUpdater\WordPressOrgManagedSource;
 use WpOrgPluginUpdater\WordPressOrgSource;
@@ -668,7 +670,6 @@ $assert = static function (bool $condition, string $message): void {
 
 $premiumMetadataDefaults = (new ExamplePremiumManagedSource(new HttpClient(), new PremiumCredentialsStore('{}')));
 $premiumMetadataDefaultsMethod = new ReflectionMethod(AbstractPremiumManagedSource::class, 'premiumMetadataRequestOptions');
-$premiumMetadataDefaultsMethod->setAccessible(true);
 $defaultMetadataOptions = $premiumMetadataDefaultsMethod->invoke($premiumMetadataDefaults);
 $assert(
     is_array($defaultMetadataOptions) && ($defaultMetadataOptions['max_body_bytes'] ?? null) === 5 * 1024 * 1024,
@@ -701,13 +702,18 @@ $runtimeDefaults = [
     'ownership_roots' => ['cms/plugins', 'cms/themes', 'cms/mu-plugins'],
     'staged_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'],
     'validated_kinds' => ['plugin', 'theme', 'mu-plugin-package', 'mu-plugin-file', 'runtime-file', 'runtime-directory'],
-    'forbidden_paths' => ['.git', '.github', '.gitlab', '.gitea', '.forgejo', '.circleci', '.wordpress-org', 'node_modules', 'docs', 'doc', 'tests', 'test', '__tests__', 'examples', 'example', 'demo', 'screenshots'],
-    'forbidden_files' => ['README*', 'CHANGELOG*', '.gitignore', '.gitattributes', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'phpunit.xml*', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+    'forbidden_paths' => RuntimeHygieneDefaults::FORBIDDEN_PATHS,
+    'forbidden_files' => RuntimeHygieneDefaults::FORBIDDEN_FILES,
     'allow_runtime_paths' => [],
     'strip_paths' => [],
     'strip_files' => [],
-    'managed_sanitize_paths' => ['cms/plugins/.github', 'cms/plugins/.gitlab', 'cms/plugins/.gitea', 'cms/plugins/.forgejo', 'cms/plugins/.wordpress-org', 'cms/plugins/node_modules', 'cms/plugins/docs', 'cms/plugins/tests', 'cms/themes/.github', 'cms/themes/.gitlab', 'cms/themes/.gitea', 'cms/themes/.forgejo', 'cms/themes/.wordpress-org', 'cms/themes/node_modules', 'cms/themes/docs', 'cms/themes/tests', 'cms/mu-plugins/.github', 'cms/mu-plugins/.gitlab', 'cms/mu-plugins/.gitea', 'cms/mu-plugins/.forgejo', 'cms/mu-plugins/.wordpress-org', 'cms/mu-plugins/node_modules', 'cms/mu-plugins/docs', 'cms/mu-plugins/tests'],
-    'managed_sanitize_files' => ['README*', 'CHANGELOG*', '.gitlab-ci.yml', 'bitbucket-pipelines.yml', 'composer.json', 'composer.lock', 'package.json', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'],
+    'managed_sanitize_paths' => RuntimeHygieneDefaults::managedSanitizePaths([
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ]),
+    'managed_sanitize_files' => RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
 ];
 $checkoutActionSha = 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd';
 $setupPhpActionSha = 'shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f';
@@ -849,6 +855,159 @@ PHP
     );
 };
 
+$freshnessConfig = Config::fromArray($repoRoot, [
+    'profile' => 'content-only',
+    'paths' => [
+        'content_root' => 'cms',
+        'plugins_root' => 'cms/plugins',
+        'themes_root' => 'cms/themes',
+        'mu_plugins_root' => 'cms/mu-plugins',
+    ],
+    'core' => [
+        'mode' => 'external',
+        'enabled' => false,
+    ],
+    'runtime' => $runtimeDefaults,
+    'dependencies' => [[
+        'name' => 'Freshness Plugin',
+        'slug' => 'freshness-plugin',
+        'kind' => 'plugin',
+        'management' => 'managed',
+        'source' => 'wordpress.org',
+        'path' => 'cms/plugins/freshness-plugin',
+        'main_file' => 'freshness-plugin.php',
+        'version' => '1.0.0',
+        'checksum' => 'sha256:' . str_repeat('a', 64),
+        'archive_subdir' => '',
+        'extra_labels' => [],
+        'source_config' => [],
+        'policy' => [],
+    ]],
+]);
+$freshnessSource = new class implements ManagedDependencySource
+{
+    public function key(): string
+    {
+        return 'wordpress.org';
+    }
+
+    public function fetchCatalog(array $dependency): array
+    {
+        return [
+            'latest_version' => '2.0.0',
+            'latest_release_at' => '2026-04-01T00:00:00+00:00',
+        ];
+    }
+
+    public function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
+    {
+        throw new RuntimeException('Not used in freshness tests.');
+    }
+
+    public function downloadReleaseToFile(array $dependency, array $releaseData, string $destination): void
+    {
+        throw new RuntimeException('Not used in freshness tests.');
+    }
+
+    public function supportsForumSync(array $dependency): bool
+    {
+        return false;
+    }
+};
+$freshnessService = new DependencyAuthoringService(
+    $freshnessConfig,
+    new DependencyMetadataResolver(),
+    new RuntimeInspector($freshnessConfig->runtime),
+    new ManifestWriter(),
+    new ManagedSourceRegistry($freshnessSource)
+);
+$freshnessList = $freshnessService->dependencyList(includeFreshness: true);
+$assert(
+    ($freshnessList[0]['freshness']['status'] ?? null) === 'outdated'
+        && ($freshnessList[0]['freshness']['latest_version'] ?? null) === '2.0.0',
+    'Expected dependency freshness reporting to compare manifest versions with source catalogs.'
+);
+
+$releaseAssetInspector = new ReleaseAssetInspectionModeHandler(
+    $freshnessConfig,
+    new HttpClient(),
+    'bin/wp-core-base',
+    'php tools/wporg-updater/bin/wporg-updater.php',
+    false,
+    static function (array $payload): never {
+        throw new RuntimeException('JSON emission is not used in release asset inspection unit tests.');
+    }
+);
+$releaseInspectorReflection = new ReflectionClass(ReleaseAssetInspectionModeHandler::class);
+$githubAssets = $releaseInspectorReflection->getMethod('githubAssets')->invoke($releaseAssetInspector, [
+    'assets' => [
+        [
+            'name' => 'example-plugin.zip',
+            'url' => 'https://api.github.com/repos/example/plugin/releases/assets/1',
+            'browser_download_url' => 'https://github.com/example/plugin/releases/download/v1.0.0/example-plugin.zip',
+            'content_type' => 'application/zip',
+            'size' => 123,
+        ],
+        [
+            'name' => 'example-plugin.zip.sha256',
+            'url' => 'https://api.github.com/repos/example/plugin/releases/assets/2',
+            'browser_download_url' => 'https://github.com/example/plugin/releases/download/v1.0.0/example-plugin.zip.sha256',
+            'content_type' => 'text/plain',
+            'size' => 91,
+        ],
+    ],
+], '*.zip', '*.sha256');
+$assert(
+    ($githubAssets[0]['matches_archive_pattern'] ?? null) === true
+        && ($githubAssets[0]['matches_checksum_pattern'] ?? null) === false
+        && ($githubAssets[1]['matches_archive_pattern'] ?? null) === false
+        && ($githubAssets[1]['matches_checksum_pattern'] ?? null) === true,
+    'Expected release asset inspection to classify GitHub archive and checksum assets by pattern.'
+);
+$inspectionResult = $releaseInspectorReflection->getMethod('inspectionResult')->invoke(
+    $releaseAssetInspector,
+    'github-release',
+    'example/plugin',
+    '1.0.0',
+    gmdate(DATE_ATOM, time() - 7200),
+    'v1.0.0',
+    'https://github.com/example/plugin/releases/tag/v1.0.0',
+    '*.zip',
+    '*.sha256',
+    $githubAssets
+);
+$assert(($inspectionResult['archive_asset']['name'] ?? null) === 'example-plugin.zip', 'Expected release asset inspection to select the matching archive asset.');
+$assert(($inspectionResult['checksum_asset']['name'] ?? null) === 'example-plugin.zip.sha256', 'Expected release asset inspection to select the matching checksum asset.');
+$assert(($inspectionResult['warnings'] ?? null) === [], 'Expected release asset inspection not to warn when both archive and checksum patterns match.');
+$warningGithubAssets = $releaseInspectorReflection->getMethod('githubAssets')->invoke($releaseAssetInspector, [
+    'assets' => [
+        [
+            'name' => 'example-plugin.zip',
+            'url' => 'https://api.github.com/repos/example/plugin/releases/assets/1',
+            'browser_download_url' => 'https://github.com/example/plugin/releases/download/v1.0.0/example-plugin.zip',
+            'content_type' => 'application/zip',
+            'size' => 123,
+        ],
+    ],
+], 'missing-*.zip', null);
+$warningInspectionResult = $releaseInspectorReflection->getMethod('inspectionResult')->invoke(
+    $releaseAssetInspector,
+    'github-release',
+    'example/plugin',
+    '1.0.0',
+    gmdate(DATE_ATOM),
+    'v1.0.0',
+    'https://github.com/example/plugin/releases/tag/v1.0.0',
+    'missing-*.zip',
+    null,
+    $warningGithubAssets
+);
+$assert(
+    is_array($warningInspectionResult['warnings'] ?? null)
+        && count($warningInspectionResult['warnings']) === 2,
+    'Expected release asset inspection to warn when archive or checksum verification cannot be confirmed.'
+);
+
 $createPluginArchive = static function (string $archivePath, string $outerDirectory, string $slug, string $version, bool $includeReadme = true): void {
     $zip = new ZipArchive();
     $opened = $zip->open($archivePath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
@@ -967,7 +1126,6 @@ $assert(in_array('type:feature', $gitHubLabels, true), 'Expected GitHub release 
 $gitLabAutomationClient = new GitLabClient(new HttpClient(), 'example/group-project', 'token');
 $gitLabAutomationReflection = new ReflectionClass(GitLabClient::class);
 $normalizeGitLabMergeRequest = $gitLabAutomationReflection->getMethod('normalizeMergeRequest');
-$normalizeGitLabMergeRequest->setAccessible(true);
 $normalizedGitLabManagedMergeRequest = $normalizeGitLabMergeRequest->invoke($gitLabAutomationClient, [
     'iid' => 12,
     'title' => 'Update dependency',
@@ -988,7 +1146,6 @@ $normalizedGitLabForkMergeRequest = $normalizeGitLabMergeRequest->invoke($gitLab
 ]);
 $updaterRepositoryCheckReflection = new ReflectionClass(\WpOrgPluginUpdater\Updater::class);
 $isManagedRepositoryPullRequest = $updaterRepositoryCheckReflection->getMethod('isManagedRepositoryPullRequest');
-$isManagedRepositoryPullRequest->setAccessible(true);
 $updaterForRepositoryCheck = $updaterRepositoryCheckReflection->newInstanceWithoutConstructor();
 $assert(
     $isManagedRepositoryPullRequest->invoke($updaterForRepositoryCheck, $normalizedGitLabManagedMergeRequest) === true,
@@ -1994,7 +2151,6 @@ $assert(str_contains($compactReconcileWorkflow, "automation:framework-update"), 
 
 $updaterReflection = new ReflectionClass(\WpOrgPluginUpdater\Updater::class);
 $normalizedReleaseData = $updaterReflection->getMethod('normalizedReleaseData');
-$normalizedReleaseData->setAccessible(true);
 $updaterWithoutConstructor = $updaterReflection->newInstanceWithoutConstructor();
 $normalizedFallback = $normalizedReleaseData->invoke($updaterWithoutConstructor, $premiumSourceDetailsWithoutNotes, '6.3.0');
 $assert(
@@ -2006,7 +2162,6 @@ $assert(
     'Expected the updater to synthesize fallback notes text when a source omits release notes.'
 );
 $branchRefreshRequired = $updaterReflection->getMethod('branchRefreshRequired');
-$branchRefreshRequired->setAccessible(true);
 $assert(
     $branchRefreshRequired->invoke($updaterWithoutConstructor, [], 'abc123') === true,
     'Expected updater PR metadata without a recorded base revision to refresh once against the current base branch.'
@@ -2020,7 +2175,6 @@ $assert(
     'Expected updater PR metadata with a stale base revision to require branch refresh.'
 );
 $partitionPullRequestsByTargetVersion = $updaterReflection->getMethod('partitionPullRequestsByTargetVersion');
-$partitionPullRequestsByTargetVersion->setAccessible(true);
 [$canonicalPrs, $duplicatePrs] = $partitionPullRequestsByTargetVersion->invoke($updaterWithoutConstructor, [
     ['number' => 38, 'planned_target_version' => '0.1.0', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-02T00:00:00+00:00', 'metadata' => ['branch' => 'codex/update-a'], 'head' => ['ref' => 'codex/update-a', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
     ['number' => 37, 'planned_target_version' => '0.1.0', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-01T00:00:00+00:00', 'metadata' => ['branch' => 'codex/update-b'], 'head' => ['ref' => 'codex/update-b', 'repo' => ['full_name' => 'fork/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
@@ -2030,7 +2184,6 @@ $assert(count($canonicalPrs) === 2, 'Expected updater duplicate partitioning to 
 $assert((int) $canonicalPrs[0]['number'] === 38, 'Expected updater duplicate partitioning to prefer the healthiest duplicate candidate, not simply the oldest PR.');
 $assert(count($duplicatePrs) === 1 && (int) $duplicatePrs[0]['number'] === 37, 'Expected updater duplicate partitioning to quarantine the weaker duplicate candidate.');
 $pullRequestAlreadySatisfied = $updaterReflection->getMethod('pullRequestAlreadySatisfied');
-$pullRequestAlreadySatisfied->setAccessible(true);
 $assert(
     $pullRequestAlreadySatisfied->invoke($updaterWithoutConstructor, '0.1.0', '0.1.0') === true,
     'Expected updater to treat matching base and target versions as already satisfied.'
@@ -2178,7 +2331,6 @@ $updaterForIsolationTest = new \WpOrgPluginUpdater\Updater(
     httpClient: new HttpClient(),
 );
 $checkoutAndApply = (new ReflectionClass(\WpOrgPluginUpdater\Updater::class))->getMethod('checkoutAndApplyDependencyVersion');
-$checkoutAndApply->setAccessible(true);
 $checkoutAndApply->invoke(
     $updaterForIsolationTest,
     'main',
@@ -2210,7 +2362,6 @@ $assert(
     'Expected dependency apply writes to ignore stale in-memory dependency paths and use the checked-out manifest path.'
 );
 $metadataMatchesDependency = $updaterReflection->getMethod('metadataMatchesDependency');
-$metadataMatchesDependency->setAccessible(true);
 $pluginADependency = $writtenInstallerConfig->dependencyByKey('plugin:wordpress.org:plugin-a');
 $assert(
     $metadataMatchesDependency->invoke(
@@ -2227,7 +2378,6 @@ $assert(
     'Expected metadata matching to reject component_key metadata that conflicts with explicit dependency identity fields.'
 );
 $indexManagedPullRequests = $updaterReflection->getMethod('indexManagedPullRequests');
-$indexManagedPullRequests->setAccessible(true);
 $conflictingIndex = $indexManagedPullRequests->invoke($updaterForIsolationTest, [[
     'number' => 501,
     'body' => '<!-- wporg-update-metadata: {"component_key":"plugin:wordpress.org:plugin-a","kind":"plugin","source":"wordpress.org","slug":"plugin-b","dependency_path":"cms/plugins/plugin-b","target_version":"9.9.9"} -->',
@@ -2246,7 +2396,6 @@ $installerInspector->clearPath($installerIsolationRoot);
 $coreUpdaterReflection = new ReflectionClass(\WpOrgPluginUpdater\CoreUpdater::class);
 $coreUpdaterWithoutConstructor = $coreUpdaterReflection->newInstanceWithoutConstructor();
 $corePartition = $coreUpdaterReflection->getMethod('partitionPullRequestsByTargetVersion');
-$corePartition->setAccessible(true);
 [$coreCanonical, $coreDuplicates] = $corePartition->invoke($coreUpdaterWithoutConstructor, [
     ['number' => 11, 'planned_target_version' => '6.9.4', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-01T00:00:00+00:00', 'metadata' => ['branch' => 'codex/core-a'], 'head' => ['ref' => 'codex/core-a', 'repo' => ['full_name' => 'fork/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
     ['number' => 12, 'planned_target_version' => '6.9.4', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-02T00:00:00+00:00', 'metadata' => ['branch' => 'codex/core-b'], 'head' => ['ref' => 'codex/core-b', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
@@ -2256,7 +2405,6 @@ $assert(count($coreCanonical) === 2, 'Expected core updater duplicate partitioni
 $assert((int) $coreCanonical[0]['number'] === 12, 'Expected core updater duplicate partitioning to prefer the healthiest duplicate candidate.');
 $assert(count($coreDuplicates) === 1 && (int) $coreDuplicates[0]['number'] === 11, 'Expected core updater duplicate partitioning to mark the weaker duplicate candidate.');
 $coreSatisfied = $coreUpdaterReflection->getMethod('pullRequestAlreadySatisfied');
-$coreSatisfied->setAccessible(true);
 $assert(
     $coreSatisfied->invoke($coreUpdaterWithoutConstructor, '6.9.4', '6.9.4') === true,
     'Expected core updater to treat matching base and target versions as already satisfied.'
@@ -2268,7 +2416,6 @@ $assert(
 $frameworkSyncerReflection = new ReflectionClass(\WpOrgPluginUpdater\FrameworkSyncer::class);
 $frameworkSyncerWithoutConstructor = $frameworkSyncerReflection->newInstanceWithoutConstructor();
 $frameworkPartition = $frameworkSyncerReflection->getMethod('partitionPullRequestsByTargetVersion');
-$frameworkPartition->setAccessible(true);
 [$frameworkCanonical, $frameworkDuplicates] = $frameworkPartition->invoke($frameworkSyncerWithoutConstructor, [
     ['number' => 21, 'planned_target_version' => '1.3.1', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-01T00:00:00+00:00', 'metadata' => ['branch' => 'codex/framework-a'], 'head' => ['ref' => 'codex/framework-a', 'repo' => ['full_name' => 'fork/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
     ['number' => 22, 'planned_target_version' => '1.3.1', 'planned_release_at' => '2026-04-01T00:00:00+00:00', 'updated_at' => '2026-04-02T00:00:00+00:00', 'metadata' => ['branch' => 'codex/framework-b'], 'head' => ['ref' => 'codex/framework-b', 'repo' => ['full_name' => 'example/repo']], 'base' => ['repo' => ['full_name' => 'example/repo']]],
@@ -2278,7 +2425,6 @@ $assert(count($frameworkCanonical) === 2, 'Expected framework sync duplicate par
 $assert((int) $frameworkCanonical[0]['number'] === 22, 'Expected framework sync duplicate partitioning to prefer the healthiest duplicate candidate.');
 $assert(count($frameworkDuplicates) === 1 && (int) $frameworkDuplicates[0]['number'] === 21, 'Expected framework sync duplicate partitioning to mark the weaker duplicate candidate.');
 $frameworkSatisfied = $frameworkSyncerReflection->getMethod('pullRequestAlreadySatisfied');
-$frameworkSatisfied->setAccessible(true);
 $assert(
     $frameworkSatisfied->invoke($frameworkSyncerWithoutConstructor, '1.3.1', '1.3.1') === true,
     'Expected framework sync to treat matching base and target versions as already satisfied.'
@@ -2498,11 +2644,8 @@ if ($previousLockTimeout === false) {
 
 $httpClientForRetryContracts = new HttpClient();
 $parseRetryAfter = new ReflectionMethod(HttpClient::class, 'parseRetryAfterSeconds');
-$parseRetryAfter->setAccessible(true);
 $retryDelayFromHeaders = new ReflectionMethod(HttpClient::class, 'retryDelayFromHeaders');
-$retryDelayFromHeaders->setAccessible(true);
 $nextRetryDelayMicroseconds = new ReflectionMethod(HttpClient::class, 'nextRetryDelayMicroseconds');
-$nextRetryDelayMicroseconds->setAccessible(true);
 
 $assert($parseRetryAfter->invoke($httpClientForRetryContracts, '7') === 7, 'Expected Retry-After numeric parsing to return exact seconds.');
 $retryAfterDateSeconds = $parseRetryAfter->invoke(

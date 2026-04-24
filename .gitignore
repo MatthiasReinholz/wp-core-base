@@ -6,5 +6,6 @@
 /wp-content/advanced-cache.php
 /.DS_Store
 /.env
+/.phpstan/
 /.phpunit.result.cache
 /tools/wporg-updater/.tmp/

@@ -12,6 +12,7 @@ final class PhpArrayFileWriter
     public function write(string $path, array $data): void
     {
         $contents = "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($data, true) . ";\n";
+        $contents = preg_replace('/[ \t]+$/m', '', $contents) ?? $contents;
         (new AtomicFileWriter())->write($path, $contents);
     }
 }

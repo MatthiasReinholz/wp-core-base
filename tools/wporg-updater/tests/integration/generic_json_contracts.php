@@ -20,8 +20,8 @@ use WpOrgPluginUpdater\ReleaseClassifier;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\SupportForumClient;
 use WpOrgPluginUpdater\Updater;
-use WpOrgPluginUpdater\WordPressOrgClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
+use WpOrgPluginUpdater\WordPressOrgClient;
 
 final class FakeGenericJsonTransport implements JsonHttpTransport
 {
@@ -225,7 +225,7 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
             new GenericJsonManagedSource($transport),
             new ExamplePremiumManagedSource($httpClient, new PremiumCredentialsStore('{}')),
         ),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
     );
 
     $addedGenericJsonDependency = $authoringService->addDependency([
@@ -270,7 +270,7 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
     $promptHandler = new DependencyAuthoringModeHandler(
         config: $authoringConfig,
         managedSourceRegistry: new ManagedSourceRegistry(new GenericJsonManagedSource($transport)),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
         mutationLock: new MutationLock(),
         repoRoot: $authoringRoot,
         commandPrefix: 'vendor/wp-core-base/bin/wp-core-base',
@@ -282,7 +282,6 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
     );
     $handlerReflection = new ReflectionClass(DependencyAuthoringModeHandler::class);
     $maybePromptForMissing = $handlerReflection->getMethod('maybePromptForMissing');
-    $maybePromptForMissing->setAccessible(true);
 
     $promptInput = fopen('php://temp', 'r+');
     $promptOutput = fopen('php://temp', 'r+');
@@ -343,11 +342,10 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
         runtimeInspector: new RuntimeInspector($authoringConfig->runtime),
         manifestWriter: new ManifestWriter(),
         httpClient: $httpClient,
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
     );
     $updaterReflection = new ReflectionClass(Updater::class);
     $pruneLatestOnlyPullRequests = $updaterReflection->getMethod('pruneHistoricalPullRequestsForLatestOnlySource');
-    $pruneLatestOnlyPullRequests->setAccessible(true);
     $remainingPlannedPrs = $pruneLatestOnlyPullRequests->invoke(
         $updater,
         [

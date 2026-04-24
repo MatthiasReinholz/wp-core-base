@@ -110,9 +110,9 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
             }
 
             $expectedChecksum = $this->extractChecksum($checksumContents, $framework->assetName());
-            $actualChecksum = hash_file('sha256', $destination);
+            $actualChecksum = @hash_file('sha256', $destination);
 
-            if (! is_string($actualChecksum) || $actualChecksum === '') {
+            if ($actualChecksum === false) {
                 throw new RuntimeException(sprintf('Unable to hash framework release archive: %s', $destination));
             }
 

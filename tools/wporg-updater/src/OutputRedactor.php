@@ -48,7 +48,7 @@ final class OutputRedactor
      */
     public static function redactAll(array $messages): array
     {
-        return array_values(array_map([self::class, 'redact'], $messages));
+        return array_map([self::class, 'redact'], $messages);
     }
 
     private static function redactBearerTokens(string $message): string
@@ -82,12 +82,8 @@ final class OutputRedactor
     {
         $environment = getenv();
 
-        if (! is_array($environment)) {
-            return $message;
-        }
-
         foreach ($environment as $name => $value) {
-            if (! is_string($name) || ! is_string($value) || trim($value) === '') {
+            if (trim($value) === '') {
                 continue;
             }
 
@@ -130,7 +126,7 @@ final class OutputRedactor
                     $redacted = preg_replace('#https://([^/\s:@]+):([^@\s/]+)@#i', 'https://[REDACTED]:[REDACTED]@', $redacted) ?? $redacted;
                 }
 
-                if (isset($parts['query']) && is_string($parts['query'])) {
+                if (isset($parts['query'])) {
                     parse_str($parts['query'], $query);
 
                     foreach ($query as $key => $value) {

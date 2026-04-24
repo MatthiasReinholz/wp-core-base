@@ -8,6 +8,7 @@ use WpOrgPluginUpdater\Cli\Handlers\DependencyAuthoringModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\DoctorModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\FrameworkSyncModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\PullRequestBlockerModeHandler;
+use WpOrgPluginUpdater\Cli\Handlers\ReleaseAssetInspectionModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\ReleaseModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\RuntimeMaintenanceModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\ScaffoldModeHandler;
@@ -32,8 +33,9 @@ use WpOrgPluginUpdater\GitHubReleaseManagedSource;
 
 require dirname(__DIR__) . '/src/Autoload.php';
 
-$mode = $argv[1] ?? 'sync';
-$arguments = array_slice($argv, 2);
+$cliArguments = array_values(array_map('strval', $GLOBALS['argv'] ?? []));
+$mode = $cliArguments[1] ?? 'sync';
+$arguments = array_slice($cliArguments, 2);
 $frameworkRoot = dirname(__DIR__, 3);
 $options = [];
 
@@ -95,6 +97,7 @@ $knownOptions = [
     'automation',
     'automation-provider',
     'check-only',
+    'checksum-asset-pattern',
     'checksum-file',
     'class',
     'component-key',
@@ -106,6 +109,7 @@ $knownOptions = [
     'fail-on-source-errors',
     'fail-on-skipped-managed-files',
     'force',
+    'freshness',
     'from-source',
     'github',
     'github-release-asset-pattern',
@@ -186,7 +190,7 @@ try {
 
     $earlyDispatcher = new ModeDispatcher([
         new DoctorModeHandler($repoRoot, $jsonOutput, $emitJson),
-        new SyncReportModeHandler($repoRoot, $jsonOutput, $emitJson),
+        new SyncReportModeHandler($repoRoot),
     ]);
     $earlyExitCode = $earlyDispatcher->dispatch($mode, $options);
 
@@ -225,7 +229,7 @@ try {
         new GenericJsonManagedSource($httpClient),
         ...array_values($premiumProviderRegistry->instantiate($httpClient, new PremiumCredentialsStore(), $config->managedDependencies()))
     );
-    $adminGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));
+    $adminGovernanceExporter = new AdminGovernanceExporter();
     $runtimeMaintenanceDispatcher = new ModeDispatcher([
         new RuntimeMaintenanceModeHandler(
             $config,
@@ -240,6 +244,22 @@ try {
 
     if ($runtimeMaintenanceExitCode !== null) {
         exit($runtimeMaintenanceExitCode);
+    }
+
+    $releaseAssetInspectionDispatcher = new ModeDispatcher([
+        new ReleaseAssetInspectionModeHandler(
+            $config,
+            $httpClient,
+            $commandPrefix,
+            $phpCommandPrefix,
+            $jsonOutput,
+            $emitJson
+        ),
+    ]);
+    $releaseAssetInspectionExitCode = $releaseAssetInspectionDispatcher->dispatch($mode, $options);
+
+    if ($releaseAssetInspectionExitCode !== null) {
+        exit($releaseAssetInspectionExitCode);
     }
 
     if (isset($options['help']) && in_array($mode, ['scaffold-premium-provider', 'sync', 'framework-sync'], true)) {

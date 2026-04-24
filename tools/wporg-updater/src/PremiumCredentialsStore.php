@@ -45,7 +45,7 @@ class PremiumCredentialsStore
         $all = $this->all();
 
         foreach ($this->lookupKeysFor($dependency) as $lookupKey) {
-            if (isset($all[$lookupKey]) && is_array($all[$lookupKey])) {
+            if (isset($all[$lookupKey])) {
                 return $lookupKey;
             }
         }

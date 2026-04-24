@@ -28,8 +28,8 @@ final class PullRequestBlockerResult
         return [
             'status' => $this->status,
             'exit_code' => $this->exitCode,
-            'blockers' => array_values($this->blockers),
-            'warnings' => array_values($this->warnings),
+            'blockers' => $this->blockers,
+            'warnings' => $this->warnings,
             'state' => $this->state,
             'pull_request_number' => $this->pullRequestNumber,
         ];

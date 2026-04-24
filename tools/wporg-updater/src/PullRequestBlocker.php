@@ -199,23 +199,6 @@ final class PullRequestBlocker
             }
         }
 
-        if (! is_array($openPullRequests)) {
-            $verificationWarnings[] = sprintf(
-                'Could not list open pull requests for blocker evaluation and blocked until verification succeeds: %s',
-                'snapshot was invalid'
-            );
-            $this->emitWarnings($verificationWarnings);
-            fwrite(STDERR, "Blocker evaluation is degraded by automation/API failures. Blocking until verification succeeds.\n");
-            return new PullRequestBlockerResult(
-                status: self::STATUS_DEGRADED,
-                exitCode: 1,
-                blockers: [],
-                warnings: $verificationWarnings,
-                state: self::STATE_WAITING_RETRY,
-                pullRequestNumber: $currentNumber,
-            );
-        }
-
         foreach ($openPullRequests as $candidate) {
             $candidateNumber = (int) ($candidate['number'] ?? 0);
 

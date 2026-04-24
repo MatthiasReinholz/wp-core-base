@@ -8,9 +8,9 @@ use RuntimeException;
 
 final class AdminGovernanceExporter
 {
-    public function __construct(
-        private readonly RuntimeInspector $runtimeInspector,
-    ) {
+    public function __construct(?RuntimeInspector $runtimeInspector = null)
+    {
+        unset($runtimeInspector);
     }
 
     public function refresh(Config $config): void

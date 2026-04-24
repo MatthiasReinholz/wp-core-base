@@ -326,7 +326,7 @@ final class EnvironmentDoctor
         $relativeStagePath = $this->doctorRuntimeStagePath();
         $stagePath = $config->repoRoot . '/' . $relativeStagePath;
         $runtimeInspector = new RuntimeInspector($config->runtime);
-        $stager = new RuntimeStager($config, $runtimeInspector, new AdminGovernanceExporter($runtimeInspector));
+        $stager = new RuntimeStager($config, $runtimeInspector, new AdminGovernanceExporter());
 
         try {
             $stagedPaths = $stager->stage($relativeStagePath);
@@ -472,7 +472,7 @@ final class EnvironmentDoctor
     {
         $loaderPath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceLoaderPath($config);
         $dataPath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config);
-        $exporter = new AdminGovernanceExporter(new RuntimeInspector($config->runtime));
+        $exporter = new AdminGovernanceExporter();
 
         $this->okIf(
             is_file($loaderPath),

@@ -88,7 +88,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
             new GitHubReleaseManagedSource($gitHubReleaseClient),
             new ExamplePremiumManagedSource($httpClient, $premiumCredentialsStore),
         ),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
     );
 
     $addedPlugin = $authoringService->addDependency([
@@ -255,7 +255,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         runtimeInspector: new RuntimeInspector($managedPlanConfig->runtime),
         manifestWriter: new ManifestWriter(),
         managedSourceRegistry: $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($managedPlanConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
     );
     $managedPlan = $managedPlanService->planAddDependency([
         'source' => 'wordpress.org',
@@ -391,7 +391,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         runtimeInspector: new RuntimeInspector($premiumDuplicateConfig->runtime),
         manifestWriter: new ManifestWriter(),
         managedSourceRegistry: $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($premiumDuplicateConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
     );
     $duplicateBlocked = false;
 
@@ -410,7 +410,6 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
 
     $dependencyAuthoringReflection = new ReflectionClass(DependencyAuthoringService::class);
     $matchesIdentity = $dependencyAuthoringReflection->getMethod('dependencyMatchesIdentity');
-    $matchesIdentity->setAccessible(true);
     $assert(
         $matchesIdentity->invoke($premiumDuplicateService, $premiumDuplicateConfig->dependencies()[0], 'plugin', 'premium', 'example-premium-plugin', 'other-vendor') === false,
         'Expected premium dependency identity matching to distinguish providers for the same slug.'
@@ -452,7 +451,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         runtimeInspector: new RuntimeInspector($adoptConfig->runtime),
         manifestWriter: new ManifestWriter(),
         managedSourceRegistry: $makeManagedSourceRegistry($fakeWordPressOrgSource, $fakeGitHubReleaseSource, $fakeArchiveDownloader),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($adoptConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
     );
     $adoptPlan = $adoptService->planAdoptDependency([
         'kind' => 'plugin',
@@ -540,7 +539,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
         'source_config' => ['github_repository' => null, 'github_release_asset_pattern' => null, 'github_token_env' => null, 'credential_key' => null, 'provider' => null, 'provider_product_id' => null],
         'policy' => ['class' => 'local-owned', 'allow_runtime_paths' => [], 'strip_paths' => [], 'strip_files' => [], 'sanitize_paths' => [], 'sanitize_files' => []],
     ]]);
-    $rollbackGovernanceExporter = new AdminGovernanceExporter(new RuntimeInspector(Config::load($rollbackRoot)->runtime));
+    $rollbackGovernanceExporter = new AdminGovernanceExporter();
     $rollbackGovernanceExporter->refresh(Config::load($rollbackRoot));
     $rollbackManifestBefore = (string) file_get_contents($rollbackRoot . '/.wp-core-base/manifest.php');
     $rollbackGovernancePath = $rollbackRoot . '/' . FrameworkRuntimeFiles::governanceDataPath(Config::load($rollbackRoot));
@@ -675,7 +674,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
             new GitHubReleaseManagedSource($gitHubReleaseClient),
             new ExamplePremiumManagedSource($httpClient, $premiumCredentialsStore),
         ),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($ambiguousAuthoringConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
     );
     $ambiguousRemoveRejected = false;
 
@@ -734,7 +733,7 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
             new GitHubReleaseManagedSource($gitHubReleaseClient),
             new ExamplePremiumManagedSource($httpClient, $premiumCredentialsStore),
         ),
-        adminGovernanceExporter: new AdminGovernanceExporter(new RuntimeInspector($authoringConfig->runtime)),
+        adminGovernanceExporter: new AdminGovernanceExporter(),
         mutationLock: new MutationLock(),
         repoRoot: $authoringRoot,
         commandPrefix: 'vendor/wp-core-base/bin/wp-core-base',
@@ -746,7 +745,6 @@ function run_dependency_authoring_contract_tests(callable $assert, array $contex
     );
     $handlerReflection = new ReflectionClass(DependencyAuthoringModeHandler::class);
     $maybePromptForMissing = $handlerReflection->getMethod('maybePromptForMissing');
-    $maybePromptForMissing->setAccessible(true);
 
     $gitHubPromptInput = fopen('php://temp', 'r+');
     $gitHubPromptOutput = fopen('php://temp', 'r+');

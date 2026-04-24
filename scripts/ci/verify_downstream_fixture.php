@@ -6,8 +6,9 @@ require dirname(__DIR__, 2) . '/tools/wporg-updater/src/Autoload.php';
 
 $frameworkRoot = dirname(__DIR__, 2);
 $profile = 'content-only';
+$cliArguments = array_values(array_map('strval', $GLOBALS['argv'] ?? []));
 
-foreach (array_slice($argv, 1) as $argument) {
+foreach (array_slice($cliArguments, 1) as $argument) {
     if (str_starts_with($argument, '--profile=')) {
         $profile = substr($argument, strlen('--profile='));
     }

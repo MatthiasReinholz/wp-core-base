@@ -16,7 +16,7 @@ final class Updater
     public function __construct(
         private Config $config,
         private readonly DependencyScanner $dependencyScanner,
-        private readonly WordPressOrgClient $wordPressOrgClient,
+        WordPressOrgClient $wordPressOrgClient,
         private readonly GitHubReleaseClient $gitHubReleaseClient,
         private readonly ManagedSourceRegistry $managedSourceRegistry,
         private readonly SupportForumClient $supportForumClient,
@@ -26,9 +26,10 @@ final class Updater
         private readonly GitRunnerInterface $gitRunner,
         private readonly RuntimeInspector $runtimeInspector,
         private readonly ManifestWriter $manifestWriter,
-        private readonly HttpClient $httpClient,
+        HttpClient $httpClient,
         private readonly ?AdminGovernanceExporter $adminGovernanceExporter = null,
     ) {
+        unset($wordPressOrgClient, $httpClient);
     }
 
     /**
@@ -185,7 +186,7 @@ final class Updater
                 latestVersion: $latestVersion,
                 latestReleaseAt: $latestReleaseAt,
                 scope: $scope,
-                blockedBy: array_values(array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs)),
+                blockedBy: array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs),
                 defaultBranch: $defaultBranch,
                 baseRevision: $baseRevision,
             );
@@ -1268,7 +1269,7 @@ final class Updater
             }
 
             $pullRequest['metadata'] = $metadata;
-            $pullRequest['planned_target_version'] = (string) ($metadata['target_version'] ?? '');
+            $pullRequest['planned_target_version'] = (string) $metadata['target_version'];
             $pullRequest['planned_release_at'] = (string) ($metadata['release_at'] ?? '');
             $matching[] = $pullRequest;
         }
@@ -1474,7 +1475,7 @@ final class Updater
         $topicsWithoutDates = [];
 
         foreach (array_values($merged) as $topic) {
-            if (($topic['opened_at'] ?? '') === '') {
+            if ($topic['opened_at'] === '') {
                 $topicsWithoutDates[] = $topic;
                 continue;
             }
@@ -1484,7 +1485,7 @@ final class Updater
 
         usort($topicsWithDates, static fn (array $left, array $right): int => strcmp($right['opened_at'], $left['opened_at']));
 
-        return array_values(array_merge($topicsWithDates, $topicsWithoutDates));
+        return array_merge($topicsWithDates, $topicsWithoutDates);
     }
 
     /**

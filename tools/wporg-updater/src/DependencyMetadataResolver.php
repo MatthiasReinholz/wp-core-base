@@ -10,9 +10,9 @@ use RuntimeException;
 
 final class DependencyMetadataResolver
 {
-    public function __construct(
-        private readonly DependencyScanner $dependencyScanner = new DependencyScanner(),
-    ) {
+    public function __construct(?DependencyScanner $dependencyScanner = null)
+    {
+        unset($dependencyScanner);
     }
 
     /**

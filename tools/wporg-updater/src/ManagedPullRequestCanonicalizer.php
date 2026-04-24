@@ -36,7 +36,7 @@ final class ManagedPullRequestCanonicalizer
             $duplicates = array_merge($duplicates, $candidates);
         }
 
-        return [array_values($canonical), array_values($duplicates)];
+        return [$canonical, $duplicates];
     }
 
     /**

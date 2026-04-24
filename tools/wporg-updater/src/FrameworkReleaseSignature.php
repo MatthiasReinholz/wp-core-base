@@ -158,7 +158,7 @@ final class FrameworkReleaseSignature
         $firstReadablePath = null;
 
         foreach ($publicKeyPaths as $path) {
-            if (! is_string($path) || trim($path) === '') {
+            if (trim($path) === '') {
                 continue;
             }
 
@@ -198,9 +198,9 @@ final class FrameworkReleaseSignature
 
     private static function hashFile(string $path): string
     {
-        $digest = hash_file('sha256', $path);
+        $digest = @hash_file('sha256', $path);
 
-        if (! is_string($digest) || $digest === '') {
+        if ($digest === false) {
             throw new RuntimeException(sprintf('Unable to hash file: %s', $path));
         }
 
