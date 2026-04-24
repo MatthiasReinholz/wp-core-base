@@ -4,44 +4,44 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'version' => '1.4.2',
+  'version' => '1.4.3',
   'release_channel' => 'stable',
-  'distribution' => 
+  'distribution' =>
   array (
     'mode' => 'vendor-snapshot',
     'path' => '.',
     'asset_name' => 'wp-core-base-vendor-snapshot.zip',
   ),
-  'release_source' => 
+  'release_source' =>
   array (
     'provider' => 'github-release',
     'reference' => 'MatthiasReinholz/wp-core-base',
     'api_base' => 'https://api.github.com',
   ),
-  'baseline' => 
+  'baseline' =>
   array (
     'wordpress_core' => '6.9.4',
-    'managed_components' => 
+    'managed_components' =>
     array (
-      0 => 
+      0 =>
       array (
         'name' => 'WooCommerce',
         'version' => '10.7.0',
         'kind' => 'plugin',
       ),
-      1 => 
+      1 =>
       array (
         'name' => 'Jetpack',
         'version' => '15.7.1',
         'kind' => 'plugin',
       ),
-      2 => 
+      2 =>
       array (
         'name' => 'Contact Form 7',
         'version' => '6.1.5',
         'kind' => 'plugin',
       ),
-      3 => 
+      3 =>
       array (
         'name' => 'Redirection',
         'version' => '5.7.5',
@@ -49,9 +49,9 @@ return array (
       ),
     ),
   ),
-  'scaffold' => 
+  'scaffold' =>
   array (
-    'managed_files' => 
+    'managed_files' =>
     array (
       '.github/workflows/wporg-update-pr-blocker.yml' => 'sha256:1b0fc1a0e4ded7a05d4eba125dc5c2a872d5d7b504f626632770796efdaee6cc',
       '.github/workflows/wporg-updates-reconcile.yml' => 'sha256:1f4a3e0a61c117b86160f327593ea92bab269478967d2670faef1100b837535b',
