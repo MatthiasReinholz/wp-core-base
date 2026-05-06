@@ -111,7 +111,9 @@ final class TempDirectoryJanitor
             return true;
         }
 
-        foreach (scandir($path) ?: [] as $entry) {
+        $entries = @scandir($path) ?: [];
+
+        foreach ($entries as $entry) {
             if ($entry === '.' || $entry === '..') {
                 continue;
             }
@@ -119,7 +121,7 @@ final class TempDirectoryJanitor
             $child = $path . '/' . $entry;
 
             if (is_link($child) || is_file($child)) {
-                if (! unlink($child)) {
+                if (! $this->removeFile($child)) {
                     return false;
                 }
 
@@ -131,6 +133,32 @@ final class TempDirectoryJanitor
             }
         }
 
-        return rmdir($path);
+        return $this->removeDirectory($path);
+    }
+
+    private function removeFile(string $path): bool
+    {
+        if (! file_exists($path) && ! is_link($path)) {
+            return true;
+        }
+
+        if (@unlink($path)) {
+            return true;
+        }
+
+        return ! file_exists($path) && ! is_link($path);
+    }
+
+    private function removeDirectory(string $path): bool
+    {
+        if (! is_dir($path)) {
+            return true;
+        }
+
+        if (@rmdir($path)) {
+            return true;
+        }
+
+        return ! file_exists($path);
     }
 }
