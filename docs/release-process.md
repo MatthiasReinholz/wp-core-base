@@ -121,6 +121,8 @@ Framework release provenance now uses a detached signature over the checksum sid
 - the checksum sidecar remains `wp-core-base-vendor-snapshot.zip.sha256`
 - the detached signature is `wp-core-base-vendor-snapshot.zip.sha256.sig`
 - the verification public key lives at `tools/wporg-updater/keys/framework-release-public.pem`
+- committed key metadata lives at `tools/wporg-updater/keys/framework-release-public-keys.json`
+- committed revocations live at `tools/wporg-updater/keys/framework-release-revocations.json`
 
 The publish workflows require these GitHub Actions secrets:
 
@@ -128,6 +130,8 @@ The publish workflows require these GitHub Actions secrets:
 - `WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE` if the private key is encrypted
 
 Downstream `framework-sync` now verifies the detached signature before trusting the checksum sidecar. A checksum file from the release origin is no longer sufficient by itself.
+
+Verification fails for revoked release keys and emits warnings for retired or expired release keys. Treat those warnings as release-maintainer action items even though historical artifact verification remains compatibility-safe.
 
 ### Signing Key Rotation Runbook
 

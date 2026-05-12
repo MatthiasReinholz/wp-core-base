@@ -3,16 +3,16 @@
 declare(strict_types=1);
 
 return array (
-  'manifest_checksum' => 'sha256:9526cd91b8457a86792da2bed24bfe3a4343f0ab2131a0ade783f78df1214c93',
+  'manifest_checksum' => 'sha256:1ad08d1cd379a0b2317434a075dbb239d2c6739c89f90d256b33f9a7b46b6346',
   'plugins' =>
   array (
     'akismet/akismet.php' =>
     array (
-      'component_key' => 'plugin:local:akismet',
-      'management' => 'local',
-      'source' => 'local',
-      'workflow_managed' => false,
-      'label' => 'Local code managed in-repo',
+      'component_key' => 'plugin:wordpress.org:akismet',
+      'management' => 'managed',
+      'source' => 'wordpress.org',
+      'workflow_managed' => true,
+      'label' => 'Managed by wp-core-base workflows',
     ),
     'contact-form-7/wp-contact-form-7.php' =>
     array (

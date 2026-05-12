@@ -61,6 +61,8 @@ The recommended workflow pattern is:
 - open or update one deduplicated issue for ongoing source failures
 - close that issue automatically once a later sync run is clean
 
+For GitHub-hosted automation, configure `WP_CORE_BASE_AUTOMATION_TOKEN` as a repository secret with enough permission to push update branches and open pull requests. The scaffolded workflows fall back to `GITHUB_TOKEN`, but PRs created with the default token may not trigger required pull-request checks.
+
 The scaffolded automation now separates:
 
 - scheduled or manual update runs

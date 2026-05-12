@@ -86,6 +86,12 @@ Candidate verification keys are resolved from:
 - rotated key files matching `tools/wporg-updater/keys/framework-release-public-*.pem`
 - optional extra paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated absolute paths)
 
+Key lifecycle policy is committed next to the public keys:
+
+- `tools/wporg-updater/keys/framework-release-public-keys.json` records key metadata such as `key_id`, creation time, optional expiry, and status
+- `tools/wporg-updater/keys/framework-release-revocations.json` records revoked key IDs
+- verification fails for revoked keys and warns for retired or expired keys
+
 Rotation procedure:
 
 1. Add the new public key as `tools/wporg-updater/keys/framework-release-public-<yyyymm>.pem`.
@@ -96,11 +102,10 @@ Rotation procedure:
 
 Revocation procedure:
 
-1. Remove compromised keys from `tools/wporg-updater/keys/` and any `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` values.
-2. Re-sign current release checksums with a trusted key.
-3. Publish a security advisory noting the revoked key identifier(s) and replacement key identifier.
-
-Future design work for explicit expiry metadata and committed revocation-list policy is documented in `docs/security-key-lifecycle-rfc.md`.
+1. Add the compromised `key_id` to `tools/wporg-updater/keys/framework-release-revocations.json`.
+2. Remove compromised keys from `tools/wporg-updater/keys/` and any `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` values.
+3. Re-sign current release checksums with a trusted key.
+4. Publish a security advisory noting the revoked key identifier(s) and replacement key identifier.
 
 ## Secret Handling
 
@@ -109,6 +114,7 @@ Secrets belong in environment variables, not in the manifest.
 Important examples:
 
 - `GITHUB_TOKEN`
+- `WP_CORE_BASE_AUTOMATION_TOKEN`
 - `GITLAB_TOKEN`
 - `WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON`
 - `WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM`

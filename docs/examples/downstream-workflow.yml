@@ -25,6 +25,15 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
+          token: ${{ secrets.WP_CORE_BASE_AUTOMATION_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Report automation token fallback
+        env:
+          WP_CORE_BASE_AUTOMATION_TOKEN: ${{ secrets.WP_CORE_BASE_AUTOMATION_TOKEN }}
+        run: |
+          if [ -z "${WP_CORE_BASE_AUTOMATION_TOKEN}" ]; then
+            echo "::warning::WP_CORE_BASE_AUTOMATION_TOKEN is not configured; updater PRs created with GITHUB_TOKEN may not trigger required pull request checks."
+          fi
 
       - name: Set up PHP
         uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
@@ -39,6 +48,7 @@ jobs:
 
       - name: Run updater
         env:
+          WP_CORE_BASE_AUTOMATION_TOKEN: ${{ secrets.WP_CORE_BASE_AUTOMATION_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
           WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON: ${{ secrets.WP_CORE_BASE_PREMIUM_CREDENTIALS_JSON }}
@@ -54,6 +64,7 @@ jobs:
       - name: Sync source-failure issue
         if: ${{ always() }}
         env:
+          WP_CORE_BASE_AUTOMATION_TOKEN: ${{ secrets.WP_CORE_BASE_AUTOMATION_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
           WPORG_REPO_ROOT: ${{ github.workspace }}

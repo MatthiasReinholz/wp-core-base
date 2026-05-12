@@ -800,21 +800,36 @@ final class EnvironmentDoctor
         }
 
         $repository = getenv('GITHUB_REPOSITORY');
-        $token = getenv('GITHUB_TOKEN');
+        $automationToken = getenv(GitHubClient::AUTOMATION_TOKEN_ENV);
+        $defaultToken = getenv('GITHUB_TOKEN');
         $apiUrl = getenv('GITHUB_API_URL');
         $hasRepository = is_string($repository) && $repository !== '';
-        $hasToken = is_string($token) && $token !== '';
+        $hasAutomationToken = is_string($automationToken) && $automationToken !== '';
+        $hasDefaultToken = is_string($defaultToken) && $defaultToken !== '';
+        $hasToken = $hasAutomationToken || $hasDefaultToken;
 
         if ($hasRepository && $hasToken) {
             $this->ok(sprintf(
-                'GitHub automation environment looks configured for %s%s.',
+                'GitHub automation environment looks configured for %s with %s%s.',
                 $repository,
+                $hasAutomationToken ? GitHubClient::AUTOMATION_TOKEN_ENV : 'GITHUB_TOKEN',
                 is_string($apiUrl) && $apiUrl !== '' ? sprintf(' using API %s', $apiUrl) : ''
             ));
+
+            if (! $hasAutomationToken) {
+                $this->warn(sprintf(
+                    'GitHub automation is using GITHUB_TOKEN fallback. PRs created with the default token may not trigger required pull request checks; configure %s for scheduled update PRs.',
+                    GitHubClient::AUTOMATION_TOKEN_ENV
+                ));
+            }
+
             return;
         }
 
-        $message = 'GitHub automation environment is not fully configured. Set GITHUB_REPOSITORY and GITHUB_TOKEN to run sync or pr-blocker modes.';
+        $message = sprintf(
+            'GitHub automation environment is not fully configured. Set GITHUB_REPOSITORY and %s or GITHUB_TOKEN to run sync or pr-blocker modes.',
+            GitHubClient::AUTOMATION_TOKEN_ENV
+        );
 
         if ($requireAutomation) {
             $this->error($message);

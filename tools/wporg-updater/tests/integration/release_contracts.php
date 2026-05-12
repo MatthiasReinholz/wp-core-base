@@ -28,6 +28,45 @@ function run_release_contract_tests(
     $assert($signatureDocument['signed_file'] === 'artifact.zip.sha256', 'Expected release signing to bind the checksum sidecar filename.');
     $verifiedSignatureDocument = FrameworkReleaseSignature::verifyChecksumFile($checksumFixturePath, $signatureFixturePath, $publicFixtureKeyPath);
     $assert($verifiedSignatureDocument['key_id'] === $signatureDocument['key_id'], 'Expected release signature verification to report the same key identifier.');
+
+    $expiredKeyFixtureRoot = sys_get_temp_dir() . '/wporg-release-expired-key-' . bin2hex(random_bytes(4));
+    mkdir($expiredKeyFixtureRoot, 0777, true);
+    $expiredKeyPath = $expiredKeyFixtureRoot . '/framework-release-public.pem';
+    copy($publicFixtureKeyPath, $expiredKeyPath);
+    file_put_contents($expiredKeyFixtureRoot . '/framework-release-public-keys.json', json_encode([
+        'keys' => [[
+            'key_id' => $signatureDocument['key_id'],
+            'path' => 'framework-release-public.pem',
+            'created_at' => '2020-01-01T00:00:00+00:00',
+            'not_after' => '2021-01-01T00:00:00+00:00',
+            'status' => 'retired',
+            'reason' => 'test fixture',
+        ]],
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+    file_put_contents($expiredKeyFixtureRoot . '/framework-release-revocations.json', "{\n  \"revocations\": []\n}\n");
+    $expiredKeyVerification = FrameworkReleaseSignature::verifyChecksumFile($checksumFixturePath, $signatureFixturePath, $expiredKeyPath);
+    $assert(($expiredKeyVerification['warnings'] ?? []) !== [], 'Expected retired or expired release keys to verify with warnings.');
+
+    $revokedKeyFixtureRoot = sys_get_temp_dir() . '/wporg-release-revoked-key-' . bin2hex(random_bytes(4));
+    mkdir($revokedKeyFixtureRoot, 0777, true);
+    $revokedKeyPath = $revokedKeyFixtureRoot . '/framework-release-public.pem';
+    copy($publicFixtureKeyPath, $revokedKeyPath);
+    file_put_contents($revokedKeyFixtureRoot . '/framework-release-revocations.json', json_encode([
+        'revocations' => [[
+            'key_id' => $signatureDocument['key_id'],
+            'revoked_at' => '2026-01-01T00:00:00+00:00',
+            'reason' => 'test fixture',
+        ]],
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+    $revokedKeyRejected = false;
+
+    try {
+        FrameworkReleaseSignature::verifyChecksumFile($checksumFixturePath, $signatureFixturePath, $revokedKeyPath);
+    } catch (RuntimeException $exception) {
+        $revokedKeyRejected = str_contains($exception->getMessage(), 'revoked');
+    }
+
+    $assert($revokedKeyRejected, 'Expected release signature verification to reject revoked keys.');
     $signatureTamperRejected = false;
     file_put_contents($checksumFixturePath, str_repeat('b', 64) . "  artifact.zip\n");
 
