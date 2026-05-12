@@ -114,6 +114,8 @@ The intended CI contract is:
 
 Treat `wp-core-base Runtime Validation` (or your equivalent workflow that runs the same contract) as a required merge check for automation PRs. Do not merge updater/reconciliation PRs while this check is failing.
 
+For GitHub-hosted automation, configure a repository secret named `WP_CORE_BASE_AUTOMATION_TOKEN` with permission to push update branches and open pull requests. The workflows can fall back to `GITHUB_TOKEN`, but PRs created with the default token may not trigger required pull-request checks.
+
 If your project is image-first, treat the staged runtime directory as the build input.
 
 ## GitLab Automation Prerequisites

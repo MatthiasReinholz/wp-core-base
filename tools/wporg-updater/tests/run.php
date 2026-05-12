@@ -1167,6 +1167,10 @@ $assert($frameworkConfig->releaseSourceReference() === 'MatthiasReinholz/wp-core
 $assert($frameworkConfig->releaseSourceReferenceUrl() === 'https://github.com/MatthiasReinholz/wp-core-base', 'Expected upstream framework metadata to derive the authoritative source URL.');
 $assert($frameworkConfig->checksumSignatureAssetName() === 'wp-core-base-vendor-snapshot.zip.sha256.sig', 'Expected framework metadata to derive the checksum-signature asset name.');
 $assert(str_ends_with(ReleaseSignatureKeyStore::defaultPublicKeyPath($frameworkConfig), 'tools/wporg-updater/keys/framework-release-public.pem'), 'Expected the default release public key path to resolve inside the framework distribution.');
+$releaseKeyMetadata = json_decode((string) file_get_contents($repoRoot . '/tools/wporg-updater/keys/framework-release-public-keys.json'), true);
+$releaseKeyRevocations = json_decode((string) file_get_contents($repoRoot . '/tools/wporg-updater/keys/framework-release-revocations.json'), true);
+$assert(is_array($releaseKeyMetadata['keys'] ?? null), 'Expected release public key metadata to be committed.');
+$assert(is_array($releaseKeyRevocations['revocations'] ?? null), 'Expected release public key revocation list to be committed.');
 $legacyFrameworkRoot = sys_get_temp_dir() . '/wporg-framework-legacy-' . bin2hex(random_bytes(4));
 mkdir($legacyFrameworkRoot . '/.wp-core-base', 0777, true);
 file_put_contents(

@@ -10,6 +10,8 @@ final class FrameworkReleaseSignature
 {
     private const CONTEXT = 'wp-core-base-release-signature-v1';
     private const ALGORITHM = 'sha256';
+    private const KEY_METADATA_FILE = 'framework-release-public-keys.json';
+    private const KEY_REVOCATIONS_FILE = 'framework-release-revocations.json';
 
     public static function signChecksumFile(
         string $checksumPath,
@@ -122,6 +124,8 @@ final class FrameworkReleaseSignature
             ));
         }
 
+        $policyWarnings = self::releaseKeyPolicyWarnings($document['key_id'], $publicKeyPaths, $resolvedPublicKeyPath);
+
         $publicKey = openssl_pkey_get_public($publicKeyPem);
 
         if ($publicKey === false) {
@@ -143,6 +147,14 @@ final class FrameworkReleaseSignature
 
         if ($verified !== 1) {
             throw new RuntimeException('Release signature verification failed.');
+        }
+
+        if ($policyWarnings !== []) {
+            foreach ($policyWarnings as $warning) {
+                fwrite(STDERR, sprintf("[warn] %s\n", $warning));
+            }
+
+            $document['warnings'] = $policyWarnings;
         }
 
         return $document;
@@ -187,6 +199,122 @@ final class FrameworkReleaseSignature
         }
 
         throw new RuntimeException('No readable release public key files were found.');
+    }
+
+    /**
+     * @param list<string> $publicKeyPaths
+     * @return list<string>
+     */
+    private static function releaseKeyPolicyWarnings(string $keyId, array $publicKeyPaths, string $resolvedPublicKeyPath): array
+    {
+        $policyDirectories = [];
+
+        foreach (array_merge([$resolvedPublicKeyPath], $publicKeyPaths) as $path) {
+            if (trim($path) !== '') {
+                $policyDirectories[] = dirname($path);
+            }
+        }
+
+        $policyDirectories = array_values(array_unique($policyDirectories));
+        $warnings = [];
+
+        foreach ($policyDirectories as $directory) {
+            $revocationsPath = $directory . '/' . self::KEY_REVOCATIONS_FILE;
+
+            if (is_file($revocationsPath)) {
+                foreach (self::readPolicyEntries($revocationsPath, 'revocations') as $revocation) {
+                    if (! hash_equals($keyId, (string) ($revocation['key_id'] ?? ''))) {
+                        continue;
+                    }
+
+                    $reason = trim((string) ($revocation['reason'] ?? ''));
+                    throw new RuntimeException(sprintf(
+                        'Release signature key %s has been revoked%s.',
+                        $keyId,
+                        $reason !== '' ? ': ' . $reason : ''
+                    ));
+                }
+            }
+
+            $metadataPath = $directory . '/' . self::KEY_METADATA_FILE;
+
+            if (! is_file($metadataPath)) {
+                continue;
+            }
+
+            foreach (self::readPolicyEntries($metadataPath, 'keys') as $metadata) {
+                if (! hash_equals($keyId, (string) ($metadata['key_id'] ?? ''))) {
+                    continue;
+                }
+
+                $status = (string) ($metadata['status'] ?? 'active');
+                $reason = trim((string) ($metadata['reason'] ?? ''));
+
+                if ($status === 'revoked') {
+                    throw new RuntimeException(sprintf(
+                        'Release signature key %s has revoked metadata%s.',
+                        $keyId,
+                        $reason !== '' ? ': ' . $reason : ''
+                    ));
+                }
+
+                if ($status === 'retired') {
+                    $warnings[] = sprintf(
+                        'Release signature key %s is retired%s.',
+                        $keyId,
+                        $reason !== '' ? ': ' . $reason : ''
+                    );
+                } elseif ($status !== 'active') {
+                    throw new RuntimeException(sprintf('Release signature key %s has unsupported metadata status: %s.', $keyId, $status));
+                }
+
+                $notAfter = $metadata['not_after'] ?? null;
+
+                if (is_string($notAfter) && trim($notAfter) !== '') {
+                    $notAfterTimestamp = strtotime($notAfter);
+
+                    if ($notAfterTimestamp === false) {
+                        throw new RuntimeException(sprintf('Release signature key %s has invalid not_after metadata: %s.', $keyId, $notAfter));
+                    }
+
+                    if ($notAfterTimestamp < time()) {
+                        $warnings[] = sprintf('Release signature key %s expired at %s.', $keyId, $notAfter);
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique($warnings));
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private static function readPolicyEntries(string $path, string $entryKey): array
+    {
+        $contents = file_get_contents($path);
+
+        if (! is_string($contents) || trim($contents) === '') {
+            throw new RuntimeException(sprintf('Release key policy file is empty: %s', $path));
+        }
+
+        $decoded = json_decode($contents, true);
+
+        if (! is_array($decoded) || ! is_array($decoded[$entryKey] ?? null)) {
+            throw new RuntimeException(sprintf('Release key policy file %s must contain a %s array.', $path, $entryKey));
+        }
+
+        foreach ($decoded[$entryKey] as $entry) {
+            if (! is_array($entry)) {
+                throw new RuntimeException(sprintf('Release key policy file %s contains a non-object entry.', $path));
+            }
+
+            if (! is_string($entry['key_id'] ?? null) || trim($entry['key_id']) === '') {
+                throw new RuntimeException(sprintf('Release key policy file %s contains an entry without key_id.', $path));
+            }
+        }
+
+        return array_values($decoded[$entryKey]);
     }
 
     private static function assertOpenSslAvailable(string $operation): void

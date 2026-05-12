@@ -8,6 +8,8 @@ use RuntimeException;
 
 final class GitHubClient implements GitHubAutomationClient
 {
+    public const AUTOMATION_TOKEN_ENV = 'WP_CORE_BASE_AUTOMATION_TOKEN';
+
     public function __construct(
         private readonly HttpClient $httpClient,
         private readonly string $repository,
@@ -20,14 +22,18 @@ final class GitHubClient implements GitHubAutomationClient
     public static function fromEnvironment(HttpClient $httpClient, string $apiBase, bool $dryRun = false): self
     {
         $repository = getenv('GITHUB_REPOSITORY');
-        $token = getenv('GITHUB_TOKEN');
+        $automationToken = getenv(self::AUTOMATION_TOKEN_ENV);
+        $defaultToken = getenv('GITHUB_TOKEN');
+        $token = is_string($automationToken) && $automationToken !== ''
+            ? $automationToken
+            : $defaultToken;
 
         if (! is_string($repository) || $repository === '') {
             throw new RuntimeException('GITHUB_REPOSITORY is required.');
         }
 
         if (! is_string($token) || $token === '') {
-            throw new RuntimeException('GITHUB_TOKEN is required.');
+            throw new RuntimeException(sprintf('%s or GITHUB_TOKEN is required.', self::AUTOMATION_TOKEN_ENV));
         }
 
         return new self($httpClient, $repository, $token, $apiBase, $dryRun);

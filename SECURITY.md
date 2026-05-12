@@ -4,7 +4,7 @@
 
 If you believe you have found a security issue in `wp-core-base`, do not open a public issue first.
 
-Report it privately to the maintainer with:
+Report it through [GitHub private vulnerability reporting](https://github.com/MatthiasReinholz/wp-core-base/security/advisories/new) with:
 
 - a clear description of the issue
 - affected versions or workflows

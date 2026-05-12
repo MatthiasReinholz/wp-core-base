@@ -4,8 +4,8 @@ This document defines a future design for framework release signing key lifecycl
 
 ## Status
 
-- State: proposed
-- Priority: future
+- State: partially implemented
+- Priority: active hardening
 - Scope: release signing and verification controls
 
 ## Current Baseline
@@ -16,7 +16,7 @@ Current behavior already supports:
 - key-ID binding during verification
 - multiple trusted public keys (default key, rotated glob, and env-provided paths)
 
-This RFC does not replace the current mechanism. It adds policy controls for expiry and explicit revocation.
+This RFC does not replace the current mechanism. It records the policy controls now present in the verifier and the remaining migration work.
 
 ## Goals
 
@@ -28,7 +28,7 @@ This RFC does not replace the current mechanism. It adds policy controls for exp
 
 ### 1. Public Key Metadata
 
-Add machine-readable metadata for each trusted public key:
+Machine-readable metadata is stored in `tools/wporg-updater/keys/framework-release-public-keys.json` for each trusted public key:
 
 - `key_id`
 - `created_at`
@@ -38,7 +38,7 @@ Add machine-readable metadata for each trusted public key:
 
 ### 2. Committed Revocation List
 
-Add a committed revocation file under `tools/wporg-updater/keys/` that lists revoked key IDs and revocation timestamps.
+The committed revocation file is `tools/wporg-updater/keys/framework-release-revocations.json`.
 
 Verification behavior:
 
@@ -52,14 +52,13 @@ Introduce explicit verification policy modes:
 - `warn-on-expired-key`
 - `fail-on-expired-key`
 
-Default should remain compatibility-safe until migration is complete.
+Current behavior is compatibility-safe: retired and expired keys warn, while revoked keys fail.
 
-## Migration Plan (Future)
+## Remaining Migration Work
 
-1. add metadata file and parser without enforcing expiry
-2. add revocation-list parsing and hard failure for revoked keys
-3. add expiry warning mode in CI first
-4. graduate to fail mode for framework release publish and verification paths
+1. add an explicit CLI policy flag for fail-on-expired-key
+2. enable fail-on-expired-key for framework release publish paths after maintainers have rotated active keys
+3. document release-specific expectations when a historical release verifies with a retired key warning
 
 ## Non-Goals
 

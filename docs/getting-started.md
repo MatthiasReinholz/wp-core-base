@@ -116,6 +116,8 @@ The standalone `wp-core-base Runtime Validation` workflow is the default because
 
 After scaffolding, mark `wp-core-base Runtime Validation` (or your equivalent workflow that runs `doctor --automation` + `stage-runtime`) as a required branch-protection check before merges. This prevents manifest-only or payload-only merges from bypassing the runtime checksum contract.
 
+For GitHub-hosted automation, add a repository secret named `WP_CORE_BASE_AUTOMATION_TOKEN` with permission to push branches and open pull requests before enabling scheduled update workflows. The workflows can fall back to `GITHUB_TOKEN`, but PRs created with the default token may not trigger required pull-request checks.
+
 If your repo already has a blanket `/vendor/` ignore from historical Composer usage, do not unignore the whole directory. Keep the exception narrow so only `vendor/wp-core-base` becomes repo-owned:
 
 ```gitignore
@@ -239,7 +241,7 @@ You can use either host while still:
 - deploying manually from a local workstation
 - using another CI platform for final release delivery
 
-If you choose GitLab as the automation host, set a masked CI/CD variable named `GITLAB_TOKEN` with `api` and `write_repository` access before enabling the scaffolded pipeline. GitLab CI already provides the project identity variables that `wp-core-base` consumes.
+If you choose GitHub as the automation host, configure `WP_CORE_BASE_AUTOMATION_TOKEN` as described above. If you choose GitLab as the automation host, set a masked CI/CD variable named `GITLAB_TOKEN` with `api` and `write_repository` access before enabling the scaffolded pipeline. GitLab CI already provides the project identity variables that `wp-core-base` consumes.
 
 ## What To Read Next
 

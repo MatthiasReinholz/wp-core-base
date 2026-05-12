@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'version' => '1.4.3',
+  'version' => '1.4.4',
   'release_channel' => 'stable',
   'distribution' =>
   array (
@@ -45,6 +45,12 @@ return array (
       array (
         'name' => 'Redirection',
         'version' => '5.7.5',
+        'kind' => 'plugin',
+      ),
+      4 =>
+      array (
+        'name' => 'Akismet Anti-spam: Spam Protection',
+        'version' => '5.7',
         'kind' => 'plugin',
       ),
     ),

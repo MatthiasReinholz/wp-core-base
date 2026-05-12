@@ -191,59 +191,6 @@ return array (
   array (
     0 =>
     array (
-      'name' => 'Akismet Anti-spam: Spam Protection',
-      'slug' => 'akismet',
-      'kind' => 'plugin',
-      'management' => 'local',
-      'source' => 'local',
-      'path' => 'wp-content/plugins/akismet',
-      'main_file' => 'akismet.php',
-      'version' => '5.6',
-      'checksum' => NULL,
-      'archive_subdir' => '',
-      'extra_labels' =>
-      array (
-        0 => 'plugin:akismet',
-      ),
-      'source_config' =>
-      array (
-        'github_repository' => NULL,
-        'github_release_asset_pattern' => NULL,
-        'github_token_env' => NULL,
-        'gitlab_project' => NULL,
-        'gitlab_release_asset_pattern' => NULL,
-        'gitlab_token_env' => NULL,
-        'gitlab_api_base' => NULL,
-        'generic_json_url' => NULL,
-        'min_release_age_hours' => NULL,
-        'verification_mode' => 'inherit',
-        'checksum_asset_pattern' => NULL,
-        'credential_key' => NULL,
-        'provider' => NULL,
-        'provider_product_id' => NULL,
-      ),
-      'policy' =>
-      array (
-        'class' => 'local-owned',
-        'allow_runtime_paths' =>
-        array (
-        ),
-        'strip_paths' =>
-        array (
-        ),
-        'strip_files' =>
-        array (
-        ),
-        'sanitize_paths' =>
-        array (
-        ),
-        'sanitize_files' =>
-        array (
-        ),
-      ),
-    ),
-    1 =>
-    array (
       'name' => 'WooCommerce',
       'slug' => 'woocommerce',
       'kind' => 'plugin',
@@ -295,7 +242,7 @@ return array (
         ),
       ),
     ),
-    2 =>
+    1 =>
     array (
       'name' => 'Jetpack',
       'slug' => 'jetpack',
@@ -348,7 +295,7 @@ return array (
         ),
       ),
     ),
-    3 =>
+    2 =>
     array (
       'name' => 'Contact Form 7',
       'slug' => 'contact-form-7',
@@ -401,7 +348,7 @@ return array (
         ),
       ),
     ),
-    4 =>
+    3 =>
     array (
       'name' => 'Redirection',
       'slug' => 'redirection',
@@ -454,7 +401,7 @@ return array (
         ),
       ),
     ),
-    5 =>
+    4 =>
     array (
       'name' => 'Twenty Twenty-Three',
       'slug' => 'twentytwentythree',
@@ -507,7 +454,7 @@ return array (
         ),
       ),
     ),
-    6 =>
+    5 =>
     array (
       'name' => 'Twenty Twenty-Four',
       'slug' => 'twentytwentyfour',
@@ -560,7 +507,7 @@ return array (
         ),
       ),
     ),
-    7 =>
+    6 =>
     array (
       'name' => 'Twenty Twenty-Five',
       'slug' => 'twentytwentyfive',
@@ -596,6 +543,59 @@ return array (
       'policy' =>
       array (
         'class' => 'local-owned',
+        'allow_runtime_paths' =>
+        array (
+        ),
+        'strip_paths' =>
+        array (
+        ),
+        'strip_files' =>
+        array (
+        ),
+        'sanitize_paths' =>
+        array (
+        ),
+        'sanitize_files' =>
+        array (
+        ),
+      ),
+    ),
+    7 =>
+    array (
+      'name' => 'Akismet Anti-spam: Spam Protection',
+      'slug' => 'akismet',
+      'kind' => 'plugin',
+      'management' => 'managed',
+      'source' => 'wordpress.org',
+      'path' => 'wp-content/plugins/akismet',
+      'main_file' => 'akismet.php',
+      'version' => '5.7',
+      'checksum' => 'sha256:bf430ba2ab9540b9d669d0a4af8a0da699bd3fe0faae91c0eaddc849a76394b5',
+      'archive_subdir' => '',
+      'extra_labels' =>
+      array (
+        0 => 'plugin:akismet',
+      ),
+      'source_config' =>
+      array (
+        'github_repository' => NULL,
+        'github_release_asset_pattern' => NULL,
+        'github_token_env' => NULL,
+        'gitlab_project' => NULL,
+        'gitlab_release_asset_pattern' => NULL,
+        'gitlab_token_env' => NULL,
+        'gitlab_api_base' => NULL,
+        'generic_json_url' => NULL,
+        'min_release_age_hours' => NULL,
+        'verification_mode' => 'inherit',
+        'checksum_asset_pattern' => NULL,
+        'credential_key' => NULL,
+        'provider' => NULL,
+        'provider_product_id' => NULL,
+      ),
+      'policy' =>
+      array (
+        'class' => 'managed-upstream',
         'allow_runtime_paths' =>
         array (
         ),

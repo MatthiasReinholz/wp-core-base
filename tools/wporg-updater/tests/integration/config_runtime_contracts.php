@@ -28,7 +28,7 @@ function run_config_runtime_contract_tests(
     $assert(in_array('runtime-file', $config->stagedKinds(), true), 'Expected runtime-file to be stageable by default.');
     $assert(in_array('runtime-directory', $config->stagedKinds(), true), 'Expected runtime-directory to be stageable by default.');
     $assert(in_array('plugin', $config->managedKinds(), true), 'Expected plugins to remain managed by default.');
-    $assert(count($config->managedDependencies()) === 4, 'Expected four managed baseline dependencies.');
+    $assert(count($config->managedDependencies()) === 5, 'Expected five managed baseline dependencies.');
 
     $longLabelManifestRoot = sys_get_temp_dir() . '/wporg-long-label-' . bin2hex(random_bytes(4));
     mkdir($longLabelManifestRoot . '/.wp-core-base', 0777, true);

@@ -101,6 +101,7 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-
 
 Use `full-core` instead of `content-only` if the downstream repository stores WordPress core in Git.
 Use `content-only-image-first` if you want a stricter image-first preset with external core, `staged-clean` validation, and starter ownership roots for content repos.
+For GitHub-hosted automation, set a repository secret named `WP_CORE_BASE_AUTOMATION_TOKEN` with permission to push update branches and open pull requests so generated PRs trigger required checks.
 Add `--automation-provider=gitlab` when the downstream repository is hosted on GitLab.
 For GitLab-hosted automation, also set a masked `GITLAB_TOKEN` CI/CD variable with `api` and `write_repository` access before enabling the scaffolded pipeline.
 Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the scheduled updates, merged-PR reconciliation, blocker, validation, and framework self-update workflows. It also writes a framework-managed admin governance MU plugin, local downstream guidance at `.wp-core-base/USAGE.md`, and a downstream `AGENTS.md` so humans and coding agents can discover the correct CLI-first workflow from inside the project repo.
@@ -143,9 +144,9 @@ That surfaces any framework-managed files that would refresh, be removed, or be 
 
 This repository currently ships:
 
-- framework release `1.4.3`
+- framework release `1.4.4`
 - WordPress core `6.9.4`
-- Akismet `5.6`
+- Akismet Anti-spam: Spam Protection `5.7`
 - WooCommerce `10.7.0`
 - Jetpack `15.7.1`
 - Contact Form 7 `6.1.5`
