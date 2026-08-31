@@ -148,7 +148,7 @@ This repository currently ships:
 - Akismet `5.6`
 - WooCommerce `10.7.0`
 - Jetpack `15.7.1`
-- Contact Form 7 `6.1.5`
+- Contact Form 7 `6.1.7`
 - Redirection `5.7.5`
 - Twenty Twenty-Three `1.6`
 - Twenty Twenty-Four `1.4`
