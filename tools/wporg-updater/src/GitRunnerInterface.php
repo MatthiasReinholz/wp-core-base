@@ -34,7 +34,7 @@ interface GitRunnerInterface
 
     public function forcePushRevision(string $branch, string $revision): void;
 
-    public function deleteRemoteBranch(string $branch): void;
+    public function deleteRemoteBranch(string $branch, ?string $expectedRevision = null): void;
 
     public function assertCleanWorktree(): void;
 }

@@ -145,7 +145,6 @@ function run_multi_host_contract_tests(
     $dirtyRoot = sys_get_temp_dir() . '/wporg-gitlab-runtime-' . bin2hex(random_bytes(4));
     mkdir($dirtyRoot . '/.gitea/workflows', 0777, true);
     file_put_contents($dirtyRoot . '/.gitea/workflows/ci.yml', "name: test\n");
-    file_put_contents($dirtyRoot . '/.gitlab-ci.yml', "stages: []\n");
 
     $giteaRejected = false;
     $gitLabFileRejected = false;

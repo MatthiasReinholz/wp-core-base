@@ -9,6 +9,8 @@ use ZipArchive;
 
 final class CoreUpdater
 {
+    private readonly ManagedPullRequestBranchCleaner $branchCleaner;
+
     public function __construct(
         private readonly Config $config,
         private readonly CoreScanner $coreScanner,
@@ -19,6 +21,7 @@ final class CoreUpdater
         private readonly GitRunnerInterface $gitRunner,
         private readonly ArchiveDownloader $archiveDownloader = new HttpClient(),
     ) {
+        $this->branchCleaner = new ManagedPullRequestBranchCleaner($automationClient, $gitRunner);
     }
 
     public function sync(): void
@@ -52,7 +55,7 @@ final class CoreUpdater
 
         foreach ($duplicatePrs as $duplicatePr) {
             $this->closeSupersededPullRequest(
-                (int) $duplicatePr['number'],
+                $duplicatePr,
                 sprintf(
                     'Another automation PR already covers WordPress core at `%s`. This duplicate PR is being closed to keep one live PR per target version.',
                     (string) $duplicatePr['planned_target_version']
@@ -190,7 +193,7 @@ final class CoreUpdater
 
         if ($this->pullRequestAlreadySatisfied($currentVersion, $targetVersion)) {
             $this->closeSupersededPullRequest(
-                (int) $plannedPr['number'],
+                $plannedPr,
                 sprintf(
                     'Base branch already contains WordPress core `%s`. This stale automation PR is no longer applicable and has been closed.',
                     $targetVersion
@@ -212,7 +215,7 @@ final class CoreUpdater
 
                 if (! $changed) {
                     $this->closeSupersededPullRequest(
-                        (int) $plannedPr['number'],
+                        $plannedPr,
                         sprintf(
                             'Refreshing this WordPress core PR from the latest base branch produced no remaining file changes for `%s`. The PR has been closed as a no-op.',
                             $targetVersion
@@ -406,10 +409,12 @@ final class CoreUpdater
         return ManagedPullRequestCanonicalizer::partitionByTargetVersion($plannedPrs);
     }
 
-    private function closeSupersededPullRequest(int $number, string $reason): void
+    /** @param array<string, mixed> $pullRequest */
+    private function closeSupersededPullRequest(array $pullRequest, string $reason): void
     {
+        $number = (int) ($pullRequest['number'] ?? 0);
         fwrite(STDOUT, sprintf("Closing PR #%d: %s\n", $number, $reason));
-        $this->automationClient->closePullRequest($number, $reason);
+        $this->branchCleaner->closeAndCleanup($pullRequest, $reason);
     }
 
     /**

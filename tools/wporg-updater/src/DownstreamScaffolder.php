@@ -181,6 +181,7 @@ final class DownstreamScaffolder
         $syncCommand = $this->updaterCommand($toolPath, 'sync');
         $frameworkSyncCommand = $this->updaterCommand($toolPath, 'framework-sync --repo-root=.');
         $blockerCommand = $this->updaterCommand($toolPath, 'pr-blocker');
+        $cleanupCommand = $this->updaterCommand($toolPath, 'managed-pr-cleanup');
         $doctorCommand = $this->updaterCommand($toolPath, 'doctor --repo-root=. --automation');
         $stageCommand = $this->updaterCommand($toolPath, 'stage-runtime --repo-root=. --output=.wp-core-base/build/runtime');
 
@@ -192,6 +193,7 @@ final class DownstreamScaffolder
                 $syncCommand,
                 $frameworkSyncCommand,
                 $blockerCommand,
+                $cleanupCommand,
                 $doctorCommand,
                 $stageCommand
             ),
@@ -307,6 +309,7 @@ final class DownstreamScaffolder
         string $syncCommand,
         string $frameworkSyncCommand,
         string $blockerCommand,
+        string $cleanupCommand,
         string $doctorCommand,
         string $stageCommand,
     ): array {
@@ -323,6 +326,7 @@ final class DownstreamScaffolder
                 [
                     '__WPORG_SYNC_COMMAND__' => $syncCommand,
                     '__WPORG_PHP_PATH__' => $phpPath,
+                    '__WPORG_CLEANUP_COMMAND__' => $cleanupCommand,
                 ]
             ),
             '.github/workflows/wporg-update-pr-blocker.yml' => $this->renderTemplate(

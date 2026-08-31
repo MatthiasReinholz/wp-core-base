@@ -18,6 +18,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  cleanup:
+    if: >
+      github.event_name == 'pull_request_target' &&
+      (
+        contains(github.event.pull_request.labels.*.name, 'automation:dependency-update') ||
+        contains(github.event.pull_request.labels.*.name, 'automation:framework-update')
+      )
+    permissions:
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Clean up managed branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: php tools/wporg-updater/bin/wporg-updater.php managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}
+
   sync:
     if: >
       (
@@ -33,6 +63,10 @@ jobs:
       )
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     steps:
       - name: Check out repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

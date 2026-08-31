@@ -7,6 +7,7 @@ use WpOrgPluginUpdater\CommandHelp;
 use WpOrgPluginUpdater\Cli\Handlers\DependencyAuthoringModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\DoctorModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\FrameworkSyncModeHandler;
+use WpOrgPluginUpdater\Cli\Handlers\ManagedPullRequestCleanupModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\PullRequestBlockerModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\ReleaseAssetInspectionModeHandler;
 use WpOrgPluginUpdater\Cli\Handlers\ReleaseModeHandler;
@@ -305,6 +306,7 @@ try {
     }
 
     $blockerDispatcher = new ModeDispatcher([
+        new ManagedPullRequestCleanupModeHandler($config, $httpClient, $repoRoot, $jsonOutput, $emitJson),
         new PullRequestBlockerModeHandler($config, $httpClient, $jsonOutput, $emitJson),
     ]);
     $blockerExitCode = $blockerDispatcher->dispatch($mode, $options);

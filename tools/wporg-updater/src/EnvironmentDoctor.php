@@ -990,6 +990,12 @@ final class EnvironmentDoctor
                 'Reconcile workflow should gate pull_request_target closed events to merged PRs.'
             );
             $this->okIf(
+                str_contains($reconcileWorkflow, 'managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}')
+                && str_contains($reconcileWorkflow, 'ref: ${{ github.event.repository.default_branch }}'),
+                'Reconcile workflow cleans managed branches from trusted default-branch code on every labeled close event.',
+                'Reconcile workflow should run managed-pr-cleanup from an explicit default-branch checkout.'
+            );
+            $this->okIf(
                 str_contains($reconcileWorkflow, "automation:dependency-update")
                 && str_contains($reconcileWorkflow, "automation:framework-update"),
                 'Reconcile workflow scopes execution to automation PR labels.',

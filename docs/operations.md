@@ -102,6 +102,16 @@ The dependency updater also keeps one live PR per dependency/version pair. If du
 
 WordPress core and framework self-update PRs follow the same rule: one live PR per target version, with stale/no-op PRs closed during reconciliation instead of left open.
 
+Closing any recognized automation PR also removes its generated same-repository
+branch. This applies to merged, manually rejected, stale, duplicate, and
+superseded PRs. It does not merge or approve anything; it only performs
+housekeeping after the close decision.
+
+Closing an update PR is not a permanent version pin. If the manifest still
+declares an older managed version, a later scheduled sync can propose the update
+again. Change the dependency policy or version intentionally when an update must
+remain deferred.
+
 That queueing behavior depends on the blocker workflow.
 
 ## Runtime Validation In CI
@@ -124,6 +134,12 @@ For GitLab-hosted automation, configure:
 - token permissions that include `api` and `write_repository`
 
 The scaffolded `.gitlab-ci.yml` also relies on the normal GitLab CI project metadata, such as `CI_PROJECT_ID`, `CI_PROJECT_PATH`, and `CI_API_V4_URL`.
+
+Updater-driven GitLab merge-request closures clean their branches through the
+same provider-neutral lifecycle service. GitLab installations that want cleanup
+after a manual close can invoke `managed-pr-cleanup --pr-number=<iid>` from a
+trusted close-event integration; the framework does not install a webhook
+service or global orphan crawler.
 
 ## Common Failure Modes
 

@@ -149,6 +149,18 @@ Core and framework automation now follow the same stale/no-op rules as dependenc
 - duplicate PRs for the same target version are collapsed to one canonical PR
 - if reconciliation discovers that the base branch already contains the target version, the stale PR is closed automatically
 
+Framework-managed branches are housekeeping, not review decisions. After an
+automation PR is merged, rejected, or closed as stale/superseded, the framework
+deletes its same-repository managed branch. Cleanup requires a recognized
+automation label, valid embedded metadata, exact metadata/head-ref agreement,
+the expected generated branch namespace, and a non-default target. GitHub runs
+closed-event cleanup from an explicit default-branch checkout; full dependency
+reconciliation remains limited to merged PRs, schedules, and manual dispatches.
+
+Branch cleanup never approves workflow execution, approves a review, enables
+auto-merge, or merges a PR. A rejected update may be proposed again on a later
+scheduled sync while the manifest still declares an older managed version.
+
 Framework release artifacts are now also built through one explicit builder path instead of repeated workflow-local shell snippets. That keeps artifact exclusion rules and release hygiene consistent across CI, finalize, and manual recovery workflows.
 
 ## Scaffolding
