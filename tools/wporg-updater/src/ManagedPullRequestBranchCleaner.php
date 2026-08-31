@@ -155,19 +155,16 @@ final class ManagedPullRequestBranchCleaner
             return self::LABEL_BRANCH_PREFIXES['automation:framework-update'];
         }
 
-        if ($recognizedLabels[0] === 'automation:dependency-update') {
-            if (($metadata['kind'] ?? null) === 'core' && ($metadata['slug'] ?? null) === 'wordpress-core') {
-                return self::CORE_BRANCH_PREFIX;
-            }
-
-            $componentKey = (string) ($metadata['component_key'] ?? '');
-
-            if ($componentKey === '' || ! str_contains($componentKey, ':')) {
-                throw new RuntimeException('Dependency automation metadata has no valid component key.');
-            }
-
-            return self::LABEL_BRANCH_PREFIXES['automation:dependency-update'];
+        if (($metadata['kind'] ?? null) === 'core' && ($metadata['slug'] ?? null) === 'wordpress-core') {
+            return self::CORE_BRANCH_PREFIX;
         }
 
+        $componentKey = (string) ($metadata['component_key'] ?? '');
+
+        if ($componentKey === '' || ! str_contains($componentKey, ':')) {
+            throw new RuntimeException('Dependency automation metadata has no valid component key.');
+        }
+
+        return self::LABEL_BRANCH_PREFIXES['automation:dependency-update'];
     }
 }
