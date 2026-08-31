@@ -46,6 +46,7 @@ Core invariant:
 
 - `Updater` orchestrates managed dependency update PRs, including release resolution, installation, branch updates, and PR lifecycle checks
 - `CoreUpdater` handles WordPress core PRs and archive application
+- `FrameworkSourceBaselineSynchronizer` keeps upstream-only baseline metadata and public baseline facts aligned with generated dependency and core PRs
 - `FrameworkSyncer` handles vendored framework self-update PRs
 - `PullRequestBlocker` enforces blocked-by queueing rules
 

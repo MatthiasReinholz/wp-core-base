@@ -10,6 +10,9 @@ use ZipArchive;
 
 final class Updater
 {
+    /** @var list<string> */
+    private array $frameworkSourceBaselinePaths = [];
+
     /** @var array<string, DependencyTrustRecord> */
     private array $lastRunTrustStates = [];
     private readonly ManagedPullRequestBranchCleaner $branchCleaner;
@@ -529,6 +532,7 @@ final class Updater
         array $releaseData,
         bool $resetToBase = false,
     ): array {
+        $this->frameworkSourceBaselinePaths = [];
         $this->gitRunner->checkoutBranch($defaultBranch, $branch, $resetToBase);
         $checkedOutConfig = $this->configForCheckedOutBranch();
         $componentKey = (string) ($dependency['component_key'] ?? '');
@@ -608,6 +612,8 @@ final class Updater
                 $checksum
             );
             $this->refreshAdminGovernance($this->config);
+            $this->frameworkSourceBaselinePaths = (new FrameworkSourceBaselineSynchronizer($this->config->repoRoot))
+                ->synchronize($this->config);
 
             return $this->config->dependencyByKey($componentKey);
         } finally {
@@ -1225,6 +1231,8 @@ final class Updater
         if ($this->adminGovernanceExporter !== null) {
             $paths[] = FrameworkRuntimeFiles::governanceDataPath($this->config);
         }
+
+        $paths = array_merge($paths, $this->frameworkSourceBaselinePaths);
 
         return array_values(array_unique($paths));
     }
