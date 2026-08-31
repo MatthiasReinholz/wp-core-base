@@ -12,6 +12,7 @@ final class Updater
 {
     /** @var array<string, DependencyTrustRecord> */
     private array $lastRunTrustStates = [];
+    private readonly ManagedPullRequestBranchCleaner $branchCleaner;
 
     public function __construct(
         private Config $config,
@@ -30,6 +31,7 @@ final class Updater
         private readonly ?AdminGovernanceExporter $adminGovernanceExporter = null,
     ) {
         unset($wordPressOrgClient, $httpClient);
+        $this->branchCleaner = new ManagedPullRequestBranchCleaner($automationClient, $gitRunner);
     }
 
     /**
@@ -136,7 +138,7 @@ final class Updater
 
         foreach ($duplicatePrs as $duplicatePr) {
             $this->closeSupersededPullRequest(
-                (int) $duplicatePr['number'],
+                $duplicatePr,
                 sprintf(
                     'Another automation PR already covers `%s` at `%s`. This duplicate PR is being closed to keep one live PR per dependency/version pair.',
                     $dependency['component_key'],
@@ -255,7 +257,7 @@ final class Updater
 
             if ($plannedTargetVersion !== '' && version_compare($plannedTargetVersion, $latestVersion, '<')) {
                 $this->closeSupersededPullRequest(
-                    (int) ($plannedPr['number'] ?? 0),
+                    $plannedPr,
                     sprintf(
                         'This automation source only resolves the latest advertised version. `%s` now advertises `%s`, so this older PR has been closed and will be replaced by the current release if needed.',
                         (string) $dependency['component_key'],
@@ -301,7 +303,7 @@ final class Updater
 
         if ($this->pullRequestAlreadySatisfied($dependencyState['version'], $targetVersion)) {
             $this->closeSupersededPullRequest(
-                (int) $plannedPr['number'],
+                $plannedPr,
                 sprintf(
                     'Base branch already contains `%s` at `%s`. This stale automation PR is no longer applicable and has been closed.',
                     $dependency['component_key'],
@@ -331,7 +333,7 @@ final class Updater
 
                 if (! $changed) {
                     $this->closeSupersededPullRequest(
-                        (int) $plannedPr['number'],
+                        $plannedPr,
                         sprintf(
                             'Refreshing this automation PR from the latest base branch produced no remaining file changes for `%s` at `%s`. The PR has been closed as a no-op.',
                             $dependency['component_key'],
@@ -1236,10 +1238,12 @@ final class Updater
         $this->adminGovernanceExporter->refresh($config);
     }
 
-    private function closeSupersededPullRequest(int $number, string $reason): void
+    /** @param array<string, mixed> $pullRequest */
+    private function closeSupersededPullRequest(array $pullRequest, string $reason): void
     {
+        $number = (int) ($pullRequest['number'] ?? 0);
         fwrite(STDOUT, sprintf("Closing PR #%d: %s\n", $number, $reason));
-        $this->automationClient->closePullRequest($number, $reason);
+        $this->branchCleaner->closeAndCleanup($pullRequest, $reason);
     }
 
     /**
