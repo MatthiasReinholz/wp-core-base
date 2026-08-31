@@ -147,7 +147,7 @@ This repository currently ships:
 - WordPress core `6.9.4`
 - Akismet `5.6`
 - WooCommerce `10.7.0`
-- Jetpack `16.0.1`
+- Jetpack `16.1.2`
 - Contact Form 7 `6.1.7`
 - Redirection `5.7.5`
 - Twenty Twenty-Three `1.6`
