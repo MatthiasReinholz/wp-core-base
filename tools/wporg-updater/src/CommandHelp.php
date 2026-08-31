@@ -49,6 +49,7 @@ Usage:
   {$phpCommandPrefix} scaffold-premium-provider [--repo-root=/path] --provider=your-provider [--class=Project\\WpCoreBase\\Premium\\YourProviderManagedSource] [--path=.wp-core-base/premium-providers/your-provider.php]
   {$phpCommandPrefix} pr-blocker [--pr-number=123] [--json]
   {$phpCommandPrefix} pr-blocker-reconcile [--json]
+  {$phpCommandPrefix} managed-pr-cleanup --pr-number=123 [--json]
 
 Use:
   {$commandPrefix} help add-dependency
