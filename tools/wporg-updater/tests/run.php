@@ -36,6 +36,7 @@ use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\InteractivePrompter;
 use WpOrgPluginUpdater\ManagedDependencySource;
 use WpOrgPluginUpdater\ManagedPullRequestCanonicalizer;
+use WpOrgPluginUpdater\ManagedPullRequestBranchCleaner;
 use WpOrgPluginUpdater\ManagedSourceRegistry;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\ManifestSuggester;
@@ -77,6 +78,7 @@ require __DIR__ . '/integration/blocker_states.php';
 require __DIR__ . '/integration/followups.php';
 require __DIR__ . '/integration/multi_host_contracts.php';
 require __DIR__ . '/integration/generic_json_contracts.php';
+require __DIR__ . '/integration/managed_pr_cleanup_contracts.php';
 
 final class ExamplePremiumManagedSource extends AbstractPremiumManagedSource
 {
@@ -178,6 +180,7 @@ final class FakeGitRunner implements GitRunnerInterface
     public string $currentRevision = 'main-sha';
     public bool $clean = true;
     public bool $failCommit = false;
+    public bool $failDeleteRemoteBranch = false;
 
     /** @var array<string, string> */
     public array $localBranches = ['main' => 'main-sha'];
@@ -296,10 +299,14 @@ final class FakeGitRunner implements GitRunnerInterface
         $this->actions[] = sprintf('push:%s:%s', $branch, $revision);
     }
 
-    public function deleteRemoteBranch(string $branch): void
+    public function deleteRemoteBranch(string $branch, ?string $expectedRevision = null): void
     {
+        if ($this->failDeleteRemoteBranch) {
+            throw new RuntimeException('Simulated remote branch deletion failure.');
+        }
+
         unset($this->remoteBranches[$branch]);
-        $this->actions[] = sprintf('delete-remote:%s', $branch);
+        $this->actions[] = sprintf('delete-remote:%s:%s', $branch, $expectedRevision ?? 'unconditional');
     }
 
     public function assertCleanWorktree(): void
@@ -2084,6 +2091,7 @@ run_workflow_contract_tests(
     $setupPhpActionSha,
     $normalizeWorkflowExample
 );
+run_managed_pr_cleanup_contract_tests($assert);
 run_multi_host_contract_tests(
     $assert,
     $repoRoot,
