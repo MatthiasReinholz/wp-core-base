@@ -169,6 +169,5 @@ final class ManagedPullRequestBranchCleaner
             return self::LABEL_BRANCH_PREFIXES['automation:dependency-update'];
         }
 
-        throw new RuntimeException('Pull request does not have a recognized wp-core-base automation label.');
     }
 }
