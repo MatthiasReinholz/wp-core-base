@@ -397,6 +397,7 @@ final class GitLabClient implements AutomationClient
         $payload['body'] = (string) ($payload['description'] ?? '');
         $payload['head'] = [
             'ref' => (string) ($payload['source_branch'] ?? ''),
+            'sha' => (string) ($payload['sha'] ?? ''),
             'repo' => ['full_name' => $sourceRepository],
         ];
         $payload['base'] = [
