@@ -304,8 +304,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/jetpack',
       'main_file' => 'jetpack.php',
-      'version' => '15.8',
-      'checksum' => 'sha256:adbf9dfc7709382505f1faca853614f09a022791f3d06ef6f5230c75bc7d46d9',
+      'version' => '15.9.1',
+      'checksum' => 'sha256:b04df295981275baf5baa85426be3af15a314077e4118210a2dd58c889e7eec0',
       'archive_subdir' => '',
       'extra_labels' =>
       array (
