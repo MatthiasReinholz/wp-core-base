@@ -26,6 +26,8 @@ function run_upstream_workflow_contract_tests(
     $assert(str_contains($upstreamReconcileWorkflow, $setupPhpActionSha), 'Expected upstream reconciliation workflow to pin setup-php by full commit SHA.');
     $assert(str_contains($upstreamValidateWorkflow, "push:\n    branches:\n      - main"), 'Expected upstream CI workflow to validate the exact merged release commit on pushes to main.');
     $assert(str_contains($upstreamReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected upstream reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
+    $assert(str_contains($upstreamReconcileWorkflow, 'managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}'), 'Expected upstream reconciliation workflow to clean branches for closed managed PRs.');
+    $assert(str_contains($upstreamReconcileWorkflow, 'ref: ${{ github.event.repository.default_branch }}'), 'Expected upstream managed branch cleanup to execute trusted default-branch code.');
     $assert(str_contains($upstreamReconcileWorkflow, "automation:framework-update"), 'Expected upstream reconciliation workflow to limit closed-PR reconciliation to framework automation PRs.');
     $assert(str_contains($upstreamReconcileWorkflow, 'workflow_dispatch:'), 'Expected upstream reconciliation workflow to include manual recovery trigger coverage.');
     $assert(str_contains($upstreamReconcileWorkflow, 'schedule:'), 'Expected upstream reconciliation workflow to include scheduled recovery trigger coverage.');
