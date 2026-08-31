@@ -153,13 +153,22 @@ final class GitCommandRunner implements GitRunnerInterface
         $this->run(['git', 'push', '--force', 'origin', $revision . ':' . $branch]);
     }
 
-    public function deleteRemoteBranch(string $branch): void
+    public function deleteRemoteBranch(string $branch, ?string $expectedRevision = null): void
     {
         if (! $this->remoteBranchExists($branch)) {
             return;
         }
 
-        $this->run(['git', 'push', 'origin', '--delete', $branch]);
+        $command = ['git', 'push'];
+
+        if (is_string($expectedRevision) && $expectedRevision !== '') {
+            $command[] = sprintf('--force-with-lease=refs/heads/%s:%s', $branch, $expectedRevision);
+        }
+
+        $command[] = 'origin';
+        $command[] = '--delete';
+        $command[] = $branch;
+        $this->run($command);
     }
 
     public function assertCleanWorktree(): void
