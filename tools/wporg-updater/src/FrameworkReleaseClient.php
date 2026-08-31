@@ -90,8 +90,9 @@ final class FrameworkReleaseClient implements FrameworkReleaseSource
      */
     public function downloadVerifiedReleaseAsset(FrameworkConfig $framework, array $release, string $destination): void
     {
-        $checksumPath = $destination . '.sha256';
-        $signaturePath = $checksumPath . '.sig';
+        $tempDir = dirname($destination);
+        $checksumPath = $tempDir . '/' . $framework->checksumAssetName();
+        $signaturePath = $tempDir . '/' . $framework->checksumSignatureAssetName();
 
         try {
             $this->downloadReleaseAsset($framework, $release, $destination);

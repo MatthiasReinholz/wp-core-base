@@ -39,6 +39,14 @@ function run_release_contract_tests(
 
     $assert($signatureTamperRejected, 'Expected release signature verification to reject tampered checksum sidecars.');
 
+    $releaseClientSource = (string) file_get_contents($repoRoot . '/tools/wporg-updater/src/FrameworkReleaseClient.php');
+    $assert(
+        str_contains($releaseClientSource, '$framework->checksumAssetName()')
+            && str_contains($releaseClientSource, '$framework->checksumSignatureAssetName()')
+            && ! str_contains($releaseClientSource, '$checksumPath = $destination . \'.sha256\''),
+        'Expected downloaded signature sidecars to retain their published filenames.'
+    );
+
     $releasePrepRoot = sys_get_temp_dir() . '/wporg-framework-release-' . bin2hex(random_bytes(4));
     mkdir($releasePrepRoot . '/.wp-core-base', 0777, true);
     mkdir($releasePrepRoot . '/docs/releases', 0777, true);
