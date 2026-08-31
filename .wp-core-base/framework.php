@@ -32,7 +32,7 @@ return array (
       1 =>
       array (
         'name' => 'Jetpack',
-        'version' => '15.7.1',
+        'version' => '15.8',
         'kind' => 'plugin',
       ),
       2 =>
