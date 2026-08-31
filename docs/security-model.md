@@ -115,3 +115,19 @@ Important examples:
 - `WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE`
 
 Local release keys should not live in tracked repository paths. The ignored `tools/wporg-updater/.tmp/` path is for local scratch material only and must never be treated as release input.
+
+## Managed Pull Request Branch Cleanup
+
+Automation branch deletion is allowed only after a pull request close decision.
+The cleanup path re-reads manually closed pull requests from the hosting API and
+requires a recognized automation label, valid framework metadata, a
+same-repository head, exact metadata/head branch agreement, the expected managed
+branch prefix, and a head that is neither the base nor default branch. The host
+must supply a PR head SHA, which must match the remote branch; deletion uses a
+Git force-with-lease so a concurrent force-push is rejected atomically.
+
+The GitHub `pull_request_target` cleanup job checks out the trusted repository
+default branch explicitly and never executes code from the pull request head.
+Its permissions are limited to reading pull-request metadata and deleting the
+managed Git ref. Review approval, workflow authorization, and merging remain
+separate human-controlled actions.
