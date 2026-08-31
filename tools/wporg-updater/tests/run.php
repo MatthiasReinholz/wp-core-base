@@ -19,6 +19,7 @@ use WpOrgPluginUpdater\FrameworkConfig;
 use WpOrgPluginUpdater\FrameworkInstaller;
 use WpOrgPluginUpdater\FrameworkReleaseNotes;
 use WpOrgPluginUpdater\FrameworkPublicContractVerifier;
+use WpOrgPluginUpdater\FrameworkSourceBaselineSynchronizer;
 use WpOrgPluginUpdater\FrameworkReleaseArtifactBuilder;
 use WpOrgPluginUpdater\FrameworkReleaseVerifier;
 use WpOrgPluginUpdater\FrameworkRuntimeFiles;
@@ -208,7 +209,6 @@ final class FakeGitRunner implements GitRunnerInterface
     public function commitAndPush(string $branch, string $message, array $paths, bool $force = false): bool
     {
         $this->actions[] = sprintf('commit:%s', $branch);
-
         if ($this->failCommit) {
             throw new RuntimeException('Simulated commit failure.');
         }
@@ -1218,6 +1218,80 @@ $assert(FrameworkReleaseNotes::missingRequiredSections($releaseNotesMarkdown) ==
 $assert((new FrameworkReleaseVerifier($repoRoot))->verify() === 'v' . $currentFrameworkVersion, 'Expected framework release verification to succeed.');
 $contractReport = (new FrameworkPublicContractVerifier($repoRoot))->verify($frameworkConfig, $releaseNotesMarkdown);
 $assert($contractReport['framework_version'] === $currentFrameworkVersion, 'Expected framework public-contract verification to report the current framework version.');
+$baselineSyncRoot = sys_get_temp_dir() . '/wporg-framework-baseline-sync-' . bin2hex(random_bytes(4));
+mkdir($baselineSyncRoot . '/.wp-core-base', 0777, true);
+mkdir($baselineSyncRoot . '/docs/releases', 0777, true);
+copy($repoRoot . '/.wp-core-base/framework.php', $baselineSyncRoot . '/.wp-core-base/framework.php');
+copy($repoRoot . '/README.md', $baselineSyncRoot . '/README.md');
+copy($repoRoot . '/docs/releases/' . $currentFrameworkVersion . '.md', $baselineSyncRoot . '/docs/releases/' . $currentFrameworkVersion . '.md');
+$baselineSourceConfig = Config::load($repoRoot);
+$baselineSyncDependencies = $baselineSourceConfig->dependencies();
+$baselineSyncManagedIndex = array_key_first(array_filter(
+    $baselineSyncDependencies,
+    static fn (array $dependency): bool => $dependency['management'] === 'managed'
+));
+$assert(is_int($baselineSyncManagedIndex), 'Expected an upstream managed dependency for baseline synchronization tests.');
+$baselineSyncDependencyName = (string) $baselineSyncDependencies[$baselineSyncManagedIndex]['name'];
+$historicalBaselineExample = "\n## Historical Baseline Example\n\n- " . $baselineSyncDependencyName . " `0.0.1`\n";
+file_put_contents($baselineSyncRoot . '/README.md', $historicalBaselineExample, FILE_APPEND);
+$baselineSyncDependencies[$baselineSyncManagedIndex]['version'] = '99.9.9';
+$baselineSyncConfig = new Config(
+    repoRoot: $baselineSyncRoot,
+    manifestPath: $baselineSyncRoot . '/.wp-core-base/manifest.php',
+    profile: $baselineSourceConfig->profile,
+    paths: $baselineSourceConfig->paths,
+    core: $baselineSourceConfig->core,
+    runtime: $baselineSourceConfig->runtime,
+    github: $baselineSourceConfig->github,
+    gitlab: $baselineSourceConfig->gitlab,
+    automation: $baselineSourceConfig->automation,
+    security: $baselineSourceConfig->security,
+    dependencies: $baselineSyncDependencies,
+);
+$baselineSyncPaths = (new FrameworkSourceBaselineSynchronizer($baselineSyncRoot))->synchronize($baselineSyncConfig, '99.8.7');
+$assert(
+    $baselineSyncPaths === ['.wp-core-base/framework.php', 'README.md', 'docs/releases/' . $currentFrameworkVersion . '.md'],
+    'Expected source baseline synchronization to return every public-contract path for commit staging.'
+);
+$baselineSyncFramework = FrameworkConfig::load($baselineSyncRoot);
+$assert($baselineSyncFramework->version === $currentFrameworkVersion, 'Expected baseline synchronization to preserve the framework release version.');
+$assert($baselineSyncFramework->baseline['wordpress_core'] === '99.8.7', 'Expected baseline synchronization to update the WordPress core baseline.');
+$assert(count($baselineSyncFramework->baseline['managed_components']) === count($baselineSourceConfig->managedDependencies()), 'Expected baseline synchronization to exclude local and ignored dependencies.');
+$assert(
+    array_values(array_filter(
+        $baselineSyncFramework->baseline['managed_components'],
+        static fn (array $component): bool => $component['name'] === $baselineSyncDependencyName && $component['version'] === '99.9.9'
+    )) !== [],
+    'Expected baseline synchronization to derive managed component versions from the checked-out manifest config.'
+);
+$assert(str_contains((string) file_get_contents($baselineSyncRoot . '/README.md'), '- WordPress core `99.8.7`'), 'Expected baseline synchronization to update the README core fact.');
+$assert(str_contains((string) file_get_contents($baselineSyncRoot . '/README.md'), '- ' . $baselineSyncDependencyName . ' `99.9.9`'), 'Expected baseline synchronization to update the README managed-component fact.');
+$assert(str_contains((string) file_get_contents($baselineSyncRoot . '/README.md'), '- ' . $baselineSyncDependencyName . ' `0.0.1`'), 'Expected baseline synchronization to leave matching facts outside the Current Baseline section untouched.');
+$assert(str_contains((string) file_get_contents($baselineSyncRoot . '/docs/releases/' . $currentFrameworkVersion . '.md'), '- WordPress core: `99.8.7`'), 'Expected baseline synchronization to update the release-note core fact.');
+$baselineSyncHashes = array_map(
+    static fn (string $path): string => hash_file('sha256', $baselineSyncRoot . '/' . $path),
+    $baselineSyncPaths
+);
+(new FrameworkSourceBaselineSynchronizer($baselineSyncRoot))->synchronize($baselineSyncConfig, '99.8.7');
+$assert(
+    $baselineSyncHashes === array_map(
+        static fn (string $path): string => hash_file('sha256', $baselineSyncRoot . '/' . $path),
+        $baselineSyncPaths
+    ),
+    'Expected source baseline synchronization to be idempotent.'
+);
+$vendoredFramework = $baselineSyncFramework->withInstalledRelease(
+    version: $baselineSyncFramework->version,
+    wordPressCoreVersion: $baselineSyncFramework->baseline['wordpress_core'],
+    managedComponents: $baselineSyncFramework->baseline['managed_components'],
+    managedFiles: $baselineSyncFramework->managedFiles(),
+    distributionPath: 'vendor/wp-core-base',
+);
+(new FrameworkWriter())->write($vendoredFramework);
+$vendoredFrameworkHash = hash_file('sha256', $baselineSyncRoot . '/.wp-core-base/framework.php');
+$assert((new FrameworkSourceBaselineSynchronizer($baselineSyncRoot))->synchronize($baselineSyncConfig, '100.0.0') === [], 'Expected vendored downstream baseline metadata to remain pinned.');
+$assert(hash_file('sha256', $baselineSyncRoot . '/.wp-core-base/framework.php') === $vendoredFrameworkHash, 'Expected vendored downstream baseline synchronization to be a strict no-op.');
+(new RuntimeInspector($runtimeDefaults))->clearPath($baselineSyncRoot);
 run_upstream_workflow_contract_tests($assert, $repoRoot, $checkoutActionSha, $setupPhpActionSha);
 run_release_contract_tests($assert, $repoRoot, $frameworkConfig, $currentFrameworkVersion);
 
@@ -2209,6 +2283,7 @@ mkdir($installerIsolationRoot . '/cms/plugins/plugin-a', 0777, true);
 mkdir($installerIsolationRoot . '/cms/plugins/plugin-b', 0777, true);
 mkdir($installerIsolationRoot . '/cms/mu-plugins', 0777, true);
 mkdir($installerIsolationRoot . '/.wp-core-base', 0777, true);
+mkdir($installerIsolationRoot . '/docs/releases', 0777, true);
 file_put_contents($installerIsolationRoot . '/cms/plugins/plugin-a/plugin-a.php', "<?php\n/*\nPlugin Name: Plugin A\nVersion: 1.0.0\n*/\n");
 file_put_contents($installerIsolationRoot . '/cms/plugins/plugin-b/plugin-b.php', "<?php\n/*\nPlugin Name: Plugin B\nVersion: 1.0.0\n*/\n");
 $installerInspector = new RuntimeInspector($runtimeDefaults);
@@ -2277,12 +2352,28 @@ file_put_contents(
     $installerIsolationRoot . '/.wp-core-base/manifest.php',
     "<?php\n\ndeclare(strict_types=1);\n\nreturn " . var_export($installerIsolationManifest, true) . ";\n"
 );
+$installerFramework = $frameworkConfig->withInstalledRelease(
+    version: '1.2.3',
+    wordPressCoreVersion: '6.9.4',
+    managedComponents: [
+        ['name' => 'Plugin A', 'version' => '1.0.0', 'kind' => 'plugin'],
+        ['name' => 'Plugin B', 'version' => '1.0.0', 'kind' => 'plugin'],
+    ],
+    managedFiles: [],
+    distributionPath: '.',
+    repoRoot: $installerIsolationRoot,
+    path: $installerIsolationRoot . '/.wp-core-base/framework.php',
+);
+(new FrameworkWriter())->write($installerFramework);
+file_put_contents($installerIsolationRoot . '/README.md', "# Fixture\n\n## Current Baseline\n\n- framework release `1.2.3`\n- WordPress core `6.9.4`\n- Plugin A `1.0.0`\n- Plugin B `1.0.0`\n\n## End\n");
+file_put_contents($installerIsolationRoot . '/docs/releases/1.2.3.md', "# Fixture\n\n## Bundled Baseline\n\n- WordPress core: `6.9.4`\n- Plugin A `1.0.0`\n- Plugin B `1.0.0`\n\n## End\n");
 $staleManifest = $installerIsolationManifest;
 $staleManifest['dependencies'][0]['version'] = '2.0.0';
 $staleManifest['dependencies'][0]['checksum'] = 'sha256:' . str_repeat('a', 64);
 $staleManifest['dependencies'][1]['path'] = 'cms/plugins/plugin-b-stale';
 $staleManifest['dependencies'][1]['main_file'] = 'plugin-b-stale.php';
 $staleConfig = Config::fromArray($installerIsolationRoot, $staleManifest, $installerIsolationRoot . '/.wp-core-base/manifest.php');
+$installerFakeGitRunner = new FakeGitRunner();
 $updaterForIsolationTest = new \WpOrgPluginUpdater\Updater(
     config: $staleConfig,
     dependencyScanner: new DependencyScanner(),
@@ -2333,7 +2424,7 @@ $updaterForIsolationTest = new \WpOrgPluginUpdater\Updater(
     releaseClassifier: new ReleaseClassifier(),
     prBodyRenderer: new PrBodyRenderer(),
     automationClient: new FakeGitHubAutomationClient(),
-    gitRunner: new FakeGitRunner(),
+    gitRunner: $installerFakeGitRunner,
     runtimeInspector: new RuntimeInspector($runtimeDefaults),
     manifestWriter: new ManifestWriter(),
     httpClient: new HttpClient(),
@@ -2369,6 +2460,14 @@ $assert(
     ! is_dir($installerIsolationRoot . '/cms/plugins/plugin-b-stale'),
     'Expected dependency apply writes to ignore stale in-memory dependency paths and use the checked-out manifest path.'
 );
+$installerCommitPaths = $updaterReflection->getMethod('commitPathsForDependency')->invoke($updaterForIsolationTest, $pluginBAfterInstallerUpdate);
+$assert(
+    array_diff(['.wp-core-base/framework.php', 'README.md', 'docs/releases/1.2.3.md'], $installerCommitPaths) === [],
+    'Expected dependency apply to stage every synchronized public baseline path.'
+);
+$assert(FrameworkConfig::load($installerIsolationRoot)->baseline['managed_components'][1]['version'] === '1.1.0', 'Expected dependency apply to synchronize framework baseline metadata.');
+$assert(str_contains((string) file_get_contents($installerIsolationRoot . '/README.md'), '- Plugin B `1.1.0`'), 'Expected dependency apply to synchronize the README baseline fact.');
+$assert(str_contains((string) file_get_contents($installerIsolationRoot . '/docs/releases/1.2.3.md'), '- Plugin B `1.1.0`'), 'Expected dependency apply to synchronize the release-note baseline fact.');
 $metadataMatchesDependency = $updaterReflection->getMethod('metadataMatchesDependency');
 $pluginADependency = $writtenInstallerConfig->dependencyByKey('plugin:wordpress.org:plugin-a');
 $assert(

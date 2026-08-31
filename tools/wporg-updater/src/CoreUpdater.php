@@ -531,6 +531,12 @@ final class CoreUpdater
                 $paths[] = $entry;
             }
 
+            $checkedOutConfig = Config::load($this->config->repoRoot, $this->config->manifestPath);
+            $paths = array_merge(
+                $paths,
+                (new FrameworkSourceBaselineSynchronizer($this->config->repoRoot))->synchronize($checkedOutConfig, $targetVersion)
+            );
+
             return array_values(array_unique($paths));
         } finally {
             $this->removePath($tempDir);
