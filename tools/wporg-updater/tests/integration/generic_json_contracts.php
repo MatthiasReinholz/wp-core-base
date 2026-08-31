@@ -328,6 +328,7 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
     $assert(str_contains($renderedGenericJsonPr, 'generic JSON metadata updater automation'), 'Expected PR rendering to describe generic-json automation accurately.');
 
     $automationClient = new FakeGitHubAutomationClient();
+    $gitRunner = new FakeGitRunner();
     $updater = new Updater(
         config: $authoringConfig,
         dependencyScanner: new \WpOrgPluginUpdater\DependencyScanner(),
@@ -338,7 +339,7 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
         releaseClassifier: new ReleaseClassifier(),
         prBodyRenderer: new PrBodyRenderer(),
         automationClient: $automationClient,
-        gitRunner: new FakeGitRunner(),
+        gitRunner: $gitRunner,
         runtimeInspector: new RuntimeInspector($authoringConfig->runtime),
         manifestWriter: new ManifestWriter(),
         httpClient: $httpClient,
@@ -346,6 +347,13 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
     );
     $updaterReflection = new ReflectionClass(Updater::class);
     $pruneLatestOnlyPullRequests = $updaterReflection->getMethod('pruneHistoricalPullRequestsForLatestOnlySource');
+    $historicalBranch = 'codex/wporg-plugin-example-json-plugin-3-1-0-20260418123000';
+    $historicalMetadata = [
+        'kind' => 'plugin',
+        'component_key' => 'plugin:generic-json:example-json-plugin',
+        'branch' => $historicalBranch,
+    ];
+    $gitRunner->remoteBranches[$historicalBranch] = 'historical-sha';
     $remainingPlannedPrs = $pruneLatestOnlyPullRequests->invoke(
         $updater,
         [
@@ -353,13 +361,21 @@ function run_generic_json_contract_tests(callable $assert, array $context): void
             'component_key' => 'plugin:generic-json:example-json-plugin',
         ],
         [
-            ['number' => 41, 'planned_target_version' => '3.1.0'],
+            [
+                'number' => 41,
+                'planned_target_version' => '3.1.0',
+                'body' => '<!-- wporg-update-metadata: ' . json_encode($historicalMetadata, JSON_THROW_ON_ERROR) . ' -->',
+                'labels' => [['name' => 'automation:dependency-update']],
+                'head' => ['ref' => $historicalBranch, 'sha' => 'historical-sha', 'repo' => ['full_name' => 'example/site']],
+                'base' => ['ref' => 'main', 'repo' => ['full_name' => 'example/site']],
+            ],
             ['number' => 42, 'planned_target_version' => '3.2.1'],
         ],
         '3.2.1'
     );
     $assert(array_column($remainingPlannedPrs, 'number') === [42], 'Expected latest-only generic-json pruning to drop historical PR targets once a newer advertised version exists.');
     $assert(count($automationClient->closedPullRequests) === 1 && $automationClient->closedPullRequests[0]['number'] === 41, 'Expected latest-only generic-json pruning to close the superseded older PR.');
+    $assert(! isset($gitRunner->remoteBranches[$historicalBranch]), 'Expected latest-only generic-json pruning to clean the superseded managed branch.');
 
     $readmeContents = (string) file_get_contents($repoRoot . '/README.md');
     $assert(str_contains($readmeContents, 'generic JSON metadata endpoints'), 'Expected the README support summary to mention generic JSON metadata endpoints.');
