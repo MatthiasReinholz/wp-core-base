@@ -149,7 +149,7 @@ This repository currently ships:
 - WooCommerce `10.8.1`
 - Jetpack `16.1.2`
 - Contact Form 7 `6.1.7`
-- Redirection `5.7.5`
+- Redirection `5.8.1`
 - Twenty Twenty-Three `1.6`
 - Twenty Twenty-Four `1.4`
 - Twenty Twenty-Five `1.4`
