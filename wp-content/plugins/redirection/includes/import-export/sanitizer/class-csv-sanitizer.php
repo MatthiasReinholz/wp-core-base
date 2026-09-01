@@ -1,9 +1,11 @@
 <?php
 
+namespace Redirection\ImportExport\Sanitizer;
+
 /**
  * Sanitize values for CSV export.
  */
-class Red_Csv_Sanitizer {
+class CsvSanitizer {
 	const ESCAPE_PREFIX = '[FORMULA] ';
 
 	/**
@@ -22,8 +24,8 @@ class Red_Csv_Sanitizer {
 	 * @param mixed $value CSV value.
 	 * @return string
 	 */
-	public static function escape( $value ) {
-		$value = self::normalize_value( $value );
+	public function escape( $value ) {
+		$value = $this->normalize_value( $value );
 
 		if ( $value === '' ) {
 			return $value;
@@ -33,7 +35,7 @@ class Red_Csv_Sanitizer {
 			return self::ESCAPE_PREFIX . $value;
 		}
 
-		if ( self::is_dangerous( $value ) ) {
+		if ( $this->is_dangerous( $value ) ) {
 			// Add a plain text marker so spreadsheet apps cannot treat the value as a formula.
 			// A bracketed prefix keeps accidental collisions with exported data less likely.
 			return self::ESCAPE_PREFIX . $value;
@@ -48,8 +50,8 @@ class Red_Csv_Sanitizer {
 	 * @param mixed $value CSV value.
 	 * @return string
 	 */
-	public static function unescape( $value ) {
-		$value = self::normalize_value( $value );
+	public function unescape( $value ) {
+		$value = $this->normalize_value( $value );
 		$doubled_prefix = self::ESCAPE_PREFIX . self::ESCAPE_PREFIX;
 
 		if ( strncmp( $value, $doubled_prefix, strlen( $doubled_prefix ) ) === 0 ) {
@@ -59,7 +61,7 @@ class Red_Csv_Sanitizer {
 		if ( strncmp( $value, self::ESCAPE_PREFIX, strlen( self::ESCAPE_PREFIX ) ) === 0 ) {
 			$remainder = substr( $value, strlen( self::ESCAPE_PREFIX ) );
 
-			if ( self::is_dangerous( $remainder ) ) {
+			if ( $this->is_dangerous( $remainder ) ) {
 				return $remainder;
 			}
 		}
@@ -76,7 +78,7 @@ class Red_Csv_Sanitizer {
 	 * @param string $value CSV value.
 	 * @return bool
 	 */
-	private static function is_dangerous( $value ) {
+	private function is_dangerous( $value ) {
 		if ( $value === '' ) {
 			return false;
 		}
@@ -116,7 +118,7 @@ class Red_Csv_Sanitizer {
 	 * @param mixed $value CSV value.
 	 * @return string
 	 */
-	private static function normalize_value( $value ) {
+	private function normalize_value( $value ) {
 		if ( $value === null ) {
 			return '';
 		}

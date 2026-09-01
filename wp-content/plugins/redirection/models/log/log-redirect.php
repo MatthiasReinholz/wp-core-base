@@ -147,6 +147,25 @@ class Red_Redirect_Log extends Red_Log {
 	}
 
 	/**
+	 * @return array<string, string>
+	 */
+	protected static function get_export_field_labels() {
+		return [
+			'date' => 'date',
+			'method' => 'method',
+			'domain' => 'domain',
+			'url' => 'source',
+			'target' => 'target',
+			'redirect_by' => 'redirect_by',
+			'code' => 'code',
+			'referrer' => 'referrer',
+			'agent' => 'agent',
+			'ip' => 'ip',
+			'count' => 'count',
+		];
+	}
+
+	/**
 	 * Get the CSV row for this log object
 	 *
 	 * @param object $row Log row.
@@ -154,15 +173,15 @@ class Red_Redirect_Log extends Red_Log {
 	 * @return array<int, string>
 	 */
 	public static function get_csv_row( $row ) {
-		self::load_csv_sanitizer();
 		/** @var RedirectCsvRow $row */
+		// Raw values are returned here. Formula escaping is applied by Red_Log's CSV writers.
 		return [
-			Red_Csv_Sanitizer::escape( $row->created ),
-			Red_Csv_Sanitizer::escape( $row->url ),
-			Red_Csv_Sanitizer::escape( $row->sent_to ),
-			Red_Csv_Sanitizer::escape( $row->ip ),
-			Red_Csv_Sanitizer::escape( $row->referrer ),
-			Red_Csv_Sanitizer::escape( $row->agent ),
+			(string) $row->created,
+			(string) $row->url,
+			(string) $row->sent_to,
+			(string) $row->ip,
+			(string) $row->referrer,
+			(string) $row->agent,
 		];
 	}
 
@@ -197,5 +216,16 @@ class Red_Redirect_Log extends Red_Log {
 				'redirect_by' => $this->get_redirect_name( $this->redirect_by === null ? '' : $this->redirect_by ),
 			]
 		);
+	}
+
+	/**
+	 * @param array<string, scalar|null> $row
+	 * @return array<string, scalar|null>
+	 */
+	protected static function map_export_row( array $row ) {
+		$mapped = parent::map_export_row( $row );
+		$mapped['target'] = isset( $row['sent_to'] ) ? $row['sent_to'] : '';
+
+		return $mapped;
 	}
 }

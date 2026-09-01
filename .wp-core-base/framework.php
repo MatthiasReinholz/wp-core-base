@@ -44,7 +44,7 @@ return array (
       3 =>
       array (
         'name' => 'Redirection',
-        'version' => '5.8.1',
+        'version' => '5.9.0',
         'kind' => 'plugin',
       ),
     ),
