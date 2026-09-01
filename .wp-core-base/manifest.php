@@ -410,8 +410,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/redirection',
       'main_file' => 'redirection.php',
-      'version' => '5.9.0',
-      'checksum' => 'sha256:e8c21b6a8ea948379a64d83f100a0a207a20862b2679e26922829aaa5dd1068a',
+      'version' => '5.10.0',
+      'checksum' => 'sha256:ed1cafc8bac2f443db02287694a7f9b272cf4c1b4b5dff066e68b0a5fc8f7ab1',
       'archive_subdir' => '',
       'extra_labels' =>
       array (
