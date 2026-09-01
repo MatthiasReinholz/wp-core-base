@@ -57,6 +57,7 @@ function run_workflow_contract_tests(
     $assert(str_contains($scaffoldedReconcileWorkflow, 'ref: ${{ github.event.repository.default_branch }}'), 'Expected managed branch cleanup to execute trusted default-branch code.');
     $assert(str_contains($scaffoldedReconcileWorkflow, "cleanup:\n    if:") && str_contains($scaffoldedReconcileWorkflow, "contents: write\n      pull-requests: read"), 'Expected managed branch cleanup to have a dedicated least-privilege job.');
     $assert(str_contains($scaffoldedReconcileWorkflow, "automation:dependency-update"), 'Expected scaffolded reconciliation workflow to gate merged-PR reconciliation to framework automation PRs.');
+    $assert(str_contains($scaffoldedReconcileWorkflow, "sync:\n    timeout-minutes: 30"), 'Expected scaffolded reconciliation sync to have a bounded runtime.');
     $assert(str_contains($scaffoldedBlocker, $checkoutActionSha), 'Expected scaffolded blocker workflow to pin actions/checkout by full commit SHA.');
     $assert(str_contains($scaffoldedBlocker, $setupPhpActionSha), 'Expected scaffolded blocker workflow to pin setup-php by full commit SHA.');
     $assert(str_contains($scaffoldedValidate, $checkoutActionSha), 'Expected scaffolded validation workflow to pin actions/checkout by full commit SHA.');

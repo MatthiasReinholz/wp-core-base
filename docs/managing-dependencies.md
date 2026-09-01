@@ -318,7 +318,7 @@ vendor/wp-core-base/bin/wp-core-base add-dependency \
 
 If your provider class needs a stable product identifier, include `--provider-product-id=...` when you add or adopt the dependency and read it from `source_config.provider_product_id`.
 
-The provider class contract is documented in [adding-premium-provider.md](/Users/matthias/DEV/wp-core-base/docs/adding-premium-provider.md), including:
+The provider class contract is documented in [adding-premium-provider.md](adding-premium-provider.md), including:
 
 - the required return shape of `fetchCatalog()`
 - the required return shape of `releaseDataForVersion()`

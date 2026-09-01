@@ -135,7 +135,7 @@ Yes, if your runtime contract uses `staged-clean` validation and strip-on-stage 
 
 No.
 
-Check [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md) for the exact supported and unsupported cases.
+Check [support-matrix.md](support-matrix.md) for the exact supported and unsupported cases.
 
 ## Are premium plugins supported in workflow updates?
 
@@ -187,9 +187,9 @@ That lets the framework model content-root runtime assets explicitly.
 
 Start the agent with:
 
-- [AGENTS.md](/Users/matthias/DEV/wp-core-base/AGENTS.md)
-- [concepts.md](/Users/matthias/DEV/wp-core-base/docs/concepts.md)
-- [evaluation-guide.md](/Users/matthias/DEV/wp-core-base/docs/evaluation-guide.md)
-- [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md)
+- [AGENTS.md](../AGENTS.md)
+- [concepts.md](concepts.md)
+- [evaluation-guide.md](evaluation-guide.md)
+- [support-matrix.md](support-matrix.md)
 
 That gives it the framework vocabulary, support boundaries, and evaluation order.

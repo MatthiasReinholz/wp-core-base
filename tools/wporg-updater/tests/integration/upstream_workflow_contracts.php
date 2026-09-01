@@ -33,6 +33,7 @@ function run_upstream_workflow_contract_tests(
     $assert(str_contains($upstreamReconcileWorkflow, 'schedule:'), 'Expected upstream reconciliation workflow to include scheduled recovery trigger coverage.');
     $assert(str_contains($upstreamReconcileWorkflow, "github.event_name == 'workflow_dispatch'"), 'Expected upstream reconciliation workflow to run sync during manual recovery dispatch.');
     $assert(str_contains($upstreamReconcileWorkflow, "github.event_name == 'schedule'"), 'Expected upstream reconciliation workflow to run sync during scheduled recovery runs.');
+    $assert(str_contains($upstreamReconcileWorkflow, "sync:\n    timeout-minutes: 30"), 'Expected upstream reconciliation sync to have a bounded runtime.');
     $assert(
         str_contains($upstreamPrepareReleaseWorkflow, 'peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0'),
         'Expected prepare release workflow to pin peter-evans/create-pull-request by full commit SHA.'
