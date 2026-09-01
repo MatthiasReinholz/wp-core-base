@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 return array (
-  'manifest_checksum' => 'sha256:3bcb70d95384e9d2e2abab73ef77856fe475ba29048f0678f6cf04c4b370909f',
+  'manifest_checksum' => 'sha256:eb1594f356db05d120203f67726b921ef7870cd0f8c85b3e6b9cda534965a3c8',
   'plugins' =>
   array (
     'akismet/akismet.php' =>

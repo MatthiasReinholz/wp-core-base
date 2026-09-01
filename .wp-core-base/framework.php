@@ -26,7 +26,7 @@ return array (
       0 =>
       array (
         'name' => 'WooCommerce',
-        'version' => '10.8.1',
+        'version' => '10.9.4',
         'kind' => 'plugin',
       ),
       1 =>
