@@ -9,7 +9,7 @@ It supports two downstream styles:
 
 This README is written for people adopting `wp-core-base` in their own WordPress projects. If you are contributing to `wp-core-base` itself, use [docs/contributing.md](docs/contributing.md).
 
-If you are an AI agent or you are asking an AI agent to evaluate or implement the framework, start with [AGENTS.md](/Users/matthias/DEV/wp-core-base/AGENTS.md).
+If you are an AI agent or you are asking an AI agent to evaluate or implement the framework, start with [AGENTS.md](AGENTS.md).
 
 ## What You Get
 
@@ -29,19 +29,19 @@ If you are an AI agent or you are asking an AI agent to evaluate or implement th
 
 `wp-core-base` is not just a starter repository. It gives a WordPress project a stronger operational model.
 
-- explicit dependency ownership through the manifest, so managed, local, and ignored runtime code are clearly separated. See [manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md).
-- first-class support for both `full-core` and `content-only` downstreams, including image-first deployments. See [deployment-models.md](/Users/matthias/DEV/wp-core-base/docs/deployment-models.md).
-- reviewable update PRs instead of silent in-dashboard changes, so every dependency change becomes a normal Git review event. See [operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md).
-- richer PR context for reviewers, including release scope, release notes, release timestamp, and support-topic signals for WordPress.org plugins. See [operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md#reviewing-update-prs).
-- intelligent PR lifecycle behavior: patch releases can refresh an existing PR, while later minor or major releases can queue behind unresolved work. See [automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md#pull-request-behavior).
-- `wp-core-base` itself is versioned and updateable, so downstream repos can pin a framework release and receive dedicated framework-update PRs instead of treating the base as a one-time copy. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#framework-version-pinning).
-- support for both WordPress.org and hosted release-backed dependencies, including private GitHub and GitLab release assets. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#source-types).
-- a premium provider extension model, so downstream repos can register their own premium plugin source adapters instead of forcing premium updates through manual plugin dashboard workflows. See [adding-premium-provider.md](/Users/matthias/DEV/wp-core-base/docs/adding-premium-provider.md).
-- local project-owned code remains first-class, so custom plugins, themes, MU plugins, runtime files, and runtime directories do not need to be forced through updater automation. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#managed-versus-local).
-- normalized runtime snapshots, because managed dependencies can be sanitized during update ingestion and local code can use staged-clean strip rules when needed. See [manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md#managed-sanitation).
-- deterministic runtime staging for Docker, immutable images, and other build pipelines, so deployments can use a clean staged payload instead of the raw working tree. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#runtime-staging).
-- clearer operational ownership inside wp-admin, because the scaffolded governance MU plugin makes workflow-managed plugins visibly distinct from project-owned local code. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md#admin-governance).
-- migration support for real-world repos, including strict vs relaxed ownership modes, manifest suggestions, and scaffolding presets for common downstream patterns. See [getting-started.md](/Users/matthias/DEV/wp-core-base/docs/getting-started.md) and [migration-guide.md](/Users/matthias/DEV/wp-core-base/docs/migration-guide.md).
+- explicit dependency ownership through the manifest, so managed, local, and ignored runtime code are clearly separated. See [manifest-reference.md](docs/manifest-reference.md).
+- first-class support for both `full-core` and `content-only` downstreams, including image-first deployments. See [deployment-models.md](docs/deployment-models.md).
+- reviewable update PRs instead of silent in-dashboard changes, so every dependency change becomes a normal Git review event. See [operations.md](docs/operations.md).
+- richer PR context for reviewers, including release scope, release notes, release timestamp, and support-topic signals for WordPress.org plugins. See [operations.md](docs/operations.md#reviewing-update-prs).
+- intelligent PR lifecycle behavior: patch releases can refresh an existing PR, while later minor or major releases can queue behind unresolved work. See [automation-overview.md](docs/automation-overview.md#pull-request-behavior).
+- `wp-core-base` itself is versioned and updateable, so downstream repos can pin a framework release and receive dedicated framework-update PRs instead of treating the base as a one-time copy. See [downstream-usage.md](docs/downstream-usage.md#framework-version-pinning).
+- support for both WordPress.org and hosted release-backed dependencies, including private GitHub and GitLab release assets. See [downstream-usage.md](docs/downstream-usage.md#source-types).
+- a premium provider extension model, so downstream repos can register their own premium plugin source adapters instead of forcing premium updates through manual plugin dashboard workflows. See [adding-premium-provider.md](docs/adding-premium-provider.md).
+- local project-owned code remains first-class, so custom plugins, themes, MU plugins, runtime files, and runtime directories do not need to be forced through updater automation. See [downstream-usage.md](docs/downstream-usage.md#managed-versus-local).
+- normalized runtime snapshots, because managed dependencies can be sanitized during update ingestion and local code can use staged-clean strip rules when needed. See [manifest-reference.md](docs/manifest-reference.md#managed-sanitation).
+- deterministic runtime staging for Docker, immutable images, and other build pipelines, so deployments can use a clean staged payload instead of the raw working tree. See [downstream-usage.md](docs/downstream-usage.md#runtime-staging).
+- clearer operational ownership inside wp-admin, because the scaffolded governance MU plugin makes workflow-managed plugins visibly distinct from project-owned local code. See [downstream-usage.md](docs/downstream-usage.md#admin-governance).
+- migration support for real-world repos, including strict vs relaxed ownership modes, manifest suggestions, and scaffolding presets for common downstream patterns. See [getting-started.md](docs/getting-started.md) and [migration-guide.md](docs/migration-guide.md).
 
 ## Start Here
 
@@ -105,7 +105,7 @@ Add `--automation-provider=gitlab` when the downstream repository is hosted on G
 For GitLab-hosted automation, also set a masked `GITLAB_TOKEN` CI/CD variable with `api` and `write_repository` access before enabling the scaffolded pipeline.
 Scaffolding writes both `.wp-core-base/manifest.php` and `.wp-core-base/framework.php`, along with the scheduled updates, merged-PR reconciliation, blocker, validation, and framework self-update workflows. It also writes a framework-managed admin governance MU plugin, local downstream guidance at `.wp-core-base/USAGE.md`, and a downstream `AGENTS.md` so humans and coding agents can discover the correct CLI-first workflow from inside the project repo.
 
-If your downstream repo already ignores `/vendor/`, keep the ignore narrow so `vendor/wp-core-base` remains committed and self-updateable. See [downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md) for the recommended pattern.
+If your downstream repo already ignores `/vendor/`, keep the ignore narrow so `vendor/wp-core-base` remains committed and self-updateable. See [downstream-usage.md](docs/downstream-usage.md) for the recommended pattern.
 
 The framework is intentionally selective: it can manage chosen dependencies for updates while leaving your custom plugins, themes, MU plugins, runtime files, and runtime directories owned directly by the downstream project. `local` is a normal long-term ownership model, not a migration workaround.
 
@@ -158,7 +158,7 @@ These versions describe the code committed in this repository, not a floating la
 
 ## Documentation Map
 
-- AI and agent entry point: [AGENTS.md](/Users/matthias/DEV/wp-core-base/AGENTS.md)
+- AI and agent entry point: [AGENTS.md](AGENTS.md)
 - concepts and glossary: [docs/concepts.md](docs/concepts.md)
 - FAQ and objections: [docs/faq.md](docs/faq.md)
 - evaluation checklist: [docs/evaluation-guide.md](docs/evaluation-guide.md)

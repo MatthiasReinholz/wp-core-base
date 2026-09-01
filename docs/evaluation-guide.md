@@ -73,7 +73,7 @@ For each path that might be `managed`, determine the source:
 - private GitLab Release
 - unsupported source type
 
-Then compare against [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md).
+Then compare against [support-matrix.md](support-matrix.md).
 
 ### 6. Check automation host availability
 
@@ -200,8 +200,8 @@ Then converge toward `strict`.
 
 ## Related Docs
 
-- [concepts.md](/Users/matthias/DEV/wp-core-base/docs/concepts.md)
-- [support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md)
-- [faq.md](/Users/matthias/DEV/wp-core-base/docs/faq.md)
-- [getting-started.md](/Users/matthias/DEV/wp-core-base/docs/getting-started.md)
-- [migration-guide.md](/Users/matthias/DEV/wp-core-base/docs/migration-guide.md)
+- [concepts.md](concepts.md)
+- [support-matrix.md](support-matrix.md)
+- [faq.md](faq.md)
+- [getting-started.md](getting-started.md)
+- [migration-guide.md](migration-guide.md)

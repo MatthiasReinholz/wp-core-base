@@ -25,28 +25,28 @@ It is not trying to be:
 
 If you are evaluating fit:
 
-1. [README.md](/Users/matthias/DEV/wp-core-base/README.md)
-2. [docs/concepts.md](/Users/matthias/DEV/wp-core-base/docs/concepts.md)
-3. [docs/support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md)
-4. [docs/faq.md](/Users/matthias/DEV/wp-core-base/docs/faq.md)
-5. [docs/evaluation-guide.md](/Users/matthias/DEV/wp-core-base/docs/evaluation-guide.md)
+1. [README.md](README.md)
+2. [docs/concepts.md](docs/concepts.md)
+3. [docs/support-matrix.md](docs/support-matrix.md)
+4. [docs/faq.md](docs/faq.md)
+5. [docs/evaluation-guide.md](docs/evaluation-guide.md)
 
 If you are implementing in a downstream repo:
 
-1. [docs/getting-started.md](/Users/matthias/DEV/wp-core-base/docs/getting-started.md)
-2. [docs/managing-dependencies.md](/Users/matthias/DEV/wp-core-base/docs/managing-dependencies.md)
-3. [docs/manifest-reference.md](/Users/matthias/DEV/wp-core-base/docs/manifest-reference.md)
-4. [docs/downstream-usage.md](/Users/matthias/DEV/wp-core-base/docs/downstream-usage.md)
-5. [docs/migration-guide.md](/Users/matthias/DEV/wp-core-base/docs/migration-guide.md)
-6. [docs/operations.md](/Users/matthias/DEV/wp-core-base/docs/operations.md)
+1. [docs/getting-started.md](docs/getting-started.md)
+2. [docs/managing-dependencies.md](docs/managing-dependencies.md)
+3. [docs/manifest-reference.md](docs/manifest-reference.md)
+4. [docs/downstream-usage.md](docs/downstream-usage.md)
+5. [docs/migration-guide.md](docs/migration-guide.md)
+6. [docs/operations.md](docs/operations.md)
 
 If you are changing the framework itself:
 
-1. [docs/contributing.md](/Users/matthias/DEV/wp-core-base/docs/contributing.md)
-2. [docs/architecture.md](/Users/matthias/DEV/wp-core-base/docs/architecture.md)
-3. [docs/security-model.md](/Users/matthias/DEV/wp-core-base/docs/security-model.md)
-4. [docs/automation-overview.md](/Users/matthias/DEV/wp-core-base/docs/automation-overview.md)
-5. [docs/release-process.md](/Users/matthias/DEV/wp-core-base/docs/release-process.md)
+1. [docs/contributing.md](docs/contributing.md)
+2. [docs/architecture.md](docs/architecture.md)
+3. [docs/security-model.md](docs/security-model.md)
+4. [docs/automation-overview.md](docs/automation-overview.md)
+5. [docs/release-process.md](docs/release-process.md)
 
 ## Core Mental Model
 
@@ -174,7 +174,7 @@ Do not invent checksum asset patterns or enable required verification speculativ
    - validation mode
    - migration order
 
-Use [docs/evaluation-guide.md](/Users/matthias/DEV/wp-core-base/docs/evaluation-guide.md) for the full checklist.
+Use [docs/evaluation-guide.md](docs/evaluation-guide.md) for the full checklist.
 
 ## How To Argue For Or Against Adoption
 
@@ -187,7 +187,7 @@ When assessing the framework, focus on:
 - are the dependency sources mostly supported?
 - is GitHub or GitLab available if automated PRs are desired?
 
-Use [docs/support-matrix.md](/Users/matthias/DEV/wp-core-base/docs/support-matrix.md) and [docs/faq.md](/Users/matthias/DEV/wp-core-base/docs/faq.md) to address common objections.
+Use [docs/support-matrix.md](docs/support-matrix.md) and [docs/faq.md](docs/faq.md) to address common objections.
 
 ## Common Agent Errors To Avoid
 

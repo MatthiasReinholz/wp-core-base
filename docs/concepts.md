@@ -2,7 +2,7 @@
 
 This document is for readers who want the mental model before they read the detailed docs.
 
-If you want step-by-step setup, start with [getting-started.md](/Users/matthias/DEV/wp-core-base/docs/getting-started.md).
+If you want step-by-step setup, start with [getting-started.md](getting-started.md).
 
 ## What `wp-core-base` Is
 

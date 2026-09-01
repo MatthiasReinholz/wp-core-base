@@ -50,6 +50,7 @@ jobs:
         run: __WPORG_CLEANUP_COMMAND__ --pr-number=${{ github.event.pull_request.number }}
 
   sync:
+    timeout-minutes: 30
     if: >
       (
         github.event_name == 'workflow_dispatch' ||
