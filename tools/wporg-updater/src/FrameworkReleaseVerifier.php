@@ -149,7 +149,8 @@ final class FrameworkReleaseVerifier
         $expectedChecksum = $this->extractChecksum($checksumContents, basename($artifactPath));
         FileChecksum::assertSha256Matches($artifactPath, $expectedChecksum, 'Release artifact');
 
-        $tempRoot = sys_get_temp_dir() . '/wp-core-base-release-verify-' . bin2hex(random_bytes(6));
+        $workspace = TempWorkspace::create($this->repoRoot, 'release-verify');
+        $tempRoot = $workspace->path();
         $extractPath = $tempRoot . '/extract';
         $downstreamRoot = $tempRoot . '/downstream';
         $runtimeInspector = new RuntimeInspector(Config::load($this->repoRoot)->runtime);
@@ -169,33 +170,10 @@ final class FrameworkReleaseVerifier
             $zip->close();
 
             $payloadRoot = $this->resolvePayloadRoot($extractPath);
+            FrameworkReleasePayload::verify($payloadRoot);
             $payloadFramework = FrameworkConfig::load($payloadRoot);
 
-            if ($payloadFramework->version !== $framework->version) {
-                throw new RuntimeException(sprintf(
-                    'Release artifact framework version mismatch. Expected %s but found %s.',
-                    $framework->version,
-                    $payloadFramework->version
-                ));
-            }
-
-            if ($payloadFramework->releaseSourceIdentity() !== $framework->releaseSourceIdentity()) {
-                throw new RuntimeException(sprintf(
-                    'Release artifact authoritative source mismatch. Expected %s `%s` but found %s `%s`.',
-                    $framework->releaseSourceKindLabel(),
-                    $framework->releaseSourceReference(),
-                    $payloadFramework->releaseSourceKindLabel(),
-                    $payloadFramework->releaseSourceReference()
-                ));
-            }
-
-            if ($payloadFramework->assetName() !== $framework->assetName()) {
-                throw new RuntimeException(sprintf(
-                    'Release artifact asset-name mismatch. Expected %s but found %s.',
-                    $framework->assetName(),
-                    $payloadFramework->assetName()
-                ));
-            }
+            FrameworkPayloadIdentity::assertMatches($payloadFramework, $framework, $framework->version);
 
             foreach (FrameworkReleaseArtifactBuilder::excludedPaths() as $excludedPath) {
                 if (file_exists($payloadRoot . '/' . $excludedPath) || is_link($payloadRoot . '/' . $excludedPath)) {
@@ -210,7 +188,7 @@ final class FrameworkReleaseVerifier
                 throw new RuntimeException(sprintf('Unable to create downstream release verification dir: %s', $downstreamRoot));
             }
 
-            (new DownstreamScaffolder($this->repoRoot, $downstreamRoot))->scaffold(
+            (new DownstreamScaffolder($this->repoRoot, $downstreamRoot, true))->scaffold(
                 'vendor/wp-core-base',
                 'content-only',
                 'cms',
@@ -224,7 +202,7 @@ final class FrameworkReleaseVerifier
             $this->initializeVerificationGitWorktree($downstreamRoot);
             $this->assertInstalledArtifactOperable($downstreamRoot);
         } finally {
-            $runtimeInspector->clearPath($tempRoot);
+            $workspace->close();
         }
     }
 

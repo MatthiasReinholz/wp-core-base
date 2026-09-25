@@ -28,9 +28,9 @@ final class EnvironmentDoctor
 
         $this->okIf(is_dir($this->repoRoot), sprintf('Repository root exists: %s', $this->repoRoot), 'Repository root does not exist.');
         $this->okIf(PHP_VERSION_ID >= 80100, sprintf('PHP version is %s.', PHP_VERSION), 'PHP 8.1 or newer is required.');
-        $this->warnIf(PHP_VERSION_ID < 80300, sprintf('PHP version is %s. PHP 8.3 is recommended to match CI.', PHP_VERSION));
+        $this->warnIf(PHP_VERSION_ID < 80400, sprintf('PHP version is %s. PHP 8.4 or 8.5 is recommended for maintained operational runtimes.', PHP_VERSION));
 
-        foreach (['curl', 'dom', 'json', 'libxml', 'simplexml', 'zip'] as $extension) {
+        foreach (['curl', 'dom', 'json', 'libxml', 'mbstring', 'openssl', 'simplexml', 'zip'] as $extension) {
             $this->okIf(extension_loaded($extension), sprintf('PHP extension loaded: %s', $extension), sprintf('Missing required PHP extension: %s', $extension));
         }
 

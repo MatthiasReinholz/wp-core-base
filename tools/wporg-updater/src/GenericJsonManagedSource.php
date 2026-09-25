@@ -7,7 +7,7 @@ namespace WpOrgPluginUpdater;
 use DateTimeImmutable;
 use RuntimeException;
 
-final class GenericJsonManagedSource implements ManagedDependencySource
+final class GenericJsonManagedSource implements ManagedDependencySource, HistoricalVersionSource
 {
     public function __construct(
         private readonly JsonHttpTransport $httpClient,
@@ -17,6 +17,11 @@ final class GenericJsonManagedSource implements ManagedDependencySource
     public function key(): string
     {
         return 'generic-json';
+    }
+
+    public function supportsHistoricalVersions(array $dependency): bool
+    {
+        return false;
     }
 
     public function fetchCatalog(array $dependency): array

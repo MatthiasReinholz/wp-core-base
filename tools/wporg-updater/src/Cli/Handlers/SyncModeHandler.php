@@ -171,7 +171,8 @@ final class SyncModeHandler implements CliModeHandler
     {
         $result = (new TempDirectoryJanitor(
             TempDirectoryJanitor::defaultPrefixes(),
-            TempDirectoryJanitor::defaultMaxAgeSeconds()
+            TempDirectoryJanitor::defaultMaxAgeSeconds(),
+            repoRoot: $this->repoRoot
         ))->cleanup();
 
         foreach ($result['failed'] as $warning) {

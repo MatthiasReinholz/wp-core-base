@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace WpOrgPluginUpdater;
 
 use RuntimeException;
+use Throwable;
 
 final class RuntimeStager
 {
@@ -20,17 +21,67 @@ final class RuntimeStager
      */
     public function stage(string $outputDirectory): array
     {
-        $stagedPaths = [];
         $absoluteOutput = $this->config->stageDir($outputDirectory);
-        $this->runtimeInspector->clearPath($absoluteOutput);
-
-        if (! is_dir($absoluteOutput) && ! mkdir($absoluteOutput, 0775, true) && ! is_dir($absoluteOutput)) {
-            throw new RuntimeException(sprintf('Unable to create runtime staging directory: %s', $absoluteOutput));
+        $parent = dirname($absoluteOutput);
+        if (! is_dir($parent) && ! mkdir($parent, 0775, true) && ! is_dir($parent)) {
+            throw new RuntimeException(sprintf('Unable to create staging parent directory: %s', $parent));
         }
+        $this->config->stageDir($outputDirectory);
+
+        $suffix = bin2hex(random_bytes(16));
+        $stagingPath = $parent . '/.wp-core-base-stage-' . $suffix;
+        $backupPath = $parent . '/.wp-core-base-stage-backup-' . $suffix;
+        if (! mkdir($stagingPath, 0700)) {
+            throw new RuntimeException(sprintf('Unable to create private runtime staging directory: %s', $stagingPath));
+        }
+
+        $swap = new PathSwapWithRollback($this->runtimeInspector);
+        $operationFailure = null;
+        try {
+            $stagedPaths = $this->assemble($stagingPath);
+            // A source validation failure must never alter the last successful output.
+            $this->config->stageDir($outputDirectory);
+            if (! chmod($stagingPath, 0755)) {
+                throw new RuntimeException('Unable to set runtime staging directory permissions.');
+            }
+            $swap->swap($absoluteOutput, $stagingPath, $backupPath, $this->config->repoRoot);
+        } catch (Throwable $exception) {
+            $operationFailure = $exception;
+            throw $exception;
+        } finally {
+            // Never follow a replaced parent while cleaning up a failed assembly.
+            // Recovery backups belong to the swap and are deliberately not cleared here.
+            try {
+                ConfigPathRules::assertNoSymlinkDescendants(
+                    $this->config->repoRoot,
+                    substr($stagingPath, strlen(rtrim($this->config->repoRoot, '/')) + 1)
+                );
+                $this->runtimeInspector->clearPath($stagingPath);
+            } catch (Throwable $cleanupFailure) {
+                if ($operationFailure === null) {
+                    throw $cleanupFailure;
+                }
+                throw new RuntimeException(sprintf(
+                    '%s Staging cleanup also failed; preserve %s for recovery: %s',
+                    $operationFailure->getMessage(),
+                    $stagingPath,
+                    $cleanupFailure->getMessage()
+                ), 0, $operationFailure);
+            }
+        }
+        // Cleanup is after commit: a cleanup failure cannot trigger rollback.
+        $swap->finalize($backupPath);
+        return $stagedPaths;
+    }
+
+    /** @return list<string> */
+    private function assemble(string $absoluteOutput): array
+    {
+        $stagedPaths = [];
 
         if ($this->config->profile === 'full-core' && $this->config->coreEnabled()) {
             foreach ($this->fullCoreEntries() as $entry) {
-                $source = $this->config->repoRoot . '/' . $entry;
+                $source = $this->sourcePath($entry);
 
                 if (! file_exists($source)) {
                     continue;
@@ -47,7 +98,7 @@ final class RuntimeStager
             }
 
             $relativePath = (string) $dependency['path'];
-            $source = $this->config->repoRoot . '/' . $relativePath;
+            $source = $this->sourcePath($relativePath);
             [$globalAllowPaths, $globalStripPaths, $globalStripFiles, $globalSanitizePaths, $globalSanitizeFiles] = $this->translatedRuntimeRulesForRoot($relativePath);
             [$sourceStripPaths, $sourceStripFiles] = $this->sourceValidationRules(
                 $dependency,
@@ -100,6 +151,7 @@ final class RuntimeStager
 
         if ($this->config->isKindStaged('runtime-file') || $this->config->isKindStaged('runtime-directory')) {
             foreach ($ownershipInspector->allowedRuntimePaths() as $path) {
+                $this->sourcePath($path['path']);
                 if (! file_exists($path['absolute_path']) && ! is_link($path['absolute_path'])) {
                     continue;
                 }
@@ -123,6 +175,7 @@ final class RuntimeStager
 
         if ($this->config->isRelaxedManifestMode()) {
             foreach ($ownershipInspector->undeclaredRuntimePaths() as $entry) {
+                $this->sourcePath($entry['path']);
                 if (! $this->config->isKindStaged($entry['kind'])) {
                     continue;
                 }
@@ -144,6 +197,7 @@ final class RuntimeStager
         }
 
         foreach (FrameworkRuntimeFiles::runtimeEntries($this->config) as $entry) {
+            $this->sourcePath($entry['path']);
             if ($entry['path'] === FrameworkRuntimeFiles::governanceDataPath($this->config)) {
                 continue;
             }
@@ -168,6 +222,12 @@ final class RuntimeStager
         sort($stagedPaths);
 
         return $stagedPaths;
+    }
+
+    private function sourcePath(string $relativePath): string
+    {
+        ConfigPathRules::assertNoSymlinkDescendants($this->config->repoRoot, $relativePath);
+        return $this->config->repoRoot . '/' . $relativePath;
     }
 
     /**

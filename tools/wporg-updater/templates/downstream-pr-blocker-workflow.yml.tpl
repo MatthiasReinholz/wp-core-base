@@ -64,8 +64,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
           PR_NUMBER: ${{ inputs.pull_request_number }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${PR_NUMBER}" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "${PR_NUMBER}" ]; then
+            [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid pull request number" >&2; exit 1; }
             __WPORG_PHP_PATH__ pr-blocker --repo-root=. --pr-number="${PR_NUMBER}" --json
           else
             __WPORG_PHP_PATH__ pr-blocker-reconcile --repo-root=. --json

@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ci/release_http.sh
+source "${SCRIPT_DIR}/release_http.sh"
+
 REPOSITORY="${1:-}"
 VERSION="${2:-}"
 COMMIT_SHA="${3:-}"
@@ -21,12 +25,8 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-api_url="https://api.github.com/repos/${REPOSITORY}/commits/${COMMIT_SHA}/pulls"
-response="$(curl -fsSL \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  "$api_url")"
+api_url="${GITHUB_API_URL:-https://api.github.com}/repos/${REPOSITORY}/commits/${COMMIT_SHA}/pulls"
+response="$(release_api_get_json "$api_url")"
 
 match_count="$(
   printf '%s' "$response" | jq --arg version "$VERSION" --arg sha "$COMMIT_SHA" '

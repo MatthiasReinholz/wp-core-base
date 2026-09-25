@@ -22,7 +22,14 @@ final class PremiumProviderScaffolder
         $normalizedProvider = $this->normalizeProvider($provider);
         $registry = PremiumProviderRegistry::load($this->repoRoot);
         $className = $class !== null && trim($class) !== '' ? trim($class) : $this->defaultClassName($normalizedProvider);
+        if (preg_match('/^(?:[A-Za-z_][A-Za-z0-9_]*\\\\)*[A-Za-z_][A-Za-z0-9_]*$/D', $className) !== 1) {
+            throw new RuntimeException('Premium provider class must be a valid PHP class name with an optional namespace.');
+        }
         $relativePath = $path !== null && trim($path) !== '' ? $this->normalizePath($path) : '.wp-core-base/premium-providers/' . $normalizedProvider . '.php';
+        if ($relativePath === '.' || in_array($relativePath, ['.wp-core-base/manifest.php', '.wp-core-base/framework.php', '.wp-core-base/premium-providers.php'], true)) {
+            throw new RuntimeException('Premium provider class path may not replace framework control files.');
+        }
+        ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, $relativePath);
         $absolutePath = $this->repoRoot . '/' . $relativePath;
         $definitions = $registry->definitions();
         $existing = $definitions[$normalizedProvider] ?? null;
@@ -45,7 +52,10 @@ final class PremiumProviderScaffolder
         $previousClassContents = is_file($absolutePath) ? file_get_contents($absolutePath) : null;
 
         try {
+            ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, $relativePath);
+            ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, '.wp-core-base/premium-providers.php');
             $this->writeProviderClass($normalizedProvider, $className, $absolutePath, $force);
+            ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, '.wp-core-base/premium-providers.php');
             (new PremiumProviderRegistryWriter())->write($registryPath, $definitions);
         } catch (RuntimeException $exception) {
             $this->restoreFile($registryPath, $previousRegistryContents);
@@ -65,26 +75,14 @@ final class PremiumProviderScaffolder
     {
         $normalized = trim($provider);
 
-        if (! preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $normalized)) {
-            throw new RuntimeException('Provider keys must use lowercase letters, numbers, and single hyphen separators.');
-        }
-
-        if (in_array($normalized, ['wordpress.org', 'github-release', 'gitlab-release', 'premium', 'local'], true)) {
-            throw new RuntimeException(sprintf('Provider key `%s` is reserved.', $normalized));
-        }
+        PremiumSourceResolver::assertCustomProviderKey($normalized);
 
         return $normalized;
     }
 
     private function normalizePath(string $path): string
     {
-        $normalized = trim(str_replace('\\', '/', $path), '/');
-
-        if ($normalized === '' || str_contains($normalized, '../') || str_starts_with($normalized, '/')) {
-            throw new RuntimeException('Provider class paths must be safe relative paths.');
-        }
-
-        return $normalized;
+        return ConfigPathRules::normalizedRelativePath($path, 'premium provider class path');
     }
 
     private function defaultClassName(string $provider): string
@@ -138,13 +136,21 @@ final class PremiumProviderScaffolder
             $template
         );
 
-        if (file_put_contents($absolutePath, $rendered) === false) {
-            throw new RuntimeException(sprintf('Unable to write premium provider class scaffold: %s', $absolutePath));
+        ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, substr($absolutePath, strlen(rtrim($this->repoRoot, '/')) + 1));
+        try {
+            $tokens = token_get_all($rendered, TOKEN_PARSE);
+            if ($tokens === [] || ! is_array($tokens[0]) || $tokens[0][0] !== T_OPEN_TAG) {
+                throw new RuntimeException('Premium provider template must begin with a PHP opening tag.');
+            }
+        } catch (\ParseError $exception) {
+            throw new RuntimeException('Premium provider class name does not produce valid PHP.', 0, $exception);
         }
+        (new AtomicFileWriter())->write($absolutePath, $rendered);
     }
 
     private function restoreFile(string $path, string|false|null $contents): void
     {
+        ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, substr($path, strlen(rtrim($this->repoRoot, '/')) + 1));
         if ($contents === false) {
             return;
         }

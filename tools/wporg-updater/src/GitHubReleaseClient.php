@@ -173,6 +173,7 @@ final class GitHubReleaseClient implements GitHubReleaseSource
 
         $this->httpClient->downloadToFileWithOptions($zipballUrl, $destination, $this->headers($dependency), [
             'allowed_redirect_hosts' => $this->allowedDownloadHosts(),
+            'credential_origin' => $this->apiBase,
             'strip_auth_on_cross_origin_redirect' => true,
             'max_download_bytes' => 512 * 1024 * 1024,
         ]);
@@ -357,6 +358,7 @@ final class GitHubReleaseClient implements GitHubReleaseSource
 
         $this->httpClient->downloadToFileWithOptions($assetApiUrl, $destination, $headers, [
             'allowed_redirect_hosts' => $this->allowedDownloadHosts(),
+            'credential_origin' => $this->apiBase,
             'strip_auth_on_cross_origin_redirect' => true,
             'max_download_bytes' => 512 * 1024 * 1024,
         ]);
@@ -382,8 +384,10 @@ final class GitHubReleaseClient implements GitHubReleaseSource
 
         return $this->httpClient->getWithOptions($apiUrl, $headers, [
             'allowed_redirect_hosts' => $this->allowedDownloadHosts(),
+            'credential_origin' => $this->apiBase,
             'strip_auth_on_cross_origin_redirect' => true,
             'max_body_bytes' => 1024 * 1024,
+            'follow_redirects' => true,
         ]);
     }
 

@@ -42,7 +42,7 @@ Use this model when your downstream repository should contain WordPress core dir
 Typical steps:
 
 1. create a new Git repository for your project
-2. start from a tagged release of `wp-core-base`
+2. start from the tagged `wp-core-base` source checkout or Git source archive that contains the optional WordPress/plugin baseline
 3. keep WordPress core at the repo root
 4. add your project-specific plugins, themes, and deployment files
 5. update `.wp-core-base/manifest.php` so every managed or local runtime dependency is declared explicitly
@@ -70,7 +70,9 @@ This is the right fit for:
 - projects where WordPress core comes from a base image or platform layer
 - repos that use `cms/` instead of `wp-content/`
 
-Fastest bootstrap:
+First place the verified official `wp-core-base-vendor-snapshot.zip` tooling payload at `vendor/wp-core-base`. It retains the `wp-core-base/` archive root and contains the launcher, framework source, templates, keys, docs, and metadata; it does not bring a second WordPress core or plugin baseline into your content-only project. Verify its signed checksum using a trusted framework public key before using the payload. Maintainer verification details are in [release-process.md](release-process.md#release-signing).
+
+Then bootstrap:
 
 ```bash
 php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php scaffold-downstream --repo-root=. --profile=content-only-default --content-root=cms

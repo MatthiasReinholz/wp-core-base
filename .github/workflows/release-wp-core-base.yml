@@ -14,6 +14,7 @@ env:
 permissions:
   contents: write
   pull-requests: read
+  actions: read
 
 concurrency:
   group: wp-core-base-release-release/${{ inputs.version }}
@@ -23,6 +24,8 @@ jobs:
   release:
     name: Release wp-core-base
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
 
     steps:
       - name: Checkout
@@ -42,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ inputs.version }}"
+          version="$RELEASE_VERSION"
 
           if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Version must use vX.Y.Z format." >&2
@@ -57,7 +60,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           COMMIT_SHA="$(git rev-parse HEAD)"
-          bash scripts/ci/check_framework_release_pr.sh "${GITHUB_REPOSITORY}" "${{ steps.version.outputs.value }}" "$COMMIT_SHA"
+          bash scripts/ci/check_framework_release_pr.sh "${GITHUB_REPOSITORY}" "$RELEASE_VERSION" "$COMMIT_SHA"
 
       - name: Verify merged release PR passed CI
         env:
@@ -65,15 +68,16 @@ jobs:
           GITHUB_API_URL: ${{ github.api_url }}
         run: |
           COMMIT_SHA="$(git rev-parse HEAD)"
-          bash scripts/ci/check_framework_release_ci.sh "${GITHUB_REPOSITORY}" "${{ steps.version.outputs.value }}" "$COMMIT_SHA"
+          bash scripts/ci/check_framework_release_ci.sh "${GITHUB_REPOSITORY}" "$RELEASE_VERSION" "$COMMIT_SHA"
 
       - name: Validate release metadata
-        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.version.outputs.value }}
+        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag="$RELEASE_VERSION"
 
       - name: Build vendored framework snapshot
         run: |
           php tools/wporg-updater/bin/wporg-updater.php build-release-artifact \
             --repo-root=. \
+            --source-revision="$(git rev-parse HEAD)" \
             --output=dist/wp-core-base-vendor-snapshot.zip \
             --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256
 
@@ -93,81 +97,34 @@ jobs:
         run: |
           php tools/wporg-updater/bin/wporg-updater.php release-verify \
             --repo-root=. \
-            --tag=${{ steps.version.outputs.value }} \
+            --tag="$RELEASE_VERSION" \
             --artifact=dist/wp-core-base-vendor-snapshot.zip \
             --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256 \
             --signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig
 
-      - name: Assess published release asset state
-        id: release_state
+      - name: Publish verified release with ownership receipts
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
         run: |
-          release_tag="${{ steps.version.outputs.value }}"
-          release_title="wp-core-base ${release_tag}"
-          release_notes="docs/releases/${{ steps.version.outputs.plain }}.md"
-
-          bash scripts/ci/check_framework_release_assets.sh \
-            --expected-title "${release_title}" \
-            --expected-notes-file "${release_notes}" \
-            "${GITHUB_REPOSITORY}" \
-            "${release_tag}" \
+          SOURCE_COMMIT="$(git rev-parse HEAD)"
+          bash scripts/ci/publish_framework_release.sh \
+            "$GITHUB_REPOSITORY" "$RELEASE_VERSION" "$SOURCE_COMMIT" \
+            "docs/releases/${RELEASE_VERSION#v}.md" \
             dist/wp-core-base-vendor-snapshot.zip \
             dist/wp-core-base-vendor-snapshot.zip.sha256 \
-            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
+            dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
+            "${RUNNER_TEMP}/wp-core-base-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
 
-      - name: Create GitHub release
-        if: steps.release_state.outputs.publish_required == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Preserve publication receipts in job summary
+        if: always()
         run: |
-          release_tag="${{ steps.version.outputs.value }}"
-          release_title="wp-core-base ${release_tag}"
-          release_notes="docs/releases/${{ steps.version.outputs.plain }}.md"
-
-          if gh release view "${release_tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${release_tag}" \
-              dist/wp-core-base-vendor-snapshot.zip \
-              dist/wp-core-base-vendor-snapshot.zip.sha256 \
-              dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
-              --repo "${GITHUB_REPOSITORY}" \
-              --clobber
-
-            gh release edit "${release_tag}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "${release_title}" \
-              --notes-file "${release_notes}"
-          else
-            gh release create "${release_tag}" \
-              dist/wp-core-base-vendor-snapshot.zip \
-              dist/wp-core-base-vendor-snapshot.zip.sha256 \
-              dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "${release_title}" \
-              --notes-file "${release_notes}"
+          journal="${RUNNER_TEMP}/wp-core-base-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          if [ -f "$journal" ]; then
+            {
+              echo '### Release publication receipts'
+              echo '```json'
+              cat "$journal"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      - name: Verify published release assets are current
-        if: steps.release_state.outputs.publish_required == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_API_URL: ${{ github.api_url }}
-        run: |
-          release_tag="${{ steps.version.outputs.value }}"
-          release_title="wp-core-base ${release_tag}"
-          release_notes="docs/releases/${{ steps.version.outputs.plain }}.md"
-
-          bash scripts/ci/check_framework_release_assets.sh \
-            --require-current \
-            --expected-title "${release_title}" \
-            --expected-notes-file "${release_notes}" \
-            "${GITHUB_REPOSITORY}" \
-            "${release_tag}" \
-            dist/wp-core-base-vendor-snapshot.zip \
-            dist/wp-core-base-vendor-snapshot.zip.sha256 \
-            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
-
-      - name: Report existing verified release
-        if: steps.release_state.outputs.publish_required != 'true'
-        run: echo "GitHub Release ${{ steps.version.outputs.value }} already contains the current verified assets and metadata; nothing to publish."

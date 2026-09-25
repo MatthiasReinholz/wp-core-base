@@ -1,0 +1,13 @@
+parameters:
+    level: 8
+    paths:
+        - tools/wporg-updater/src/SourceCatalog.php
+        - tools/wporg-updater/src/SourceRelease.php
+        - tools/wporg-updater/src/SourceRecordValues.php
+        - tools/wporg-updater/src/UpdatePlan.php
+        - tools/wporg-updater/src/CoreContentOwnership.php
+        - tools/wporg-updater/src/HttpRequestPolicy.php
+        - tools/wporg-updater/src/FrameworkPayloadIdentity.php
+    bootstrapFiles:
+        - tools/wporg-updater/src/Autoload.php
+    tmpDir: .phpstan/boundaries

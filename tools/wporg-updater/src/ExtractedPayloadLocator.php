@@ -16,6 +16,9 @@ final class ExtractedPayloadLocator
         DependencyMetadataResolver $metadataResolver,
         ?string $mainFile = null,
     ): string {
+        if ($mainFile !== null) {
+            $mainFile = ConfigPathRules::normalizedRelativePath($mainFile, 'archive main file');
+        }
         $matches = [];
 
         foreach (self::candidateBases($extractPath) as $candidateBase) {
@@ -43,6 +46,9 @@ final class ExtractedPayloadLocator
                 }
 
                 $resolvedMainFile = $metadataResolver->resolveMainFile($candidatePath, $kind, $mainFile);
+                if ($resolvedMainFile !== null) {
+                    ConfigPathRules::assertNoSymlinkDescendants($candidatePath, $resolvedMainFile);
+                }
                 $matches[] = [
                     'path' => $candidatePath,
                     'score' => self::scoreDirectoryCandidate($candidatePath, $resolvedMainFile, $slug, $extractPath),
@@ -66,10 +72,12 @@ final class ExtractedPayloadLocator
         string $slug,
         bool $isFile,
     ): string {
+        $expectedEntry = ConfigPathRules::normalizedRelativePath($expectedEntry, 'archive expected entry');
         $matches = [];
 
         foreach (self::candidateBases($extractPath) as $candidateBase) {
             $candidatePath = self::candidatePath($candidateBase, $archiveSubdir);
+            ConfigPathRules::assertNoSymlinkDescendants($candidatePath, $expectedEntry);
 
             if ($isFile) {
                 $candidateFile = rtrim($candidatePath, '/') . '/' . trim($expectedEntry, '/');
@@ -110,13 +118,16 @@ final class ExtractedPayloadLocator
      */
     private static function candidateBases(string $extractPath): array
     {
+        if (is_link($extractPath) || ! is_dir($extractPath)) {
+            throw new RuntimeException('Extracted payload root must be a real directory.');
+        }
         $entries = array_values(array_filter(scandir($extractPath) ?: [], static fn (string $entry): bool => $entry !== '.' && $entry !== '..'));
         $candidateBases = [$extractPath];
 
         foreach ($entries as $entry) {
             $candidate = $extractPath . '/' . $entry;
 
-            if (is_dir($candidate)) {
+            if (is_dir($candidate) && ! is_link($candidate)) {
                 $candidateBases[] = $candidate;
             }
         }
@@ -130,7 +141,9 @@ final class ExtractedPayloadLocator
             return $candidateBase;
         }
 
-        return rtrim($candidateBase, '/') . '/' . trim($archiveSubdir, '/');
+        $relative = ConfigPathRules::normalizedRelativePath($archiveSubdir, 'archive_subdir');
+        ConfigPathRules::assertNoSymlinkDescendants($candidateBase, $relative);
+        return rtrim($candidateBase, '/') . '/' . $relative;
     }
 
     private static function scoreDirectoryCandidate(string $candidatePath, string $resolvedMainFile, string $slug, string $extractPath): int

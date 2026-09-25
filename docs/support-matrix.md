@@ -87,7 +87,7 @@ Support tiers in this table mean:
 
 | Behavior | Status | Notes |
 | --- | --- | --- |
-| one PR per dependency | Supported | Current operating model. |
+| one dependency per PR; one live PR per dependency/version pair | Supported | Later release lines may remain as separate blocked PRs. |
 | patch release refreshes existing PR | Supported | Same release line. |
 | later minor/major opens separate blocked PR | Supported | Requires blocker workflow. |
 | support-topic refresh for WordPress.org plugins | Supported | PR body can refresh with newer signals. |
@@ -115,3 +115,16 @@ If an evaluator asks whether the framework can be adopted, the main questions ar
 5. Should deployment come from a staged runtime payload?
 
 If the answer to most of those is yes, the framework is usually a strong fit.
+
+
+## Framework CLI runtimes and assurance
+
+| Runtime or check | Status | Scope |
+| --- | --- | --- |
+| PHP 8.4 and 8.5 | Recommended operational runtimes | Required framework CI coverage. |
+| PHP 8.3 | Tested compatibility | Included in the framework CI matrix. |
+| PHP 8.1 | Migration compatibility only | Syntax/behavior tests remain; end-of-life PHP is not a recommended operational runtime. |
+| Real WordPress smoke fixture | Supported | Disposable local database; install, plugin/MU bootstrap, and REST checks for both profiles. |
+| Read-only update-health monitor | GitHub maintainer workflow | Required-check and scheduling visibility; does not approve or merge updates. |
+
+Framework CLI compatibility does not override the support requirements of WordPress, individual plugins, the database, or the hosting platform. The smoke fixture is evidence for the tested baseline and environment, not a full site/browser regression suite. See [local prerequisites](local-prerequisites.md) and [contributor verification](contributing.md#wordpress-runtime-smoke-test).

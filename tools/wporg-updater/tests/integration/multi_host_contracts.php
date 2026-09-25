@@ -65,8 +65,7 @@ function run_multi_host_contract_tests(
     mkdir($frameworkInstallRoot, 0777, true);
     (new DownstreamScaffolder($repoRoot, $frameworkInstallRoot))->scaffold('vendor/wp-core-base', 'content-only-default', 'cms', true, false, 'gitlab');
     $payloadRoot = sys_get_temp_dir() . '/wporg-framework-gitlab-payload-' . bin2hex(random_bytes(4));
-    mkdir($payloadRoot, 0777, true);
-    $inspector->copyPath($repoRoot, $payloadRoot, FrameworkReleaseArtifactBuilder::excludedPaths());
+        (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($payloadRoot);
     $inspector->clearPath($payloadRoot . '/.git');
     $payloadFramework = FrameworkConfig::load($payloadRoot)->withInstalledRelease(
         version: '9.9.9',
@@ -112,8 +111,7 @@ function run_multi_host_contract_tests(
     );
     file_put_contents($providerSwitchRoot . '/.wp-core-base/manifest.php', $providerSwitchManifest);
     $providerSwitchPayloadRoot = sys_get_temp_dir() . '/wporg-framework-provider-switch-payload-' . bin2hex(random_bytes(4));
-    mkdir($providerSwitchPayloadRoot, 0777, true);
-    $inspector->copyPath($repoRoot, $providerSwitchPayloadRoot, FrameworkReleaseArtifactBuilder::excludedPaths());
+        (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($providerSwitchPayloadRoot);
     $inspector->clearPath($providerSwitchPayloadRoot . '/.git');
     $providerSwitchPayloadFramework = FrameworkConfig::load($providerSwitchPayloadRoot)->withInstalledRelease(
         version: '9.9.10',

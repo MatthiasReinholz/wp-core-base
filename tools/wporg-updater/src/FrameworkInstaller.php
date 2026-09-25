@@ -77,8 +77,11 @@ final class FrameworkInstaller
         $frameworkState = null;
         $governanceState = null;
         $swappedIntoPlace = false;
+        $committed = false;
+        $preserveRecovery = false;
         $refreshedFileLookup = array_fill_keys($refreshedFiles, true);
 
+        ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, ".wp-core-base/build");
         $this->runtimeInspector->clearPath($stagingPath);
         $this->runtimeInspector->clearPath($backupPath);
         $this->runtimeInspector->clearPath($stateBackupRoot);
@@ -93,6 +96,7 @@ final class FrameworkInstaller
                     continue;
                 }
 
+                ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, $relativePath);
                 $absolutePath = $this->repoRoot . '/' . $relativePath;
                 $directory = dirname($absolutePath);
 
@@ -108,6 +112,7 @@ final class FrameworkInstaller
             }
 
             foreach ($removedFiles as $relativePath) {
+                ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, $relativePath);
                 $absolutePath = $this->repoRoot . '/' . $relativePath;
                 $managedFileStates[$relativePath] ??= $this->captureFileState(
                     $absolutePath,
@@ -124,15 +129,24 @@ final class FrameworkInstaller
                 releaseSource: $payloadFramework->releaseSource,
                 distributionPath: $distributionPath
             );
+            ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, ".wp-core-base/framework.php");
             $frameworkState = $this->captureFileState($framework->path, $stateBackupRoot . '/framework.php');
             (new FrameworkWriter())->write($framework);
             $changedPaths[] = '.wp-core-base/framework.php';
             $governancePath = $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($downstreamConfig);
+            ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, FrameworkRuntimeFiles::governanceDataPath($downstreamConfig));
             $governanceState = $this->captureFileState($governancePath, $stateBackupRoot . '/admin-governance.php');
             (new AdminGovernanceExporter())->refresh($downstreamConfig);
             $changedPaths[] = FrameworkRuntimeFiles::governanceDataPath($downstreamConfig);
-            $pathSwapper->finalize($backupPath);
+            // The installation is committed before best-effort backup cleanup.
+            $committed = true;
             $swappedIntoPlace = false;
+            try {
+                $pathSwapper->finalize($backupPath);
+            } catch (Throwable $cleanupFailure) {
+                $preserveRecovery = true;
+                fwrite(STDERR, sprintf("[warn] Framework installation committed; cleanup failed. Recovery data retained at %s and %s: %s\n", $backupPath, $stateBackupRoot, $cleanupFailure->getMessage()));
+            }
 
             return [
                 'changed_paths' => array_values(array_unique($changedPaths)),
@@ -144,27 +158,41 @@ final class FrameworkInstaller
                 'managed_components' => $framework->baseline['managed_components'],
             ];
         } catch (Throwable $throwable) {
-            if ($governanceState !== null) {
-                $this->restoreFileState($governanceState);
+            $recoveryErrors = [];
+            if (! $committed) {
+                foreach (array_filter([$governanceState, $frameworkState, ...array_reverse($managedFileStates)]) as $state) {
+                    try {
+                        $this->restoreFileState($state);
+                    } catch (Throwable $restoreFailure) {
+                        $recoveryErrors[] = $restoreFailure->getMessage();
+                    }
+                }
+                if ($swappedIntoPlace) {
+                    try {
+                        $pathSwapper->rollback($targetPath, $backupPath);
+                    } catch (Throwable $restoreFailure) {
+                        $recoveryErrors[] = $restoreFailure->getMessage();
+                    }
+                }
             }
-
-            if ($frameworkState !== null) {
-                $this->restoreFileState($frameworkState);
+            // A failed swap may already have attempted rollback internally.
+            $preserveRecovery = $recoveryErrors !== [] || file_exists($backupPath);
+            if ($preserveRecovery) {
+                throw new RuntimeException(sprintf(
+                    'Framework installation failed: %s. Recovery data retained at %s and %s. Recovery errors: %s',
+                    $throwable->getMessage(), $backupPath, $stateBackupRoot,
+                    $recoveryErrors === [] ? 'Inspect retained backup before retrying.' : implode('; ', $recoveryErrors)
+                ), 0, $throwable);
             }
-
-            foreach ($managedFileStates as $state) {
-                $this->restoreFileState($state);
-            }
-
-            if ($swappedIntoPlace) {
-                $pathSwapper->rollback($targetPath, $backupPath);
-            }
-
             throw $throwable;
         } finally {
-            $this->runtimeInspector->clearPath($stagingPath);
-            $this->runtimeInspector->clearPath($backupPath);
-            $this->runtimeInspector->clearPath($stateBackupRoot);
+            foreach ($preserveRecovery ? [$stagingPath] : [$stagingPath, $backupPath, $stateBackupRoot] as $cleanupPath) {
+                try {
+                    $this->runtimeInspector->clearPath($cleanupPath);
+                } catch (Throwable $cleanupFailure) {
+                    fwrite(STDERR, sprintf("[warn] Recovery/cleanup path retained at %s: %s\n", $cleanupPath, $cleanupFailure->getMessage()));
+                }
+            }
         }
     }
 
@@ -369,9 +397,8 @@ final class FrameworkInstaller
     {
         $path = $state['path'];
 
-        $this->runtimeInspector->clearPath($path);
-
         if (! $state['existed']) {
+            $this->runtimeInspector->clearPath($path);
             return;
         }
 
@@ -381,6 +408,7 @@ final class FrameworkInstaller
             throw new RuntimeException(sprintf('Unable to restore backup for %s.', $path));
         }
 
+        $this->runtimeInspector->clearPath($path);
         $this->runtimeInspector->copyPath($backupPath, $path);
     }
 }

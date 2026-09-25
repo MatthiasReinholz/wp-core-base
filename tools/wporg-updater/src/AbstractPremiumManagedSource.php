@@ -8,6 +8,9 @@ use RuntimeException;
 
 abstract class AbstractPremiumManagedSource implements PremiumManagedDependencySource
 {
+    /** @var array<string,string> */
+    private array $observedCredentialOrigins = [];
+
     public function __construct(
         protected readonly HttpClient $httpClient,
         protected readonly PremiumCredentialsStore $credentialsStore,
@@ -26,11 +29,16 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
     protected function requestJson(string $method, string $url, array $headers = [], ?array $json = null, ?string $body = null): array
     {
         $options = $this->premiumMetadataRequestOptions();
+        $origin = HttpRequestPolicy::origin($url);
+        $options['credential_origin'] = $origin;
         $allowedHosts = $this->allowedApiHosts();
 
         if ($allowedHosts !== []) {
             $options['allowed_redirect_hosts'] = $allowedHosts;
         }
+
+        HttpRequestPolicy::assertAllowedUrl($url, $options);
+        $this->observedCredentialOrigins[$origin] = $origin;
 
         // Route JSON GET requests through the retry-aware JSON transport path.
         if (strtoupper($method) === 'GET' && $json === null && $body === null) {
@@ -105,6 +113,7 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
     {
         $options = [
             'max_download_bytes' => 512 * 1024 * 1024,
+            'credential_origins' => array_merge($this->allowedCredentialOrigins(), array_values($this->observedCredentialOrigins)),
             'strip_auth_on_cross_origin_redirect' => true,
         ];
         $allowedHosts = $this->allowedDownloadHosts();
@@ -158,6 +167,17 @@ abstract class AbstractPremiumManagedSource implements PremiumManagedDependencyS
     protected function allowedApiHosts(): array
     {
         return [];
+    }
+
+    /**
+     * Exact API origins allowed to receive credentials on an initial download.
+     * Providers using nonstandard ports can override this explicitly. Origins
+     * already used for metadata requests are also trusted for that instance.
+     * @return list<string>
+     */
+    protected function allowedCredentialOrigins(): array
+    {
+        return array_map(static fn (string $host): string => 'https://' . $host, $this->allowedApiHosts());
     }
 
     /**

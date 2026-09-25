@@ -66,7 +66,7 @@ That is one of the strongest fits for the framework. Use `stage-runtime` and bui
 
 ## What happens if multiple plugins have updates at the same time?
 
-The framework opens one PR per dependency.
+Each PR targets one dependency. There is one live PR per dependency/version pair; different release lines for that dependency may have separate queued PRs.
 
 That keeps review focused and avoids unrelated dependency changes getting bundled together.
 
@@ -103,7 +103,7 @@ Framework update PRs also include:
 
 Framework updates operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.
 
-They do not rewrite `.wp-core-base/manifest.php`, and they do not directly change runtime dependency ownership. They refresh the framework tooling layer that downstream automation runs through.
+They do not rewrite `.wp-core-base/manifest.php` or install the baseline WordPress/plugin versions into your site. They refresh the framework tooling and eligible scaffolded files that downstream automation uses. The signed framework ZIP now excludes the optional runtime starter baseline; core and plugin upgrades remain separate PRs.
 
 ## What if my repo already ignores `/vendor/`?
 

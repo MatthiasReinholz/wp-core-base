@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'version' => '1.4.8',
+  'version' => '1.5.0',
   'release_channel' => 'stable',
   'distribution' =>
   array (
@@ -20,7 +20,7 @@ return array (
   ),
   'baseline' =>
   array (
-    'wordpress_core' => '6.9.4',
+    'wordpress_core' => '6.9.9',
     'managed_components' =>
     array (
       0 =>

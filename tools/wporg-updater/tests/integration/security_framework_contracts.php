@@ -48,10 +48,8 @@ function run_security_framework_contract_tests(
     );
 
     $payloadRoot = sys_get_temp_dir() . '/wporg-framework-payload-' . bin2hex(random_bytes(4));
-    mkdir($payloadRoot, 0777, true);
-    $repoRuntimeInspector = new RuntimeInspector($config->runtime);
-    $repoRuntimeInspector->clearPath($repoRoot . '/.wp-core-base/build');
-    $repoRuntimeInspector->copyPath($repoRoot, $payloadRoot, FrameworkReleaseArtifactBuilder::excludedPaths());
+        $repoRuntimeInspector = new RuntimeInspector($config->runtime);
+    (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($payloadRoot);
     (new RuntimeInspector($config->runtime))->clearPath($payloadRoot . '/.git');
     $payloadFramework = FrameworkConfig::load($payloadRoot)->withInstalledRelease(
         version: '1.0.1',
@@ -87,7 +85,7 @@ function run_security_framework_contract_tests(
     $legacyUntrackedCustomizedRoot = sys_get_temp_dir() . '/wporg-framework-legacy-untracked-customized-' . bin2hex(random_bytes(4));
     mkdir($legacyUntrackedCustomizedRoot, 0777, true);
     (new \WpOrgPluginUpdater\DownstreamScaffolder($repoRoot, $legacyUntrackedCustomizedRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
-    $repoRuntimeInspector->copyPath($repoRoot, $legacyUntrackedCustomizedRoot . '/vendor/wp-core-base', FrameworkReleaseArtifactBuilder::excludedPaths());
+    (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($legacyUntrackedCustomizedRoot . '/vendor/wp-core-base');
     $repoRuntimeInspector->clearPath($legacyUntrackedCustomizedRoot . '/vendor/wp-core-base/.git');
     $legacyUntrackedCustomizedFramework = FrameworkConfig::load($legacyUntrackedCustomizedRoot);
     $legacyManagedFiles = $legacyUntrackedCustomizedFramework->managedFiles();
@@ -102,8 +100,7 @@ function run_security_framework_contract_tests(
     $legacyCustomizedWorkflowContents = (string) file_get_contents($legacyCustomizedWorkflowPath) . "\n# preserved local customization\n";
     file_put_contents($legacyCustomizedWorkflowPath, $legacyCustomizedWorkflowContents);
     $legacyCustomizedPayloadRoot = sys_get_temp_dir() . '/wporg-framework-legacy-untracked-customized-payload-' . bin2hex(random_bytes(4));
-    mkdir($legacyCustomizedPayloadRoot, 0777, true);
-    $repoRuntimeInspector->copyPath($repoRoot, $legacyCustomizedPayloadRoot, FrameworkReleaseArtifactBuilder::excludedPaths());
+        (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($legacyCustomizedPayloadRoot);
     (new RuntimeInspector($config->runtime))->clearPath($legacyCustomizedPayloadRoot . '/.git');
     (new FrameworkWriter())->write(FrameworkConfig::load($legacyCustomizedPayloadRoot)->withInstalledRelease(
         version: '1.0.2',
@@ -140,7 +137,7 @@ function run_security_framework_contract_tests(
     $legacyUntrackedRefreshRoot = sys_get_temp_dir() . '/wporg-framework-legacy-untracked-refresh-' . bin2hex(random_bytes(4));
     mkdir($legacyUntrackedRefreshRoot, 0777, true);
     (new \WpOrgPluginUpdater\DownstreamScaffolder($repoRoot, $legacyUntrackedRefreshRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
-    $repoRuntimeInspector->copyPath($repoRoot, $legacyUntrackedRefreshRoot . '/vendor/wp-core-base', FrameworkReleaseArtifactBuilder::excludedPaths());
+    (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($legacyUntrackedRefreshRoot . '/vendor/wp-core-base');
     $repoRuntimeInspector->clearPath($legacyUntrackedRefreshRoot . '/vendor/wp-core-base/.git');
     $legacyUntrackedRefreshFramework = FrameworkConfig::load($legacyUntrackedRefreshRoot);
     $legacyRefreshManagedFiles = $legacyUntrackedRefreshFramework->managedFiles();
@@ -152,8 +149,7 @@ function run_security_framework_contract_tests(
         managedFiles: $legacyRefreshManagedFiles,
     ));
     $legacyRefreshPayloadRoot = sys_get_temp_dir() . '/wporg-framework-legacy-untracked-refresh-payload-' . bin2hex(random_bytes(4));
-    mkdir($legacyRefreshPayloadRoot, 0777, true);
-    $repoRuntimeInspector->copyPath($repoRoot, $legacyRefreshPayloadRoot, FrameworkReleaseArtifactBuilder::excludedPaths());
+        (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($legacyRefreshPayloadRoot);
     (new RuntimeInspector($config->runtime))->clearPath($legacyRefreshPayloadRoot . '/.git');
     (new FrameworkWriter())->write(FrameworkConfig::load($legacyRefreshPayloadRoot)->withInstalledRelease(
         version: '1.0.3',
@@ -192,15 +188,14 @@ function run_security_framework_contract_tests(
     $strictCheckRoot = sys_get_temp_dir() . '/wporg-framework-strict-check-' . bin2hex(random_bytes(4));
     mkdir($strictCheckRoot, 0777, true);
     (new \WpOrgPluginUpdater\DownstreamScaffolder($repoRoot, $strictCheckRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
-    $repoRuntimeInspector->copyPath($repoRoot, $strictCheckRoot . '/vendor/wp-core-base', FrameworkReleaseArtifactBuilder::excludedPaths());
+    (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($strictCheckRoot . '/vendor/wp-core-base');
     $repoRuntimeInspector->clearPath($strictCheckRoot . '/vendor/wp-core-base/.git');
     $strictCheckWorkflowPath = $strictCheckRoot . '/.github/workflows/wp-core-base-self-update.yml';
     file_put_contents($strictCheckWorkflowPath, (string) file_get_contents($strictCheckWorkflowPath) . "\n# local customization\n");
     [$strictMajor, $strictMinor, $strictPatch] = array_map('intval', explode('.', $frameworkConfig->normalizedVersion()));
     $strictTargetVersion = sprintf('%d.%d.%d', $strictMajor, $strictMinor, $strictPatch + 1);
     $strictPayloadRoot = sys_get_temp_dir() . '/wporg-framework-strict-check-payload-' . bin2hex(random_bytes(4));
-    mkdir($strictPayloadRoot, 0777, true);
-    $repoRuntimeInspector->copyPath($repoRoot, $strictPayloadRoot, FrameworkReleaseArtifactBuilder::excludedPaths());
+        (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($strictPayloadRoot);
     (new RuntimeInspector($config->runtime))->clearPath($strictPayloadRoot . '/.git');
     (new FrameworkWriter())->write(FrameworkConfig::load($strictPayloadRoot)->withInstalledRelease(
         version: $strictTargetVersion,
@@ -218,6 +213,7 @@ function run_security_framework_contract_tests(
             (string) file_get_contents($strictPayloadTemplatePath)
         )
     );
+    \WpOrgPluginUpdater\FrameworkReleasePayload::writeInventory($strictPayloadRoot, 'fixture');
     $strictArtifactPath = sys_get_temp_dir() . '/wporg-framework-strict-check-' . bin2hex(random_bytes(4)) . '.zip';
     $strictZip = new ZipArchive();
     $assert($strictZip->open($strictArtifactPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true, 'Expected strict framework-sync fixture ZIP to be created.');

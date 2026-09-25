@@ -94,7 +94,7 @@ final class CoreUpdater
         }
 
         if (version_compare((string) $release['version'], $highestCoveredVersion, '>')) {
-            $scope = $this->releaseClassifier->classifyScope($highestCoveredVersion, (string) $release['version']);
+            $scope = UpdatePlan::scope($current['version'], (string) $release['version'], $this->releaseClassifier);
             $this->createPullRequestForLatest(
                 currentVersion: $current['version'],
                 release: $release,
@@ -131,36 +131,17 @@ final class CoreUpdater
      */
     private function planExistingPullRequest(array $pullRequest, string $baseVersion, string $latestVersion, string $latestReleaseAt, string $baseRevision): array
     {
-        $metadata = $pullRequest['metadata'];
-        $targetVersion = (string) ($metadata['target_version'] ?? '');
-        $releaseAt = (string) ($metadata['release_at'] ?? '');
-        $scope = (string) ($metadata['scope'] ?? 'none');
-
-        if ($targetVersion === '' || $releaseAt === '') {
-            throw new RuntimeException(sprintf('Managed core pull request #%d has incomplete metadata.', $pullRequest['number']));
+        $metadata = $pullRequest['metadata'] ?? null;
+        if (! is_array($metadata)) {
+            throw new RuntimeException(sprintf('Managed pull request #%d is missing metadata.', $pullRequest['number']));
         }
-
-        $requiresCodeUpdate = $this->branchRefreshRequired($metadata, $baseRevision);
-
-        if (
-            $this->releaseClassifier->samePatchLine($targetVersion, $latestVersion) &&
-            version_compare($latestVersion, $targetVersion, '>') &&
-            $this->releaseClassifier->classifyScope($targetVersion, $latestVersion) === 'patch'
-        ) {
-            $targetVersion = $latestVersion;
-            $releaseAt = $latestReleaseAt;
-            $scope = 'patch';
-            $requiresCodeUpdate = true;
-        }
-
-        $metadata['base_version'] = $metadata['base_version'] ?? $baseVersion;
-
+        $plan = UpdatePlan::refresh($metadata, $baseVersion, $latestVersion, $latestReleaseAt, $baseRevision, $this->releaseClassifier);
+        $metadata['base_version'] = $plan->baseVersion;
         $pullRequest['metadata'] = $metadata;
-        $pullRequest['planned_target_version'] = $targetVersion;
-        $pullRequest['planned_release_at'] = $releaseAt;
-        $pullRequest['planned_scope'] = $scope;
-        $pullRequest['requires_code_update'] = $requiresCodeUpdate;
-
+        $pullRequest['planned_target_version'] = $plan->targetVersion;
+        $pullRequest['planned_release_at'] = $plan->releaseAt;
+        $pullRequest['planned_scope'] = $plan->scope;
+        $pullRequest['requires_code_update'] = $plan->requiresBranchRefresh;
         return $pullRequest;
     }
 
@@ -209,9 +190,10 @@ final class CoreUpdater
                     $defaultBranch,
                     $branch,
                     (string) $release['download_url'],
-                    $targetVersion
+                    $targetVersion,
+                    $branchGuard
                 );
-                $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
+                $changed = $branchGuard->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
 
                 if (! $changed) {
                     $this->closeSupersededPullRequest(
@@ -315,9 +297,10 @@ final class CoreUpdater
                 $defaultBranch,
                 $branch,
                 (string) $release['download_url'],
-                (string) $release['version']
+                (string) $release['version'],
+                $branchGuard
             );
-            $changed = $this->gitRunner->commitAndPush($branch, sprintf('Update WordPress core to %s', $release['version']), $paths);
+            $changed = $branchGuard->commitAndPush($branch, sprintf('Update WordPress core to %s', $release['version']), $paths);
 
             if (! $changed) {
                 fwrite(STDOUT, sprintf("Skipping WordPress core PR creation for %s because no file changes were produced.\n", $release['version']));
@@ -382,22 +365,6 @@ final class CoreUpdater
     private function pullRequestAlreadySatisfied(string $baseVersion, string $targetVersion): bool
     {
         return version_compare($targetVersion, $baseVersion, '<=');
-    }
-
-    /**
-     * @param array<string, mixed> $metadata
-     */
-    private function branchRefreshRequired(array $metadata, string $baseRevision): bool
-    {
-        if ($baseRevision === '') {
-            return false;
-        }
-
-        $recordedBaseRevision = $metadata['base_revision'] ?? null;
-
-        return ! is_string($recordedBaseRevision)
-            || $recordedBaseRevision === ''
-            || ! hash_equals($recordedBaseRevision, $baseRevision);
     }
 
     /**
@@ -479,14 +446,13 @@ final class CoreUpdater
     /**
      * @return list<string>
      */
-    private function checkoutAndApplyCoreVersion(string $defaultBranch, string $branch, string $downloadUrl, string $targetVersion): array
+    private function checkoutAndApplyCoreVersion(string $defaultBranch, string $branch, string $downloadUrl, string $targetVersion, ?BranchRollbackGuard $branchGuard = null): array
     {
         $this->gitRunner->checkoutBranch($defaultBranch, $branch);
-        $tempDir = sys_get_temp_dir() . '/wp-core-update-' . bin2hex(random_bytes(6));
-
-        if (! mkdir($tempDir, 0777, true) && ! is_dir($tempDir)) {
-            throw new RuntimeException(sprintf('Failed to create temp directory: %s', $tempDir));
-        }
+        $branchGuard?->recordCheckout($branch);
+        $branchGuard?->trackSourceBaselinePaths();
+        $workspace = TempWorkspace::create($this->config->repoRoot, 'core-update');
+        $tempDir = $workspace->path();
 
         $archivePath = $tempDir . '/core.zip';
         $extractPath = $tempDir . '/extract';
@@ -521,11 +487,13 @@ final class CoreUpdater
                 $source = $sourceRoot . '/' . $entry;
 
                 if ($entry === 'wp-content') {
-                    $paths = array_merge($paths, $this->syncCoreWpContent($source));
+                    $paths = array_merge($paths, $this->syncCoreWpContent($source, $branchGuard));
                     continue;
                 }
 
+                $branchGuard?->trackMutationPaths([$entry]);
                 $destination = $this->config->repoRoot . '/' . $entry;
+                ConfigPathRules::assertNoSymlinkDescendants($this->config->repoRoot, $entry);
                 $this->removePath($destination);
                 $this->copyPath($source, $destination);
                 $paths[] = $entry;
@@ -539,15 +507,16 @@ final class CoreUpdater
 
             return array_values(array_unique($paths));
         } finally {
-            $this->removePath($tempDir);
+            $workspace->close();
         }
     }
 
     /**
      * @return list<string>
      */
-    private function syncCoreWpContent(string $sourceWpContent): array
+    private function syncCoreWpContent(string $sourceWpContent, ?BranchRollbackGuard $branchGuard = null): array
     {
+        ConfigPathRules::assertNoSymlinkDescendants($this->config->repoRoot, $this->config->paths['content_root']);
         $destinationWpContent = $this->config->repoRoot . '/' . $this->config->paths['content_root'];
 
         if (! is_dir($destinationWpContent)) {
@@ -563,10 +532,16 @@ final class CoreUpdater
             $destination = $destinationWpContent . '/' . $entry;
 
             if (is_dir($source) && in_array($entry, ['plugins', 'themes'], true)) {
-                $paths = array_merge($paths, $this->syncBundledDirectory($source, $destination, $this->config->paths['content_root'] . '/' . $entry));
+                $paths = array_merge($paths, $this->syncBundledDirectory($source, $destination, $this->config->paths['content_root'] . '/' . $entry, $branchGuard));
                 continue;
             }
 
+            if (! (new CoreContentOwnership($this->config))->mayReplace($this->config->paths['content_root'] . '/' . $entry, is_dir($source))) {
+                continue;
+            }
+
+            $branchGuard?->trackMutationPaths([$this->config->paths['content_root'] . '/' . $entry]);
+            ConfigPathRules::assertNoSymlinkDescendants($this->config->repoRoot, $this->config->paths['content_root'] . '/' . $entry);
             $this->removePath($destination);
             $this->copyPath($source, $destination);
             $paths[] = $this->config->paths['content_root'] . '/' . $entry;
@@ -578,8 +553,9 @@ final class CoreUpdater
     /**
      * @return list<string>
      */
-    private function syncBundledDirectory(string $sourceDirectory, string $destinationDirectory, string $pathPrefix): array
+    private function syncBundledDirectory(string $sourceDirectory, string $destinationDirectory, string $pathPrefix, ?BranchRollbackGuard $branchGuard = null): array
     {
+        ConfigPathRules::assertNoSymlinkDescendants($this->config->repoRoot, $pathPrefix);
         if (! is_dir($destinationDirectory)) {
             if (! mkdir($destinationDirectory, 0777, true) && ! is_dir($destinationDirectory)) {
                 throw new RuntimeException(sprintf('Failed to create bundled destination directory: %s', $destinationDirectory));
@@ -591,6 +567,11 @@ final class CoreUpdater
         foreach (array_values(array_filter(scandir($sourceDirectory) ?: [], static fn (string $entry): bool => ! in_array($entry, ['.', '..'], true))) as $entry) {
             $source = $sourceDirectory . '/' . $entry;
             $destination = $destinationDirectory . '/' . $entry;
+            if (! (new CoreContentOwnership($this->config))->mayReplace($pathPrefix . '/' . $entry, is_dir($source))) {
+                continue;
+            }
+            $branchGuard?->trackMutationPaths([$pathPrefix . '/' . $entry]);
+            ConfigPathRules::assertNoSymlinkDescendants($this->config->repoRoot, $pathPrefix . '/' . $entry);
             $this->removePath($destination);
             $this->copyPath($source, $destination);
             $paths[] = $pathPrefix . '/' . $entry;

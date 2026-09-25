@@ -67,19 +67,33 @@ use WpOrgPluginUpdater\WordPressOrgClient;
 use WpOrgPluginUpdater\ZipExtractor;
 
 require dirname(__DIR__) . '/src/Autoload.php';
-require __DIR__ . '/integration/workflow_contracts.php';
-require __DIR__ . '/integration/upstream_workflow_contracts.php';
-require __DIR__ . '/integration/release_contracts.php';
-require __DIR__ . '/integration/config_runtime_contracts.php';
-require __DIR__ . '/integration/security_framework_contracts.php';
-require __DIR__ . '/integration/security_policy_contracts.php';
-require __DIR__ . '/integration/dependency_authoring_contracts.php';
-require __DIR__ . '/integration/cli_json_contracts.php';
-require __DIR__ . '/integration/blocker_states.php';
-require __DIR__ . '/integration/followups.php';
-require __DIR__ . '/integration/multi_host_contracts.php';
-require __DIR__ . '/integration/generic_json_contracts.php';
-require __DIR__ . '/integration/managed_pr_cleanup_contracts.php';
+require __DIR__ . '/support/SuiteRunner.php';
+$suites = new SuiteRunner(__DIR__ . '/integration', [
+    'workflow_contracts.php' => 'run_workflow_contract_tests',
+    'upstream_workflow_contracts.php' => 'run_upstream_workflow_contract_tests',
+    'release_contracts.php' => 'run_release_contract_tests',
+    'config_runtime_contracts.php' => 'run_config_runtime_contract_tests',
+    'configuration_planning_contracts.php' => 'run_configuration_planning_contract_tests',
+    'test_runner_contracts.php' => 'run_test_runner_contract_tests',
+    'security_framework_contracts.php' => 'run_security_framework_contract_tests',
+    'security_policy_contracts.php' => 'run_security_policy_contract_tests',
+    'dependency_authoring_contracts.php' => 'run_dependency_authoring_contract_tests',
+    'cli_json_contracts.php' => 'run_cli_json_contract_tests',
+    'blocker_states.php' => 'run_blocker_state_tests',
+    'followups.php' => 'run_followup_integration_tests',
+    'multi_host_contracts.php' => 'run_multi_host_contract_tests',
+    'generic_json_contracts.php' => 'run_generic_json_contract_tests',
+    'managed_pr_cleanup_contracts.php' => 'run_managed_pr_cleanup_contract_tests',
+    'seam_contracts.php' => 'run_seam_contract_tests',
+    'http_security_contracts.php' => 'run_http_security_contract_tests',
+    'concurrency_contracts.php' => 'run_concurrency_contract_tests',
+    'filesystem_hardening_contracts.php' => 'run_filesystem_hardening_contract_tests',
+    'release_distribution_contracts.php' => 'run_release_distribution_contract_tests',
+    'core_ownership_contracts.php' => 'run_core_ownership_contract_tests',
+    'update_health_contracts.php' => 'run_update_health_contract_tests',
+    'wordpress_smoke_contracts.php' => 'run_wordpress_smoke_contract_tests',
+    'dependency_recovery_contracts.php' => 'run_dependency_recovery_contract_tests',
+], dirname(__DIR__, 3));
 
 final class ExamplePremiumManagedSource extends AbstractPremiumManagedSource
 {
@@ -175,13 +189,39 @@ final class ConfigurablePremiumManagedSource extends AbstractPremiumManagedSourc
     }
 }
 
-final class FakeGitRunner implements GitRunnerInterface
+final class FakeGitRunner implements \WpOrgPluginUpdater\GuardedGitRunnerInterface
 {
     public ?string $currentBranch = 'main';
     public string $currentRevision = 'main-sha';
     public bool $clean = true;
     public bool $failCommit = false;
     public bool $failDeleteRemoteBranch = false;
+    public array $expectedRemote = [];
+    public array $expectedLocal = [];
+    public array $ownedCheckout = [];
+    public array $successfulPush = [];
+
+    public function expectRemoteRevision(string $branch, ?string $revision): void { $this->expectedRemote[$branch] = $revision; }
+    public function expectLocalRevision(string $branch, ?string $revision): void { $this->expectedLocal[$branch] = $revision; }
+    public function ownedCheckoutRevision(string $branch): ?string { return $this->ownedCheckout[$branch] ?? null; }
+    public function successfulPushRevision(string $branch): ?string { return $this->successfulPush[$branch] ?? null; }
+    public function compareAndSwapRemoteBranch(string $branch, ?string $replacement, ?string $expected): void
+    {
+        if (($this->remoteBranches[$branch] ?? null) !== $expected) { throw new RuntimeException('Fake remote lease rejected.'); }
+        if ($replacement === null) { unset($this->remoteBranches[$branch]); } else { $this->remoteBranches[$branch] = $replacement; }
+        $this->actions[] = 'remote-cas:' . $branch;
+    }
+    public function compareAndSwapLocalBranch(string $branch, ?string $replacement, ?string $expected): void
+    {
+        if (($this->localBranches[$branch] ?? null) !== $expected) { throw new RuntimeException('Fake local lease rejected.'); }
+        if ($replacement === null) { unset($this->localBranches[$branch]); } else { $this->localBranches[$branch] = $replacement; }
+        $this->actions[] = 'local-cas:' . $branch;
+    }
+    public function restoreMutationPaths(string $revision, array $paths): void
+    {
+        $this->clean = true;
+        $this->actions[] = 'restore-mutation-paths:' . implode(',', $paths);
+    }
 
     /** @var array<string, string> */
     public array $localBranches = ['main' => 'main-sha'];
@@ -199,7 +239,10 @@ final class FakeGitRunner implements GitRunnerInterface
             ? $baseRevision
             : $this->remoteBranches[$branch];
 
-        $this->localBranches[$branch] = $startingRevision;
+        if (array_key_exists($branch, $this->expectedLocal)) {
+            $this->compareAndSwapLocalBranch($branch, $startingRevision, $this->expectedLocal[$branch]);
+        } else { $this->localBranches[$branch] = $startingRevision; }
+        $this->ownedCheckout[$branch] = $startingRevision;
         $this->currentBranch = $branch;
         $this->currentRevision = $startingRevision;
         $this->clean = true;
@@ -215,7 +258,10 @@ final class FakeGitRunner implements GitRunnerInterface
 
         $revision = $branch . '-commit-' . (count($this->actions) + 1);
         $this->localBranches[$branch] = $revision;
-        $this->remoteBranches[$branch] = $revision;
+        $this->compareAndSwapRemoteBranch($branch, $revision, $this->expectedRemote[$branch] ?? ($this->remoteBranches[$branch] ?? null));
+        $this->successfulPush[$branch] = $revision;
+        $this->ownedCheckout[$branch] = $revision;
+        $this->expectedRemote[$branch] = $revision;
         $this->currentBranch = $branch;
         $this->currentRevision = $revision;
         $this->clean = true;
@@ -669,10 +715,8 @@ $makeManagedSourceRegistry = static function (
     );
 };
 
-$assert = static function (bool $condition, string $message): void {
-    if (! $condition) {
-        throw new RuntimeException($message);
-    }
+$assert = static function (bool $condition, string $message) use ($suites): void {
+    $suites->assertion($condition, $message);
 };
 
 $premiumMetadataDefaults = (new ExamplePremiumManagedSource(new HttpClient(), new PremiumCredentialsStore('{}')));
@@ -1292,16 +1336,16 @@ $vendoredFrameworkHash = hash_file('sha256', $baselineSyncRoot . '/.wp-core-base
 $assert((new FrameworkSourceBaselineSynchronizer($baselineSyncRoot))->synchronize($baselineSyncConfig, '100.0.0') === [], 'Expected vendored downstream baseline metadata to remain pinned.');
 $assert(hash_file('sha256', $baselineSyncRoot . '/.wp-core-base/framework.php') === $vendoredFrameworkHash, 'Expected vendored downstream baseline synchronization to be a strict no-op.');
 (new RuntimeInspector($runtimeDefaults))->clearPath($baselineSyncRoot);
-run_upstream_workflow_contract_tests($assert, $repoRoot, $checkoutActionSha, $setupPhpActionSha);
-run_release_contract_tests($assert, $repoRoot, $frameworkConfig, $currentFrameworkVersion);
+$suites->run('upstream_workflow_contracts.php', static fn () => run_upstream_workflow_contract_tests($assert, $repoRoot, $checkoutActionSha, $setupPhpActionSha));
+$suites->run('release_contracts.php', static fn () => run_release_contract_tests($assert, $repoRoot, $frameworkConfig, $currentFrameworkVersion));
 
-$configRuntimeContracts = run_config_runtime_contract_tests(
+$configRuntimeContracts = $suites->run('config_runtime_contracts.php', static fn () => run_config_runtime_contract_tests(
     $assert,
     $repoRoot,
     $runtimeDefaults,
     $longLabel,
     $normalizedLongLabel
-);
+));
 $config = $configRuntimeContracts['config'];
 $runtimeInspector = $configRuntimeContracts['runtimeInspector'];
 $gitLabVerificationConfig = Config::fromArray($repoRoot, [
@@ -2157,21 +2201,21 @@ $assert($outsideContentAllowRuntimePathRejected, 'Expected runtime.allow_runtime
 $tempScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-' . bin2hex(random_bytes(4));
 mkdir($tempScaffoldRoot, 0777, true);
 (new DownstreamScaffolder(dirname(__DIR__, 3), $tempScaffoldRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
-run_workflow_contract_tests(
+$suites->run('workflow_contracts.php', static fn () => run_workflow_contract_tests(
     $assert,
     $repoRoot,
     $tempScaffoldRoot,
     $checkoutActionSha,
     $setupPhpActionSha,
     $normalizeWorkflowExample
-);
-run_managed_pr_cleanup_contract_tests($assert);
-run_multi_host_contract_tests(
+));
+$suites->run('managed_pr_cleanup_contracts.php', static fn () => run_managed_pr_cleanup_contract_tests($assert));
+$suites->run('multi_host_contracts.php', static fn () => run_multi_host_contract_tests(
     $assert,
     $repoRoot,
     $tempScaffoldRoot,
     $normalizeWorkflowExample
-);
+));
 $scaffoldedFramework = FrameworkConfig::load($tempScaffoldRoot);
 
 $conflictScaffoldRoot = sys_get_temp_dir() . '/wporg-scaffold-conflict-' . bin2hex(random_bytes(4));
@@ -2243,17 +2287,16 @@ $assert(
     $normalizedFallback['notes_text'] === 'Release notes unavailable for version 6.3.0.',
     'Expected the updater to synthesize fallback notes text when a source omits release notes.'
 );
-$branchRefreshRequired = $updaterReflection->getMethod('branchRefreshRequired');
 $assert(
-    $branchRefreshRequired->invoke($updaterWithoutConstructor, [], 'abc123') === true,
+    \WpOrgPluginUpdater\UpdatePlan::branchRefreshRequired([], 'abc123') === true,
     'Expected updater PR metadata without a recorded base revision to refresh once against the current base branch.'
 );
 $assert(
-    $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'abc123'], 'abc123') === false,
+    \WpOrgPluginUpdater\UpdatePlan::branchRefreshRequired(['base_revision' => 'abc123'], 'abc123') === false,
     'Expected updater PR metadata with a matching base revision to avoid unnecessary branch refreshes.'
 );
 $assert(
-    $branchRefreshRequired->invoke($updaterWithoutConstructor, ['base_revision' => 'stale456'], 'abc123') === true,
+    \WpOrgPluginUpdater\UpdatePlan::branchRefreshRequired(['base_revision' => 'stale456'], 'abc123') === true,
     'Expected updater PR metadata with a stale base revision to require branch refresh.'
 );
 $partitionPullRequestsByTargetVersion = $updaterReflection->getMethod('partitionPullRequestsByTargetVersion');
@@ -2660,10 +2703,9 @@ $guard = new BranchRollbackGuard($branchGuardRoot, $fakeGitRunner);
 $guard->begin();
 $guard->trackBranch('codex/test-update');
 $guard->trackCleanupPath($branchGuardRoot . '/.wp-core-base/build/leftover');
-$fakeGitRunner->currentBranch = 'codex/test-update';
-$fakeGitRunner->currentRevision = 'new-sha';
-$fakeGitRunner->localBranches['codex/test-update'] = 'new-sha';
-$fakeGitRunner->remoteBranches['codex/test-update'] = 'new-sha';
+$fakeGitRunner->checkoutBranch('main', 'codex/test-update', true);
+$guard->recordCheckout('codex/test-update');
+$guard->commitAndPush('codex/test-update', 'Owned fixture mutation', ['owned.txt'], true);
 $fakeGitRunner->clean = false;
 $rollbackRaised = false;
 
@@ -2678,7 +2720,7 @@ $assert($fakeGitRunner->currentBranch === 'main', 'Expected branch rollback guar
 $assert(($fakeGitRunner->localBranches['codex/test-update'] ?? null) === 'old-local-sha', 'Expected branch rollback guard to restore the local automation branch revision.');
 $assert(($fakeGitRunner->remoteBranches['codex/test-update'] ?? null) === 'old-remote-sha', 'Expected branch rollback guard to restore the remote automation branch revision.');
 $assert(! file_exists($branchGuardRoot . '/.wp-core-base/build/leftover/temp.txt'), 'Expected branch rollback guard to clean tool-created untracked residue.');
-$assert(in_array('clean-untracked', $fakeGitRunner->actions, true), 'Expected branch rollback guard to clean untracked repository files during rollback.');
+$assert(! in_array('clean-untracked', $fakeGitRunner->actions, true) && in_array('restore-mutation-paths:owned.txt', $fakeGitRunner->actions, true), 'Expected rollback to restore only owned mutation paths without cleaning unrelated files.');
 
 $gitRunnerRoot = sys_get_temp_dir() . '/wporg-git-runner-' . bin2hex(random_bytes(4));
 mkdir($gitRunnerRoot, 0777, true);
@@ -2697,27 +2739,28 @@ $baselineRevision = run_process_or_fail($assert, $gitRunnerRoot, ['git', 'rev-pa
 run_process_or_fail($assert, $gitRunnerRoot, ['git', 'remote', 'set-url', 'origin', '/path/that/does/not/exist'], 'Expected to reconfigure origin to an invalid path for push-failure rollback testing.');
 file_put_contents($gitRunnerRoot . '/tracked.txt', "changed\n");
 $gitCommandRunner = new GitCommandRunner($gitRunnerRoot);
+$gitCommandRunner->expectRemoteRevision('main', $baselineRevision);
 $pushRollbackRaised = false;
 
 try {
     $gitCommandRunner->commitAndPush('main', 'Simulate push rollback', ['tracked.txt']);
 } catch (RuntimeException $exception) {
-    $pushRollbackRaised = str_contains($exception->getMessage(), 'branch was reset to ' . $baselineRevision);
+    $pushRollbackRaised = str_contains($exception->getMessage(), 'Local recovery commit') && str_contains($exception->getMessage(), 'was preserved');
 }
 
-$assert($pushRollbackRaised, 'Expected GitCommandRunner to report push failure rollback details including the baseline revision.');
+$assert($pushRollbackRaised, 'Expected GitCommandRunner to report a preserved recovery commit on ambiguous push failure.');
 $assert(
-    run_process_or_fail($assert, $gitRunnerRoot, ['git', 'rev-parse', 'HEAD'], 'Expected to resolve post-rollback revision.') === $baselineRevision,
-    'Expected GitCommandRunner to reset the local branch back to the baseline revision when push fails.'
+    run_process_or_fail($assert, $gitRunnerRoot, ['git', 'rev-parse', 'HEAD'], 'Expected to resolve preserved recovery revision.') !== $baselineRevision,
+    'Expected GitCommandRunner to preserve the local recovery commit when push outcome is unknown.'
 );
 $assert(
-    trim((string) file_get_contents($gitRunnerRoot . '/tracked.txt')) === 'baseline',
-    'Expected GitCommandRunner push-failure rollback to restore tracked file contents.'
+    trim((string) file_get_contents($gitRunnerRoot . '/tracked.txt')) === 'changed',
+    'Expected ambiguous push failure to preserve the committed payload for recovery.'
 );
 
 $lockRepoRoot = sys_get_temp_dir() . '/wporg-lock-timeout-' . bin2hex(random_bytes(4));
 mkdir($lockRepoRoot . '/.wp-core-base/build/locks', 0777, true);
-$lockPath = $lockRepoRoot . '/.wp-core-base/build/locks/mutation-test.lock';
+$lockPath = $lockRepoRoot . '/.wp-core-base/build/locks/mutation.lock';
 $lockHandle = fopen($lockPath, 'c+');
 $assert(is_resource($lockHandle), 'Expected lock timeout fixture to open lock file.');
 $assert(flock($lockHandle, LOCK_EX | LOCK_NB), 'Expected lock timeout fixture to acquire exclusive lock.');
@@ -2807,10 +2850,10 @@ touch($freshManagedDirectory, time());
 touch($unmanagedDirectory, time() - 600);
 $janitorResult = (new TempDirectoryJanitor(['wporg-update-'], 60, $janitorRoot))->cleanup();
 $assert(
-    in_array($staleManagedDirectory, $janitorResult['removed'], true),
-    'Expected TempDirectoryJanitor to remove stale managed temporary directories.'
+    $janitorResult['removed'] === [],
+    'Expected legacy prefix-only directories to remain outside owned temporary cleanup.'
 );
-$assert(! is_dir($staleManagedDirectory), 'Expected TempDirectoryJanitor to delete stale managed temporary directory trees.');
+$assert(is_dir($staleManagedDirectory), 'Expected legacy directory without ownership marker to remain untouched.');
 $assert(is_dir($freshManagedDirectory), 'Expected TempDirectoryJanitor to preserve managed temporary directories newer than max age.');
 $assert(is_dir($unmanagedDirectory), 'Expected TempDirectoryJanitor to ignore stale directories without recognized prefixes.');
 $assert($janitorResult['failed'] === [], 'Expected TempDirectoryJanitor cleanup contract test to complete without failures.');
@@ -2846,12 +2889,12 @@ $assert(isset($structuredLoggerPayload['operation_id']) && preg_match('/^[a-f0-9
 $assert(is_int($structuredLoggerPayload['duration_ms'] ?? null), 'Expected StructuredLogger contract output to include integer duration_ms when startedAt is provided.');
 $assert(($structuredLoggerPayload['context']['contract'] ?? null) === 'structured-logger', 'Expected StructuredLogger contract output to include context payload.');
 
-run_blocker_state_tests($assert);
-run_followup_integration_tests($assert);
+$suites->run('blocker_states.php', static fn () => run_blocker_state_tests($assert));
+$suites->run('followups.php', static fn () => run_followup_integration_tests($assert));
 
-run_security_policy_contract_tests($assert, $repoRoot);
+$suites->run('security_policy_contracts.php', static fn () => run_security_policy_contract_tests($assert, $repoRoot));
 
-run_security_framework_contract_tests(
+$suites->run('security_framework_contracts.php', static fn () => run_security_framework_contract_tests(
     $assert,
     $repoRoot,
     $config,
@@ -2861,9 +2904,9 @@ run_security_framework_contract_tests(
     $fixtureDir,
     $coreClient,
     $renderer
-);
+));
 
-run_dependency_authoring_contract_tests($assert, [
+$suites->run('dependency_authoring_contracts.php', static fn () => run_dependency_authoring_contract_tests($assert, [
     'repoRoot' => $repoRoot,
     'writeManifest' => $writeManifest,
     'createPluginArchive' => $createPluginArchive,
@@ -2874,22 +2917,34 @@ run_dependency_authoring_contract_tests($assert, [
     'gitHubReleaseClient' => $gitHubReleaseClient,
     'premiumCredentialsStore' => $premiumCredentialsStore,
     'supportClient' => $supportClient,
-]);
+]));
 
-run_generic_json_contract_tests($assert, [
+$suites->run('generic_json_contracts.php', static fn () => run_generic_json_contract_tests($assert, [
     'repoRoot' => $repoRoot,
     'writeManifest' => $writeManifest,
     'createPluginArchive' => $createPluginArchive,
     'httpClient' => $httpClient,
-]);
+]));
 
-run_cli_json_contract_tests(
+$suites->run('cli_json_contracts.php', static fn () => run_cli_json_contract_tests(
     $assert,
     $repoRoot,
     $runtimeInspector,
     $currentFrameworkVersion,
     $writeManifest,
     $writePremiumProvider
-);
+));
 
+$suites->run('seam_contracts.php', static fn () => run_seam_contract_tests($assert, $repoRoot));
+$suites->run('concurrency_contracts.php', static fn () => run_concurrency_contract_tests($assert, $repoRoot));
+$suites->run('filesystem_hardening_contracts.php', static fn () => run_filesystem_hardening_contract_tests($assert));
+$suites->run('release_distribution_contracts.php', static fn () => run_release_distribution_contract_tests($assert, $repoRoot));
+$suites->run('core_ownership_contracts.php', static fn () => run_core_ownership_contract_tests($assert, $repoRoot));
+$suites->run('update_health_contracts.php', static fn () => run_update_health_contract_tests($assert));
+$suites->run('wordpress_smoke_contracts.php', static fn () => run_wordpress_smoke_contract_tests($assert, $repoRoot));
+$suites->run('dependency_recovery_contracts.php', static fn () => run_dependency_recovery_contract_tests($assert));
+$suites->run('http_security_contracts.php', static fn () => run_http_security_contract_tests($assert, $repoRoot));
+$suites->run('configuration_planning_contracts.php', static fn () => run_configuration_planning_contract_tests($assert, $repoRoot));
+$suites->run('test_runner_contracts.php', static fn () => run_test_runner_contract_tests($assert, $repoRoot));
+$suites->complete();
 fwrite(STDOUT, "All updater tests passed.\n");

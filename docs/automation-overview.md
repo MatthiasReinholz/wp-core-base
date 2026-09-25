@@ -11,14 +11,15 @@ The framework now revolves around two explicit metadata files:
 - `.wp-core-base/manifest.php`
 - `.wp-core-base/framework.php`
 
-That manifest drives:
+The runtime manifest drives:
 
 - repository profile
 - root paths
 - core management mode
 - runtime staging policy
 - dependency ownership and update eligibility
-- installed framework version and vendored distribution path
+
+The separate framework lock file records the installed framework version, authoritative release source, vendored distribution path, and framework-managed file checksums.
 
 The legacy `.github/wporg-updates.php` model is no longer the primary configuration surface.
 
@@ -101,7 +102,7 @@ Generic JSON metadata endpoints are supported through:
 
 This source is latest-only and does not support forum sync or checksum-sidecar verification today.
 
-The download flow never forwards authorization headers to redirected CDN URLs.
+Every HTTPS redirect is validated. Origin changes strip caller headers except a small representation allowlist, including authorization, cookies, and custom premium tokens; a return to the original origin does not restore them. Initial hosted-release credentials are bound to the configured API origin, including its port. Sidecar GETs explicitly enable redirects with a one MiB response ceiling; normal metadata requests do not follow redirects implicitly. See [security-model.md](security-model.md).
 
 Premium source handling uses one fixed credentials env var:
 
@@ -142,7 +143,7 @@ Rules:
 - support topics refresh incrementally for WordPress.org plugins
 - when blocker verification is degraded by automation/API failures, later PRs stay blocked until verification succeeds again
 
-Framework PRs use the same queueing behavior, but operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`.
+Framework PRs use the same queueing behavior, but operate on the vendored `wp-core-base` snapshot and `.wp-core-base/framework.php`, plus eligible framework-managed downstream files. Baseline WordPress/plugin metadata in a framework release does not upgrade those downstream runtime dependencies.
 
 Core and framework automation now follow the same stale/no-op rules as dependency PRs:
 
@@ -162,6 +163,12 @@ auto-merge, or merges a PR. A rejected update may be proposed again on a later
 scheduled sync while the manifest still declares an older managed version.
 
 Framework release artifacts are now also built through one explicit builder path instead of repeated workflow-local shell snippets. That keeps artifact exclusion rules and release hygiene consistent across CI, finalize, and manual recovery workflows.
+
+## Serialization and operational health
+
+Repository-dependent commands acquire the same checkout lock before loading manifests or provider registrations. Git pushes and rollback use exact expected remote revisions; a failed or uncertain write does not grant ownership of a concurrently changed ref. Failed filesystem recovery retains a private workspace for inspection. See the [operations guide](operations.md) for lock timeouts, recovery manifests, and manual recovery limits.
+
+The upstream GitHub health workflow reports stalled managed PRs, required-check failures or absence, workflow approval requirements, and stale source schedules. It is read-only and does not approve or merge updates. The maintainer script and response thresholds are documented in [automation health](operations.md#automation-health-and-response-targets); this monitor is separate from the scaffolded update and reconciliation workflows.
 
 ## Scaffolding
 
@@ -208,7 +215,7 @@ Recommended discipline:
 
 ## Tests
 
-Local verification is intentionally lightweight and self-contained:
+The PHP regression suite includes isolated fixtures for filesystems, real Git remotes, and local trusted TLS transport:
 
 ```bash
 php tools/wporg-updater/tests/run.php
@@ -225,3 +232,8 @@ That test suite covers:
 - scaffolding
 - framework install behavior for vendored downstreams
 - migration guardrails
+- lock contention, exact-revision leases, ambiguous pushes, and scoped rollback
+- redirect policy, credential stripping, retry behavior, and signed payload identity
+- archive/path validation, failed recovery preservation, and release inventory
+
+See [contributing.md](contributing.md) for the full quality gates and a separate real WordPress/database smoke fixture.

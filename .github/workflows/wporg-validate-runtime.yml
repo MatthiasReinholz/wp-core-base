@@ -25,7 +25,7 @@ jobs:
           - php-version: '8.4'
             experimental: false
           - php-version: '8.5'
-            experimental: true
+            experimental: false
     continue-on-error: ${{ matrix.experimental }}
     steps:
       - name: Check out repository
@@ -35,7 +35,7 @@ jobs:
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with:
           php-version: ${{ matrix.php-version }}
-          coverage: none
+          coverage: ${{ matrix.php-version == '8.4' && 'pcov' || 'none' }}
 
       - name: Run doctor
         env:
@@ -50,13 +50,26 @@ jobs:
         run: php scripts/ci/check_workflow_examples_and_permissions.php
 
       - name: Run test suite
-        run: php tools/wporg-updater/tests/run.php
+        env:
+          TEST_PHP_VERSION: ${{ matrix.php-version }}
+        run: |
+          mkdir -p .wp-core-base/build
+          export WP_CORE_BASE_TEST_REPORT=.wp-core-base/build/test-report.json
+          if [ "$TEST_PHP_VERSION" = '8.4' ]; then
+            export WP_CORE_BASE_COVERAGE_FILE=.wp-core-base/build/coverage-observed.json
+          fi
+          php tools/wporg-updater/tests/run.php
+
+      - name: Check documentation contracts
+        run: php scripts/ci/check_documentation.php
 
       - name: Stage runtime payload
         run: php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 
   quality:
     runs-on: ubuntu-latest
+    env:
+      QUALITY_TOOLS: .wp-core-base/build/quality-tools
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -64,31 +77,26 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with:
-          php-version: '8.3'
+          php-version: '8.4'
           coverage: none
-          tools: phpstan
 
-      - name: Install actionlint
-        run: |
-          curl -fsSL -o /tmp/actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz
-          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
-
-      - name: Install shellcheck
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
+      - name: Install verified pinned quality tools
+        run: bash scripts/ci/install_quality_tools.sh "$QUALITY_TOOLS"
 
       - name: Run actionlint
-        run: /tmp/actionlint -color
+        run: '"$QUALITY_TOOLS/actionlint" -color'
 
       - name: Run shellcheck
-        run: shellcheck scripts/ci/*.sh
+        run: '"$QUALITY_TOOLS/shellcheck" scripts/ci/*.sh'
 
       - name: Test release CI helper scripts
         run: bash scripts/ci/test_release_scripts.sh
 
       - name: Run PHPStan
-        run: phpstan analyse --configuration=phpstan.neon.dist --no-progress
+        run: php "$QUALITY_TOOLS/phpstan.phar" analyse --configuration=phpstan.neon.dist --memory-limit=1G --no-progress
+
+      - name: Check typed policy boundaries
+        run: php "$QUALITY_TOOLS/phpstan.phar" analyse --configuration=phpstan-boundaries.neon.dist --memory-limit=1G --no-progress
 
       - name: Build release verification fixture
         run: |
@@ -134,4 +142,46 @@ jobs:
           coverage: none
 
       - name: Verify downstream fixture
-        run: php scripts/ci/verify_downstream_fixture.php --profile=${{ matrix.profile }}
+        env:
+          FIXTURE_PROFILE: ${{ matrix.profile }}
+        run: php scripts/ci/verify_downstream_fixture.php --profile="$FIXTURE_PROFILE"
+
+  wordpress-smoke:
+    name: WordPress smoke (${{ matrix.profile }}, PHP ${{ matrix.php-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile: [full-core, content-only]
+        php-version: ['8.4', '8.5']
+    services:
+      database:
+        image: mariadb:11.4@sha256:70cc072b29b4a89ae07abb2d4da2c64678a7f2dfe092751bb51c87d67dc1338b
+        env:
+          MARIADB_ROOT_PASSWORD: disposable-root-password
+          MARIADB_DATABASE: wp_core_base_smoke
+          MARIADB_USER: smoke
+          MARIADB_PASSWORD: disposable-smoke-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: ${{ matrix.php-version }}
+          extensions: curl, dom, mbstring, mysqli, openssl, simplexml, zip
+          coverage: none
+      - name: Verify staged WordPress runtime
+        env:
+          SMOKE_PROFILE: ${{ matrix.profile }}
+          WP_CORE_BASE_SMOKE_DB_HOST: 127.0.0.1:3306
+          WP_CORE_BASE_SMOKE_DB_NAME: wp_core_base_smoke
+          WP_CORE_BASE_SMOKE_DB_USER: smoke
+          WP_CORE_BASE_SMOKE_DB_PASSWORD: disposable-smoke-password
+        run: php scripts/ci/verify_wordpress_runtime.php --profile="$SMOKE_PROFILE"

@@ -32,6 +32,7 @@ The manifest returns a PHP array with these sections:
 - `automation`
 - `security`
 - `dependencies`
+- `extensions` (optional namespaced downstream data)
 
 ## `profile`
 
@@ -544,3 +545,26 @@ Useful CLI helpers:
 
 Use [examples/downstream-manifest.php](examples/downstream-manifest.php) as the GitHub-first starting point.
 Use [examples/downstream-manifest-gitlab.php](examples/downstream-manifest-gitlab.php) when the downstream automation host is GitLab.
+
+## Validation and extension data
+
+Every dependency must have a unique generated `component_key`, including in relaxed ownership mode. Relaxed mode allows migration discovery; it does not make duplicate automation identities safe.
+
+The `security` and dependency `source_config` sections reject unknown keys and invalid value types rather than silently disabling a misspelled policy. Store custom downstream metadata in namespaced maps under top-level `extensions`, `security.extensions`, or `source_config.extensions`. These maps survive manifest normalization and formatting. They do not alter built-in security or source behavior.
+
+
+For example, metadata owned by a downstream team can use:
+
+```php
+'extensions' => [
+    'example-team' => [
+        'deployment_group' => 'storefront',
+    ],
+],
+```
+
+Namespace keys must be non-empty strings. Values may contain arrays, scalar values, and `null`; objects, resources, non-finite numbers, and excessive nesting are rejected. No credentials belong in these maps. Custom premium adapter fields formerly placed directly under `source_config` must move into `source_config.extensions.<provider>` and be read there by the adapter. The existing built-in `provider_product_id` remains available for its documented purpose.
+
+Unknown-key rejection is explicit for `security` and dependency `source_config`; do not assume every historical section is a closed schema. Run `doctor` after manual edits and use `format-manifest` to confirm normalized extension data is preserved.
+
+`runtime.stage_dir` and the `stage-runtime --output` override share the same path validation. They must identify a canonical relative directory outside live source and protected control paths. See [staging publication](operations.md#commands-locks-and-staging-publication) for the failure and concurrency contract.

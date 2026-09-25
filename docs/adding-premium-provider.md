@@ -324,10 +324,13 @@ vendor/wp-core-base/bin/wp-core-base add-dependency \
 
 ## Minimal Provider Skeleton
 
-The scaffold gives you the class shape. A minimal provider usually looks like this:
+The scaffold gives you the class shape. This latest-only example assumes the API returns `latest_version`, `latest_release_at`, and a download URL. Adapt those fields to the actual vendor response and declare only the hosts that vendor uses:
 
 ```php
-final class ExampleVendorManagedSource extends AbstractPremiumManagedSource
+use WpOrgPluginUpdater\AbstractPremiumManagedSource;
+use WpOrgPluginUpdater\HistoricalVersionSource;
+
+final class ExampleVendorManagedSource extends AbstractPremiumManagedSource implements HistoricalVersionSource
 {
     public function key(): string
     {
@@ -337,6 +340,21 @@ final class ExampleVendorManagedSource extends AbstractPremiumManagedSource
     protected function requiredCredentialFields(): array
     {
         return ['license_key'];
+    }
+
+    protected function allowedApiHosts(): array
+    {
+        return ['vendor.example.com'];
+    }
+
+    protected function allowedDownloadHosts(): array
+    {
+        return ['vendor.example.com'];
+    }
+
+    public function supportsHistoricalVersions(array $dependency): bool
+    {
+        return false;
     }
 
     public function fetchCatalog(array $dependency): array
@@ -352,9 +370,13 @@ final class ExampleVendorManagedSource extends AbstractPremiumManagedSource
 
     public function releaseDataForVersion(array $dependency, array $catalog, string $targetVersion, string $fallbackReleaseAt): array
     {
+        if ($targetVersion !== (string) $catalog['latest_version']) {
+            throw new \RuntimeException('This vendor endpoint only resolves its latest version.');
+        }
+
         return [
             'version' => $targetVersion,
-            'release_at' => (string) ($catalog['latest_release_at'] ?? $fallbackReleaseAt),
+            'release_at' => (string) $catalog['latest_release_at'],
             'download_url' => (string) $catalog['download_url'],
             'source_reference' => 'https://vendor.example.com/account/downloads',
         ];
@@ -362,12 +384,17 @@ final class ExampleVendorManagedSource extends AbstractPremiumManagedSource
 
     public function downloadReleaseToFile(array $dependency, array $releaseData, string $destination): void
     {
-        $this->downloadBinary((string) $releaseData['download_url'], $destination);
+        $credentials = $this->credentialsFor($dependency, $this->requiredCredentialFields());
+        $this->downloadBinary(
+            (string) $releaseData['download_url'],
+            $destination,
+            ['Authorization' => 'Bearer ' . $credentials['license_key']]
+        );
     }
 }
 ```
 
-That is enough for a downstream repo to implement a provider for any premium source with a deterministic HTTP contract, including vendors that expose a latest-version endpoint plus an authenticated ZIP download.
+The example authenticates metadata and the initial same-origin download. A cross-origin redirect strips that header, so a vendor that uses a CDN must supply a signed public download URL or another explicitly designed credential flow. Test the actual vendor contract, including release identity and authentication, before making the entry managed.
 
 ## Validation
 
@@ -384,3 +411,24 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-
 - the provider class can be loaded
 - the provider class implements the required interface
 - premium credentials are present enough for that provider's validation logic
+
+## Optional historical-release capability
+
+Adapters that implement `HistoricalVersionSource` explicitly declare `supportsHistoricalVersions(array $dependency): bool`. Return `false` for a latest-only service so the updater does not request a queued historical release that the provider cannot resolve. Existing adapters without this optional interface retain the historical behavior for compatibility. `SourceCatalog` and `SourceRelease` validate the minimum non-empty version and ISO timestamp contract while preserving additional provider payload fields.
+
+## Credential Origins
+
+Credential-bearing requests bind to their initial approved HTTPS origin, including its port. After a redirect changes origin, authorization, cookies, and custom headers are removed for the entire remaining chain, even if the chain returns to the initial origin. Premium adapters can declare `allowedCredentialOrigins()` for explicit nonstandard-port download origins; metadata request origins are retained only for that adapter instance. Never derive credential allowlists from untrusted redirect destinations.
+
+`allowedApiHosts()` and `allowedDownloadHosts()` authorize destination hosts. They do not authorize forwarding a credential to every port or CDN on those lists. The default credential origins are HTTPS port 443 on declared API hosts. A provider that needs credentials on a nonstandard port can override:
+
+```php
+protected function allowedCredentialOrigins(): array
+{
+    return ['https://vendor.example.com:8443'];
+}
+```
+
+Include only origins explicitly trusted to receive that provider's credentials. A permitted metadata request records its exact origin for the current adapter instance; this is not persistent trust state. Cross-origin redirects still strip credentials even when the destination is another declared credential origin. For signed download URLs on a CDN, pass no API credential headers.
+
+Declare both destination host lists in new providers. A missing host allowlist remains a compatibility warning, not assurance that arbitrary endpoints are appropriate. Historical capability declarations and credential policy solve different problems; a latest-only adapter should implement `HistoricalVersionSource` and return `false`, while retaining the normal source interface. Its release record must resolve the requested version exactly and include an ISO-8601 timestamp with timezone, for example `2026-09-25T12:00:00Z`.

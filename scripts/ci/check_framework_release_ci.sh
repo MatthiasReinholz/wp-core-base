@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ci/release_http.sh
+source "${SCRIPT_DIR}/release_http.sh"
+
 REPOSITORY="${1:-}"
 VERSION="${2:-}"
 COMMIT_SHA="${3:-}"
@@ -36,11 +40,7 @@ if ! [[ "${POLL_INTERVAL_SECONDS}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 fi
 
 github_api_get() {
-  curl -fsSL \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$1"
+  release_api_get_json "$1"
 }
 
 pulls_json="$(

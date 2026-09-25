@@ -10,153 +10,191 @@ use ZipArchive;
 final class FrameworkReleaseArtifactBuilder
 {
     private const SNAPSHOT_ROOT = 'wp-core-base';
+    // Fixed DOS-compatible time, independent of checkout, timezone, and build time.
+    private const ZIP_TIMESTAMP = 946684800;
 
-    /**
-     * @return list<string>
-     */
+    /** @return list<string> Compatibility list for older downstream fixture callers. */
     public static function excludedPaths(): array
     {
-        return [
-            '.git',
-            '.github',
-            '.wp-core-base/build',
-            'dist',
-            'scripts/ci',
-            'tools/wporg-updater/.tmp',
-            'tools/wporg-updater/tests',
-        ];
+        return ['.git', '.github', '.wp-core-base/build', 'dist', 'scripts/ci', 'tools/wporg-updater/.tmp', 'tools/wporg-updater/tests'];
     }
 
-    public function __construct(
-        private readonly string $repoRoot,
-    ) {
-    }
+    public function __construct(private readonly string $repoRoot) {}
 
-    /**
-     * @return array<string, mixed>
-     */
-    public function build(string $artifactPath, ?string $checksumPath = null): array
+    /** @return array<string, mixed> */
+    public function build(string $artifactPath, ?string $checksumPath = null, ?string $sourceRevision = null, bool $fixture = false): array
     {
-        $artifactDirectory = dirname($artifactPath);
-
-        if (! is_dir($artifactDirectory) && ! mkdir($artifactDirectory, 0775, true) && ! is_dir($artifactDirectory)) {
-            throw new RuntimeException(sprintf('Unable to create artifact directory: %s', $artifactDirectory));
+        $revision = $fixture ? 'fixture' : trim($this->git(['rev-parse', '--verify', '--end-of-options', ($sourceRevision ?? 'HEAD') . '^{commit}']));
+        if ($fixture && $this->isGitWorktree()) {
+            throw new RuntimeException('Fixture release builds require an explicit non-Git fixture directory.');
         }
-
-        $temporaryRoot = sys_get_temp_dir() . '/wp-core-base-artifact-' . bin2hex(random_bytes(6));
-        $snapshotRoot = $temporaryRoot . '/' . self::SNAPSHOT_ROOT;
-        $runtimeInspector = new RuntimeInspector(Config::load($this->repoRoot)->runtime);
-
+        if (! $fixture && preg_match('/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/D', $revision) !== 1) {
+            throw new RuntimeException('Official release builds require an immutable Git commit.');
+        }
+        $directory = dirname($artifactPath);
+        if (! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) {
+            throw new RuntimeException(sprintf('Unable to create artifact directory: %s', $directory));
+        }
+        $workspace = TempWorkspace::create($this->repoRoot, 'artifact');
+        $snapshot = $workspace->path() . '/' . self::SNAPSHOT_ROOT;
+        $temporaryArtifact = $directory . '/.wp-core-base-artifact-' . bin2hex(random_bytes(8)) . '.zip';
         try {
-            $this->copySnapshotTo($snapshotRoot);
-
-            $zip = new ZipArchive();
-
-            if ($zip->open($artifactPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-                throw new RuntimeException(sprintf('Unable to create release artifact archive: %s', $artifactPath));
+            if ($fixture) {
+                $this->copySnapshotTo($snapshot);
+            } else {
+                $this->copyCommitTo($snapshot, $revision);
             }
-
-            $this->addDirectoryToZip($zip, $snapshotRoot, self::SNAPSHOT_ROOT);
-            $zip->close();
-
-            $resolvedChecksumPath = $checksumPath ?? ($artifactPath . '.sha256');
-            (new AtomicFileWriter())->write(
-                $resolvedChecksumPath,
-                sprintf("%s  %s\n", FileChecksum::sha256($artifactPath), basename($artifactPath))
-            );
-
-            return [
-                'artifact' => $artifactPath,
-                'checksum_file' => $resolvedChecksumPath,
-                'snapshot_root' => self::SNAPSHOT_ROOT,
-                'excluded_paths' => self::excludedPaths(),
-            ];
+            FrameworkReleasePayload::writeInventory($snapshot, $revision);
+            FrameworkReleasePayload::verify($snapshot);
+            $this->writeArchive($snapshot, $temporaryArtifact);
+            $resolvedChecksum = $checksumPath ?? ($artifactPath . '.sha256');
+            $this->publishArtifactPair($temporaryArtifact, $artifactPath, $resolvedChecksum);
+            return ['artifact' => $artifactPath, 'checksum_file' => $resolvedChecksum, 'snapshot_root' => self::SNAPSHOT_ROOT, 'source_revision' => $revision, 'format' => FrameworkReleasePayload::FORMAT, 'excluded_paths' => self::excludedPaths()];
         } finally {
-            $runtimeInspector->clearPath($temporaryRoot);
+            if (is_file($temporaryArtifact)) {
+                unlink($temporaryArtifact);
+            }
+            try {
+                $workspace->close();
+            } catch (\Throwable $cleanupFailure) {
+                fwrite(STDERR, sprintf("[warn] Release scratch cleanup failed: %s\n", $cleanupFailure->getMessage()));
+            }
         }
     }
 
+    private function writeArchive(string $snapshot, string $temporaryArtifact): void
+    {
+        // libzip encodes DOS timestamps in the process timezone, independently
+        // of PHP's date timezone. Keep this synchronous CLI operation in UTC.
+        $previousTimezone = getenv('TZ');
+        if (! putenv('TZ=UTC')) {
+            throw new RuntimeException('Unable to establish reproducible ZIP timezone.');
+        }
+        try {
+            $zip = new ZipArchive();
+            if ($zip->open($temporaryArtifact, ZipArchive::CREATE | ZipArchive::EXCL) !== true) {
+                throw new RuntimeException('Unable to create temporary release archive.');
+            }
+            try {
+                $paths = array_keys(FrameworkReleasePayload::inventory($snapshot));
+                $paths[] = FrameworkReleasePayload::INVENTORY;
+                sort($paths, SORT_STRING);
+                foreach ($paths as $path) {
+                    $name = self::SNAPSHOT_ROOT . '/' . $path;
+                    if (! $zip->addFile($snapshot . '/' . $path, $name)
+                        || ! $zip->setMtimeName($name, self::ZIP_TIMESTAMP)
+                        || ! $zip->setCompressionName($name, ZipArchive::CM_STORE)
+                        || ! $zip->setExternalAttributesName($name, ZipArchive::OPSYS_UNIX, (($path === 'bin/wp-core-base' ? 0100755 : 0100644) << 16))) {
+                        throw new RuntimeException(sprintf('Unable to add deterministic release entry: %s', $path));
+                    }
+                }
+            } finally {
+                if (! $zip->close()) {
+                    throw new RuntimeException('Unable to finalize release archive.');
+                }
+            }
+        } finally {
+            if (! putenv($previousTimezone === false ? 'TZ' : 'TZ=' . $previousTimezone)) {
+                throw new RuntimeException('Unable to restore process timezone after ZIP creation.');
+            }
+        }
+    }
+
+    /** Explicit development-fixture copy; official builds read committed Git objects instead. */
     public function copySnapshotTo(string $destination): void
     {
-        $inspector = new RuntimeInspector(Config::load($this->repoRoot)->runtime);
-        $inspector->clearPath($destination);
-        $this->copyPath($this->repoRoot, $destination, '');
-    }
-
-    private function copyPath(string $source, string $destination, string $relativePath): void
-    {
-        if ($relativePath !== '' && $this->isExcluded($relativePath)) {
-            return;
+        if (file_exists($destination) || is_link($destination)) {
+            throw new RuntimeException('Snapshot fixture destination must not already exist.');
         }
-
-        if (is_link($source)) {
-            throw new RuntimeException(sprintf('Symlink detected while building release snapshot: %s', $relativePath === '' ? '.' : $relativePath));
-        }
-
-        if (is_file($source)) {
-            $directory = dirname($destination);
-
-            if (! is_dir($directory) && ! mkdir($directory, 0775, true) && ! is_dir($directory)) {
-                throw new RuntimeException(sprintf('Unable to create directory while building release snapshot: %s', $directory));
-            }
-
-            if (! copy($source, $destination)) {
-                throw new RuntimeException(sprintf('Unable to copy %s into release snapshot.', $relativePath));
-            }
-
-            return;
-        }
-
-        if (! is_dir($source)) {
-            return;
-        }
-
-        if (! is_dir($destination) && ! mkdir($destination, 0775, true) && ! is_dir($destination)) {
-            throw new RuntimeException(sprintf('Unable to create snapshot directory: %s', $destination));
-        }
-
-        foreach (scandir($source) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..') {
+        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->repoRoot, \FilesystemIterator::SKIP_DOTS));
+        foreach ($iterator as $file) {
+            $path = str_replace('\\', '/', $iterator->getSubPathName());
+            if (! FrameworkReleasePayload::allows($path)) {
                 continue;
             }
-
-            $childRelative = $relativePath === '' ? $entry : $relativePath . '/' . $entry;
-            $this->copyPath($source . '/' . $entry, $destination . '/' . $entry, $childRelative);
+            if ($file->isLink() || ! $file->isFile()) {
+                throw new RuntimeException(sprintf('Release fixture contains a non-regular allowed input: %s', $path));
+            }
+            $contents = file_get_contents($file->getPathname());
+            if (! is_string($contents)) {
+                throw new RuntimeException(sprintf('Unable to read release fixture: %s', $path));
+            }
+            $this->writePayloadFile($destination, $path, $contents);
         }
+        FrameworkReleasePayload::writeInventory($destination, 'fixture');
     }
 
-    private function addDirectoryToZip(ZipArchive $zip, string $sourceRoot, string $archiveRoot): void
+    private function copyCommitTo(string $destination, string $revision): void
     {
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($sourceRoot, \FilesystemIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::SELF_FIRST
-        );
-
-        $zip->addEmptyDir($archiveRoot);
-
-        foreach ($iterator as $item) {
-            $relativePath = str_replace('\\', '/', $iterator->getSubPathName());
-            $archivePath = $archiveRoot . '/' . $relativePath;
-
-            if ($item->isDir()) {
-                $zip->addEmptyDir($archivePath);
+        foreach (explode("\0", $this->git(['ls-tree', '-rz', '--full-tree', $revision])) as $entry) {
+            if ($entry === '') {
                 continue;
             }
-
-            if (! $zip->addFile($item->getPathname(), $archivePath)) {
-                throw new RuntimeException(sprintf('Unable to add %s to release artifact.', $relativePath));
+            if (preg_match('/^([0-7]{6}) (blob|tree|commit) ([a-f0-9]+)\t(.+)$/sD', $entry, $match) !== 1) {
+                throw new RuntimeException('Unable to parse committed release tree.');
             }
+            $path = $match[4];
+            if (! FrameworkReleasePayload::allows($path)) {
+                continue;
+            }
+            if (! in_array($match[1], ['100644', '100755'], true) || $match[2] !== 'blob') {
+                throw new RuntimeException(sprintf('Release input is not a regular committed file: %s', $path));
+            }
+            $this->writePayloadFile($destination, $path, $this->git(['cat-file', 'blob', $match[3]]));
         }
     }
 
-    private function isExcluded(string $relativePath): bool
+    private function writePayloadFile(string $root, string $path, string $contents): void
     {
-        foreach (self::excludedPaths() as $excludedPath) {
-            if ($relativePath === $excludedPath || str_starts_with($relativePath, $excludedPath . '/')) {
-                return true;
-            }
+        $directory = dirname($root . '/' . $path);
+        if (! is_dir($directory) && ! mkdir($directory, 0755, true) && ! is_dir($directory)) {
+            throw new RuntimeException(sprintf('Unable to create payload directory: %s', $directory));
         }
+        if (file_put_contents($root . '/' . $path, $contents) === false) {
+            throw new RuntimeException(sprintf('Unable to write payload file: %s', $path));
+        }
+        chmod($root . '/' . $path, $path === 'bin/wp-core-base' ? 0755 : 0644);
+    }
 
-        return false;
+    private function publishArtifactPair(string $temporary, string $artifact, string $checksum): void
+    {
+        if ($artifact === $checksum || is_link($artifact) || is_link($checksum)) {
+            throw new RuntimeException('Artifact and checksum must be distinct regular file destinations.');
+        }
+        $previousChecksum = is_file($checksum) ? file_get_contents($checksum) : null;
+        if ($previousChecksum === false) {
+            throw new RuntimeException('Unable to preserve previous checksum.');
+        }
+        (new AtomicFileWriter())->write($checksum, sprintf("%s  %s\n", FileChecksum::sha256($temporary), basename($artifact)));
+        if (! rename($temporary, $artifact)) {
+            if (is_string($previousChecksum)) {
+                (new AtomicFileWriter())->write($checksum, $previousChecksum);
+            } else {
+                unlink($checksum);
+            }
+            throw new RuntimeException('Unable to publish completed release artifact; previous artifact preserved.');
+        }
+    }
+
+    private function isGitWorktree(): bool
+    {
+        try { return trim($this->git(['rev-parse', '--is-inside-work-tree'])) === 'true'; }
+        catch (RuntimeException) { return false; }
+    }
+
+    /** @param list<string> $arguments */
+    private function git(array $arguments): string
+    {
+        $process = proc_open(['git', '-C', $this->repoRoot, ...$arguments], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (! is_resource($process)) {
+            throw new RuntimeException('Unable to read immutable release source.');
+        }
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]); fclose($pipes[2]);
+        if (proc_close($process) !== 0 || ! is_string($stdout)) {
+            throw new RuntimeException('Official release source Git command failed: ' . trim((string) $stderr));
+        }
+        return $stdout;
     }
 }

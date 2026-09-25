@@ -161,6 +161,7 @@ final class GitLabReleaseClient
 
         $this->httpClient->downloadToFileWithOptions($assetUrl, $destination, $this->headers($dependency), [
             'allowed_redirect_hosts' => $this->allowedDownloadHosts($dependency),
+            'credential_origin' => $this->apiBase($dependency),
             'strip_auth_on_cross_origin_redirect' => true,
             'max_download_bytes' => 512 * 1024 * 1024,
         ]);
@@ -203,8 +204,10 @@ final class GitLabReleaseClient
 
         $checksumContents = $this->httpClient->getWithOptions($assetUrl, $this->headers($dependency), [
             'allowed_redirect_hosts' => $this->allowedDownloadHosts($dependency),
+            'credential_origin' => $this->apiBase($dependency),
             'strip_auth_on_cross_origin_redirect' => true,
             'max_body_bytes' => 1024 * 1024,
+            'follow_redirects' => true,
         ]);
 
         return FileChecksum::extractSha256ForAsset($checksumContents, $expectedAssetName);

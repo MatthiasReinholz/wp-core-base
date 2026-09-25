@@ -190,7 +190,7 @@ You can extend them with extra runtime-bearing directories under the content roo
 
 ## PR Blocker Behavior
 
-The framework uses one PR per dependency.
+Each update PR covers one dependency, and there is one live PR per dependency/version pair. Later release lines can have separate blocked PRs.
 
 If a dependency already has an open PR:
 

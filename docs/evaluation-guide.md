@@ -198,6 +198,10 @@ Then converge toward `strict`.
 - recommending `relaxed` as a permanent state
 - ignoring unsupported dependency source types
 
+## Evidence When Comparing Alternatives
+
+Identify the exact alternative repository/version and compare equivalent downstream workflows before ranking tools. Use [evaluating-alternatives.md](evaluating-alternatives.md) for the Woo Release comparison boundary, measurable criteria, and package-cost harness. The benchmark measures distribution cost; application throughput and operational review effort require separate evidence.
+
 ## Related Docs
 
 - [concepts.md](concepts.md)
