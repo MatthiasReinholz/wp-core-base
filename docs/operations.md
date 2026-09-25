@@ -105,6 +105,12 @@ php scripts/ci/check_update_health.php --repo=owner/repository --json --fail-on-
 
 Authenticate the GitHub CLI with read access to the repository's PRs, Actions, and rules. This is a maintainer utility in the source repository, not a bundled downstream CLI command or a GitLab monitor. The upstream `wporg-update-health.yml` workflow uses the same read-only report. The script refuses to report health when required input cannot be established, including absent effective required checks or missing scheduled-run history.
 
+The report covers open PRs and scheduled sync health. It does not inventory
+closed-PR cleanup runs or orphan branches, so a healthy result does not establish
+that every generated branch was removed. After closing several automation PRs,
+check each corresponding cleanup job and replay any missed close event as
+described under [blocked PRs](#blocked-prs).
+
 The monitor scopes PR runs to the current head commit and branch, then selects the latest execution of each workflow and event. Scheduled-run checks query a recent time window and select by timestamp instead of assuming the first API result is current. Earlier blocked or failed executions do not override their replacements.
 
 Default signals are:
@@ -169,6 +175,30 @@ Closing any recognized automation PR also removes its generated same-repository
 branch. This applies to merged, manually rejected, stale, duplicate, and
 superseded PRs. It does not merge or approve anything; it only performs
 housekeeping after the close decision.
+
+Each closed PR has its own cleanup concurrency group, so closing several PRs
+cannot replace another PR's pending cleanup. Only the `sync` job shares the
+updater's `wp-core-base-dependency-sync` group. Sync can coalesce pending runs
+because every run rereads the complete open-PR state; cleanup must retain each
+individual close event. GitHub's `cancel-in-progress: false` preserves an active
+run, but does not preserve every pending run in a shared group.
+
+If a historical cleanup run was cancelled before its job started, rerun that
+specific closed-PR workflow run and wait for completion before replaying another.
+Reruns retain the original event revision and can therefore retain the old shared
+queue. GitHub permits reruns for 30 days after the initial run; see
+[rerunning workflows](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs).
+A manual reconciliation dispatch runs sync; it does not recover individual
+missed cleanup events.
+
+For older or unavailable runs, use a trusted, current default-branch checkout
+and configured GitHub credentials to run
+`php tools/wporg-updater/bin/wporg-updater.php managed-pr-cleanup --repo-root=. --pr-number=123`,
+replacing `123` with the verified closed PR number. In a vendored downstream, use
+`php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php managed-pr-cleanup --repo-root=. --pr-number=123`.
+The command rechecks current PR metadata and deletes only the unchanged managed
+branch using its expected revision. Never delete a branch merely because its
+name looks stale.
 
 Closing an update PR is not a permanent version pin. If the manifest still
 declares an older managed version, a later scheduled sync can propose the update
