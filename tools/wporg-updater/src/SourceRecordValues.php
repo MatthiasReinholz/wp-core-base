@@ -26,7 +26,7 @@ final class SourceRecordValues
         $value = self::requiredString($data, $key, $context);
         // Retain older adapters' minute/basic forms and PHP DateTime::ISO8601 offsets.
         $dateTime = '(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?|\d{8}T\d{4}(?:\d{2})?)';
-        $timezone = '(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)';
+        $timezone = '(?:Z|[+-](?:[01]\d|2[0-3])(?::?[0-5]\d)?)';
         if (preg_match('/^' . $dateTime . $timezone . '$/D', $value) !== 1) {
             throw new RuntimeException(sprintf('%s must provide an ISO-8601 timestamp with timezone for %s.', $context, $key));
         }
