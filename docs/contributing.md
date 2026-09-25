@@ -51,6 +51,8 @@ When changing the bundled baseline:
 3. keep the `Current Baseline` section in `README.md` accurate
 4. make sure the repository still passes `doctor` and `stage-runtime`
 
+Core or plugin baseline migrations must also pass the database-backed upgrade fixture for both profiles. See [baseline upgrades and rollback](baseline-upgrades.md) for the pinned starting point, test commands, evidence boundaries and downstream rehearsal procedure.
+
 ## Scaffolding Changes
 
 If you change downstream scaffolding, keep these aligned:

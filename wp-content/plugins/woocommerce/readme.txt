@@ -1,10 +1,10 @@
 === WooCommerce ===
 Contributors: automattic, woocommerce, mikejolley, jameskoster, claudiosanches, rodrigosprimo, peterfabian1000, vedjain, jamosova, obliviousharmony, konamiman, sadowski, wpmuguru, royho, barryhughes-1, claudiulodro, tiagonoronha, ryelle, levinmedia, aljullu, nerrad, joshuawold, assassinateur, haszari, mppfeiffer, nielslange, opr18, ralucastn, tjcafferkey, danielwrobert, patriciahillebrandt, albarin, dinhtungdu, imanish003, karolmanijak, sunyatasattva, alexandrelara, gigitux, danieldudzic, samueljseay, alexflorisca, opr18, tarunvijwani, pauloarromba, saadtarhi, bor0, kloon, coreymckrill, jorgeatorres, leifsinger, neosinner
 Tags: online store, ecommerce, shop, shopping cart, sell online
-Requires at least: 6.9
-Tested up to: 7.0
+Requires at least: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 11.0.0
+Stable tag: 11.1.1
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 
@@ -128,7 +128,7 @@ Request new features and extensions and vote on existing suggestions on our offi
 
 = WooCommerce is awesome! Can I contribute? =
 
-Yes, you can! Join in on our [GitHub repository](https://github.com/woocommerce/woocommerce/?utm_medium=referral&utm_source=wordpress.org&utm_campaign=wp_org_repo_listing) and follow the [development blog](https://woocommerce.wordpress.com/?utm_medium=referral&utm_source=wordpress.org&utm_campaign=wp_org_repo_listing) to stay up-to-date with everything happening in the project.
+Yes, you can! Join in on our [GitHub repository](https://github.com/woocommerce/woocommerce/?utm_medium=referral&utm_source=wordpress.org&utm_campaign=wp_org_repo_listing) and follow the [development blog](https://developer.woocommerce.com/?utm_medium=referral&utm_source=wordpress.org&utm_campaign=wp_org_repo_listing) to stay up-to-date with everything happening in the project.
 
 = Where can I find REST API documentation? =
 
@@ -144,7 +144,7 @@ Check out [Frequently Asked Questions](https://woocommerce.com/document/frequent
 
 * PHP 7.4 or greater is required (PHP 8.0 or greater is recommended)
 * MySQL 5.5.5 or greater, OR MariaDB version 10.1 or greater, is required
-* WordPress 6.9 or greater
+* WordPress 7.0 or greater
 * (Recommended) WordPress [memory limit](https://woocommerce.com/document/increasing-the-wordpress-memory-limit/) of 256 MB or greater.
 * (Recommended) [HTTPS](https://woocommerce.com/document/ssl-and-https/) support.
 
@@ -170,29 +170,12 @@ WooCommerce comes with some sample data you can use to see how products look; im
 
 == Changelog ==
 
-= 11.0.1 2026-08-10 =
+= 11.1.2 2026-09-22 =
 
 **WooCommerce**
 
-* Fix - Fixed admin settings initialization. [#67532](https://github.com/woocommerce/woocommerce/pull/67532)
-* Fix - Fix order list checkbox interactions and responsive layout with WordPress 7.1. [#67364](https://github.com/woocommerce/woocommerce/pull/67364)
-* Fix - Prevent password-protected products from exposing short descriptions before authentication. [#67557](https://github.com/woocommerce/woocommerce/pull/67557)
-* Fix - Sanitize the single dismissible store notice before rendering so entity-encoded HTML in Store API error messages (e.g. a product name) cannot execute script on the Cart and Checkout blocks. [#67476](https://github.com/woocommerce/woocommerce/pull/67476)
-* Fix - Store API: Always resolve the cart token from a consistent place. [#67550](https://github.com/woocommerce/woocommerce/pull/67550)
-* Fix - Store API: improve coupon handling for order payments. [#67549](https://github.com/woocommerce/woocommerce/pull/67549)
-* Fix - Tighten authorization checks on the Marketplace subscription activate endpoint. [#67567](https://github.com/woocommerce/woocommerce/pull/67567)
-* Fix - Tighten authorization checks on the review-order shortcode. [#67552](https://github.com/woocommerce/woocommerce/pull/67552)
-* Fix - Update product button label checks. [#67558](https://github.com/woocommerce/woocommerce/pull/67558)
-* Fix - Update product image SKU match checks [#67530](https://github.com/woocommerce/woocommerce/pull/67530)
-* Fix - Update session cookies hashing [#67408](https://github.com/woocommerce/woocommerce/pull/67408)
-* Fix - Update theme onboarding checks [#67533](https://github.com/woocommerce/woocommerce/pull/67533)
-* Fix - Validate Analytics report export arguments orderby against the target report's schema. [#67551](https://github.com/woocommerce/woocommerce/pull/67551)
-* Fix - Validate the Analytics order date type option against known columns. [#67554](https://github.com/woocommerce/woocommerce/pull/67554)
-* Add - Add a woocommerce_order_step_logging_enabled filter that allows disabling per-order place-order-debug logging without raising the site-wide logging level threshold. [#67410](https://github.com/woocommerce/woocommerce/pull/67410)
-* Dev - Accept the WordPress 7.1 list table check-column markup in the reviews list table row test. [#67517](https://github.com/woocommerce/woocommerce/pull/67517)
-* Dev - Add a PHP_CodeSniffer rule requiring the Store API cart token to be read through CartTokenUtils::get_request_cart_token(). [#67550](https://github.com/woocommerce/woocommerce/pull/67550)
-* Dev - Update the JS file count test for WordPress 7.1. [#67473](https://github.com/woocommerce/woocommerce/pull/67473)
-* Performance - Log writes no longer scan the whole wc-logs directory to locate their target file (the path is now constructed deterministically), and the daily place-order debug log cleanup now deletes a bounded batch per run and reschedules itself until the backlog is drained, instead of stopping at 100 files per day. [#67410](https://github.com/woocommerce/woocommerce/pull/67410)
+* Fix - Prevent variation gallery rendering from recursively requesting variation data. [#68965](https://github.com/woocommerce/woocommerce/pull/68965)
+* Fix - Route order review submissions through WordPress's comment pipeline so they receive the same filtering and moderation as other comments. [#68961](https://github.com/woocommerce/woocommerce/pull/68961)
 
 
 [See changelog for all versions](https://raw.githubusercontent.com/woocommerce/woocommerce/trunk/changelog.txt).

@@ -43,4 +43,12 @@ final class WordpressSmokeRunner
             throw new RuntimeException('Unable to confirm WordPress smoke phase completion.');
         }
     }
+
+    /** WordPress can log failed schema queries without failing its process. */
+    public static function assertHealthyLog(string $log): void
+    {
+        if (preg_match('/WordPress database error|PHP (Fatal error|Parse error|Recoverable fatal error)/', $log) === 1) {
+            throw new RuntimeException('WordPress validation recorded a database or fatal error.');
+        }
+    }
 }

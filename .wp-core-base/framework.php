@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'version' => '1.5.0',
+  'version' => '1.6.0',
   'release_channel' => 'stable',
   'distribution' =>
   array (
@@ -20,19 +20,19 @@ return array (
   ),
   'baseline' =>
   array (
-    'wordpress_core' => '6.9.9',
+    'wordpress_core' => '7.1.2',
     'managed_components' =>
     array (
       0 =>
       array (
         'name' => 'WooCommerce',
-        'version' => '11.0.1',
+        'version' => '11.1.2',
         'kind' => 'plugin',
       ),
       1 =>
       array (
         'name' => 'Jetpack',
-        'version' => '16.1.3',
+        'version' => '16.2',
         'kind' => 'plugin',
       ),
       2 =>

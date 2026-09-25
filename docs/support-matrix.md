@@ -125,6 +125,7 @@ If the answer to most of those is yes, the framework is usually a strong fit.
 | PHP 8.3 | Tested compatibility | Included in the framework CI matrix. |
 | PHP 8.1 | Migration compatibility only | Syntax/behavior tests remain; end-of-life PHP is not a recommended operational runtime. |
 | Real WordPress smoke fixture | Supported | Disposable local database; install, plugin/MU bootstrap, and REST checks for both profiles. |
+| Seeded baseline upgrade fixture | Supported | Pinned prior baseline, existing synthetic store data, database migration and paired runtime/database restore; both profiles and HPOS/legacy order storage. |
 | Read-only update-health monitor | GitHub maintainer workflow | Required-check and scheduling visibility; does not approve or merge updates. |
 
-Framework CLI compatibility does not override the support requirements of WordPress, individual plugins, the database, or the hosting platform. The smoke fixture is evidence for the tested baseline and environment, not a full site/browser regression suite. See [local prerequisites](local-prerequisites.md) and [contributor verification](contributing.md#wordpress-runtime-smoke-test).
+Framework CLI compatibility does not override the support requirements of WordPress, individual plugins, the database, or the hosting platform. Runtime fixtures provide evidence for the tested baseline and environment, not a full site/browser regression suite. See [local prerequisites](local-prerequisites.md), [contributor verification](contributing.md#wordpress-runtime-smoke-test) and [baseline upgrades](baseline-upgrades.md).

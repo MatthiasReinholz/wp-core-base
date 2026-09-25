@@ -78,6 +78,8 @@ php scripts/ci/verify_downstream_fixture.php --profile=content-only
 - when `--artifact`, `--checksum-file`, and `--signature-file` are provided, the checksum sidecar signature verifies against the framework release public key before the artifact checksum is trusted
 - the built vendored snapshot checksum matches and the artifact installs into a temporary downstream copy
 
+When the bundled core or plugin baseline changes, also run the database-backed [upgrade and rollback fixture](baseline-upgrades.md#repository-upgrade-fixture) for both profiles and order-storage modes. Fresh-install smoke checks alone do not establish that an existing store survives a database migration.
+
 ## GitHub Flow
 
 The release flow is intentionally staged:

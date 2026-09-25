@@ -126,6 +126,23 @@ function run_filesystem_hardening_contract_tests(callable $assert): void
         mkdir($extract . '/local-plugin', 0700, true);
         file_put_contents($extract . '/local-plugin/plugin.php', "<?php\n/* Plugin Name: Example */\n");
         $assert(ExtractedPayloadLocator::locateByExpectedEntry($extract, '', 'plugin.php', 'local-plugin', false) === $extract . '/local-plugin', 'Extracted payload lookup must retain normal wrapper-directory support.');
+        $assert(ExtractedPayloadLocator::locateByExpectedEntry($extract, 'local-plugin', 'plugin.php', 'local-plugin', false) === $extract . '/local-plugin', 'A root archive subdirectory must remain valid when later wrapper candidates do not contain it.');
+        $assert(ExtractedPayloadLocator::locateByExpectedEntry($extract, 'local-plugin', 'plugin.php', 'local-plugin', true) === $extract . '/local-plugin/plugin.php', 'Single-file updates must support a root archive subdirectory.');
+        mkdir($extract . '/release/dist', 0700, true);
+        file_put_contents($extract . '/release/dist/plugin.php', "<?php\n/* Plugin Name: Wrapped */\n");
+        $assert(ExtractedPayloadLocator::locateByExpectedEntry($extract, 'dist', 'plugin.php', 'wrapped', false) === $extract . '/release/dist', 'Missing earlier archive subdirectories must not hide a valid payload within a release wrapper.');
+        $assert(ExtractedPayloadLocator::locateByExpectedEntry($extract, 'dist', 'plugin.php', 'wrapped', true) === $extract . '/release/dist/plugin.php', 'Single-file updates must support a wrapped archive subdirectory.');
+        file_put_contents($extract . '/dist', 'not a candidate directory');
+        $assert(ExtractedPayloadLocator::locateByExpectedEntry($extract, 'dist', 'plugin.php', 'wrapped', false) === $extract . '/release/dist', 'A non-directory archive candidate must not hide a valid directory in a later wrapper.');
+        unlink($extract . '/dist');
+        $assert($throws(static fn () => ExtractedPayloadLocator::locateByExpectedEntry($extract, 'missing', 'plugin.php', 'local-plugin', false)), 'A completely missing archive subdirectory must fail payload lookup.');
+        symlink($root . '/missing-target', $extract . '/dist');
+        $assert($throws(static fn () => ExtractedPayloadLocator::locateByExpectedEntry($extract, 'dist', 'plugin.php', 'wrapped', false)), 'A dangling archive-subdirectory symlink must fail closed rather than being skipped for a later valid wrapper.');
+        unlink($extract . '/dist');
+        symlink($root . '/outside', $extract . '/dist');
+        $assert($throws(static fn () => ExtractedPayloadLocator::locateByExpectedEntry($extract, 'dist', 'plugin.php', 'wrapped', false)), 'An existing archive-subdirectory symlink must fail closed rather than being skipped for a later valid wrapper.');
+        $assert($throws(static fn () => ExtractedPayloadLocator::locateByExpectedEntry($extract, 'dist/missing', 'plugin.php', 'wrapped', false)), 'An archive subdirectory with a symlink ancestor must fail closed even when its leaf is absent.');
+        unlink($extract . '/dist');
         foreach (['../outside', '/outside', 'C:outside', "nested/\0outside"] as $unsafe) {
             $assert($throws(static fn () => ExtractedPayloadLocator::locateByExpectedEntry($extract, $unsafe, 'plugin.php', 'local-plugin', false)), 'Source-provided archive subdirectories must reject unsafe paths.');
             $assert($throws(static fn () => ExtractedPayloadLocator::locateByExpectedEntry($extract, '', $unsafe, 'local-plugin', true)), 'Expected archive entry must reject unsafe paths.');

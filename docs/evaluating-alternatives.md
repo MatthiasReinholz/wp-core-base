@@ -8,6 +8,8 @@
 
 If the intended comparator primarily builds and publishes a plugin's release archive, it addresses the publisher's workflow. `wp-core-base` can consume an archive produced by such tooling when it satisfies a supported source contract. That may make the tools complementary. Confirm the actual comparator's responsibilities before classifying it.
 
+One public reference is WooCommerce's [release process](https://developer.woocommerce.com/docs/contribution/releases/), which covers building, publishing, release readiness, monitoring and security support. Its [automation overview](https://developer.woocommerce.com/2025/08/14/how-ai-and-automation-are-improving-the-woo-release-process/) describes GitHub-driven builds and publication. These sources establish a publisher workflow; they do not identify a separate application foundation named `woo-release`. If that is the intended comparison, evaluate publishing and recovery practices separately from downstream ownership, dependency ingestion and runtime assembly. A shared use of GitHub Actions is not evidence that either project is faster or more reliable.
+
 ## Compare Complete Workflows
 
 Use the same WordPress application and dependency versions, with the same runner resources, network/cache conditions, permissions, and validation requirements. Exercise both `full-core` and `content-only` when both matter to the team.

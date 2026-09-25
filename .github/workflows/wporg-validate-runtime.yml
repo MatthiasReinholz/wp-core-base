@@ -152,7 +152,7 @@ jobs:
     strategy:
       matrix:
         profile: [full-core, content-only]
-        php-version: ['8.4', '8.5']
+        php-version: ['8.1', '8.4', '8.5']
     services:
       database:
         image: mariadb:11.4@sha256:70cc072b29b4a89ae07abb2d4da2c64678a7f2dfe092751bb51c87d67dc1338b
@@ -177,6 +177,8 @@ jobs:
           php-version: ${{ matrix.php-version }}
           extensions: curl, dom, mbstring, mysqli, openssl, simplexml, zip
           coverage: none
+      - name: Fetch immutable previous baseline for upgrade regression
+        run: git fetch --no-tags --depth=1 origin a8f6404fa46befd6d2a8ecd9a3aca940ea05a45c
       - name: Verify staged WordPress runtime
         env:
           SMOKE_PROFILE: ${{ matrix.profile }}
@@ -185,3 +187,14 @@ jobs:
           WP_CORE_BASE_SMOKE_DB_USER: smoke
           WP_CORE_BASE_SMOKE_DB_PASSWORD: disposable-smoke-password
         run: php scripts/ci/verify_wordpress_runtime.php --profile="$SMOKE_PROFILE"
+      - name: Verify seeded store migration and rollback
+        env:
+          SMOKE_PROFILE: ${{ matrix.profile }}
+          WP_CORE_BASE_SMOKE_DB_HOST: 127.0.0.1:3306
+          WP_CORE_BASE_SMOKE_DB_NAME: wp_core_base_smoke
+          WP_CORE_BASE_SMOKE_DB_USER: smoke
+          WP_CORE_BASE_SMOKE_DB_PASSWORD: disposable-smoke-password
+        run: |
+          for order_storage in hpos posts; do
+            php scripts/ci/verify_wordpress_upgrade.php --profile="$SMOKE_PROFILE" --order-storage="$order_storage"
+          done
