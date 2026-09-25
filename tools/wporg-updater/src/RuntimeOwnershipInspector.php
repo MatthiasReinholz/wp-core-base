@@ -185,7 +185,9 @@ final class RuntimeOwnershipInspector
      */
     private function isCovered(string $path, array $coveredPaths): bool
     {
+        $path = ConfigPathRules::filesystemPath($this->config->repoRoot, $path);
         foreach ($coveredPaths as $coveredPath) {
+            $coveredPath = ConfigPathRules::filesystemPath($this->config->repoRoot, $coveredPath);
             if ($path === $coveredPath || str_starts_with($path, $coveredPath . '/')) {
                 return true;
             }

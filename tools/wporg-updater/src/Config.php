@@ -88,9 +88,27 @@ final class Config
         $extensions = self::normalizeExtensions(array_key_exists('extensions', $data) ? $data['extensions'] : [], 'extensions');
         $dependencies = self::normalizeDependencies($data['dependencies'] ?? [], $paths);
         self::assertProfileCoreCompatibility($profile, $core);
+        foreach (array_merge(array_values($paths), $runtime['ownership_roots'], $runtime['allow_runtime_paths']) as $sourcePath) {
+            // A root content directory is supported, but individual runtime
+            // ownership and allowlist entries may never authorize control data.
+            if ($sourcePath !== '.') {
+                ConfigPathRules::assertSafeDependencyPath($repoRoot, $sourcePath);
+            }
+        }
+        foreach (array_merge([$paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']], $runtime['ownership_roots'], $runtime['allow_runtime_paths']) as $sourcePath) {
+            if ($sourcePath === '.') {
+                throw new RuntimeException('Runtime ownership roots may not own the repository root.');
+            }
+        }
+        if ($core['enabled']) {
+            self::assertRuntimePathsOutsideCore($repoRoot, array_merge(array_values($paths), $runtime['ownership_roots'], $runtime['allow_runtime_paths']));
+        }
         self::assertDependencyPathsSafe($repoRoot, $dependencies);
+        if ($core['enabled']) {
+            self::assertRuntimePathsOutsideCore($repoRoot, array_column(array_filter($dependencies, static fn (array $dependency): bool => $dependency['management'] !== 'ignored'), 'path'));
+        }
         self::assertSafeStageDirectory($runtime['stage_dir'], $paths, array_merge($runtime['ownership_roots'], array_column($dependencies, 'path')), $repoRoot);
-        self::assertDependencyPathConsistency($dependencies, $runtime['manifest_mode']);
+        self::assertDependencyPathConsistency($dependencies, $runtime['manifest_mode'], $repoRoot);
 
         return new self(
             repoRoot: $repoRoot,
@@ -468,7 +486,10 @@ final class Config
     public function withDependencies(array $dependencies): self
     {
         self::assertDependencyPathsSafe($this->repoRoot, $dependencies);
-        self::assertDependencyPathConsistency($dependencies, $this->runtime['manifest_mode']);
+        if ($this->coreEnabled()) {
+            self::assertRuntimePathsOutsideCore($this->repoRoot, array_column(array_filter($dependencies, static fn (array $dependency): bool => $dependency['management'] !== 'ignored'), 'path'));
+        }
+        self::assertDependencyPathConsistency($dependencies, $this->runtime['manifest_mode'], $this->repoRoot);
         return new self(
             repoRoot: $this->repoRoot,
             manifestPath: $this->manifestPath,
@@ -994,10 +1015,27 @@ final class Config
         }
     }
 
+    /** @param list<string> $paths */
+    private static function assertRuntimePathsOutsideCore(string $repoRoot, array $paths): void
+    {
+        foreach ($paths as $path) {
+            if ($path === '.') {
+                continue;
+            }
+            $comparisonPath = ConfigPathRules::filesystemPath($repoRoot, $path);
+            foreach (['wp-admin', 'wp-includes'] as $corePath) {
+                $corePath = ConfigPathRules::filesystemPath($repoRoot, $corePath);
+                if (self::pathStartsWith($comparisonPath, $corePath) || self::pathStartsWith($corePath, $comparisonPath)) {
+                    throw new RuntimeException(sprintf('Runtime ownership path %s may not overlap core-managed directory %s.', $path, $corePath));
+                }
+            }
+        }
+    }
+
     /**
      * @param list<array<string, mixed>> $dependencies
      */
-    private static function assertDependencyPathConsistency(array $dependencies, string $manifestMode): void
+    private static function assertDependencyPathConsistency(array $dependencies, string $manifestMode, string $repoRoot): void
     {
         $identities = [];
         foreach ($dependencies as $dependency) {
@@ -1014,7 +1052,7 @@ final class Config
         $pathsByDependency = [];
 
         foreach ($dependencies as $dependency) {
-            $path = (string) $dependency['path'];
+            $path = ConfigPathRules::filesystemPath($repoRoot, (string) $dependency['path']);
             $pathsByDependency[$path][] = (string) $dependency['component_key'];
         }
 
@@ -1029,7 +1067,7 @@ final class Config
         }
 
         $dependencyPaths = array_map(
-            static fn (array $dependency): string => (string) $dependency['path'],
+            static fn (array $dependency): string => ConfigPathRules::filesystemPath($repoRoot, (string) $dependency['path']),
             $dependencies
         );
         sort($dependencyPaths);

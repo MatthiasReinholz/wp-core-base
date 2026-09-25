@@ -26,10 +26,7 @@ final class PremiumProviderScaffolder
             throw new RuntimeException('Premium provider class must be a valid PHP class name with an optional namespace.');
         }
         $relativePath = $path !== null && trim($path) !== '' ? $this->normalizePath($path) : '.wp-core-base/premium-providers/' . $normalizedProvider . '.php';
-        if ($relativePath === '.' || in_array($relativePath, ['.wp-core-base/manifest.php', '.wp-core-base/framework.php', '.wp-core-base/premium-providers.php'], true)) {
-            throw new RuntimeException('Premium provider class path may not replace framework control files.');
-        }
-        ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, $relativePath);
+        ConfigPathRules::assertSafePremiumProviderPath($this->repoRoot, $relativePath);
         $absolutePath = $this->repoRoot . '/' . $relativePath;
         $definitions = $registry->definitions();
         $existing = $definitions[$normalizedProvider] ?? null;

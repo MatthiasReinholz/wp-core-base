@@ -30,6 +30,8 @@ foreach (['max-age-hours', 'check-grace-hours'] as $name) {
     }
 }
 $repository = $options['repo'];
+$policy = new UpdateHealthReport();
+$now = time();
 $repositoryData = healthGithubJson(['api', 'repos/' . $repository]);
 $base = (string) ($repositoryData['default_branch'] ?? '');
 if ($base === '') {
@@ -50,7 +52,7 @@ if ($required === []) {
 $pullRequests = [];
 foreach (['automation:dependency-update', 'automation:framework-update'] as $label) {
     $labelled = healthGithubJson(['pr', 'list', '--repo', $repository, '--state', 'open', '--label', $label, '--limit', '1000',
-        '--json', 'number,url,createdAt,body,headRefOid,statusCheckRollup']);
+        '--json', 'number,url,createdAt,body,headRefOid,headRefName,statusCheckRollup']);
     if (count($labelled) >= 1000) {
         throw new RuntimeException('PR inventory reached the query limit; refusing to report potentially incomplete health.');
     }
@@ -67,23 +69,32 @@ foreach ($pullRequests as $pr) {
         $name = (string) ($check['name'] ?? $check['context'] ?? '');
         $checks[$name] = (string) (($check['conclusion'] ?? '') !== '' ? $check['conclusion'] : ($check['state'] ?? $check['status'] ?? 'UNKNOWN'));
     }
-    $runs = healthGithubJson(['api', 'repos/' . $repository . '/actions/runs?head_sha=' . rawurlencode((string) $pr['headRefOid']) . '&per_page=100']);
+    $runs = healthGithubJson(['api', 'repos/' . $repository . '/actions/runs?event=pull_request&head_sha=' . rawurlencode((string) $pr['headRefOid']) . '&branch=' . rawurlencode((string) $pr['headRefName']) . '&per_page=100']);
+    if ((int) ($runs['total_count'] ?? 0) > 100) {
+        throw new RuntimeException('PR workflow history reached the query limit; refusing to report potentially incomplete health.');
+    }
     $metadata = PrBodyRenderer::extractMetadata((string) $pr['body']);
     $normalized[] = ['number' => (int) $pr['number'], 'url' => (string) $pr['url'], 'created_at' => (string) $pr['createdAt'],
         'queued' => array_intersect((array) ($metadata['blocked_by'] ?? []), $openNumbers) !== [], 'checks' => $checks,
-        'runs' => array_map(static fn (array $run): array => ['status' => (string) $run['status'], 'conclusion' => (string) ($run['conclusion'] ?? '')], $runs['workflow_runs'] ?? [])];
+        'runs' => array_map(static fn (array $run): array => ['status' => (string) $run['status'], 'conclusion' => (string) ($run['conclusion'] ?? '')], $policy->latestWorkflowRuns($runs['workflow_runs'] ?? []))];
 }
 $sourceRuns = [];
 foreach (['wporg-updates.yml', 'wporg-updates-reconcile.yml'] as $workflow) {
-    $runs = healthGithubJson(['api', 'repos/' . $repository . '/actions/workflows/' . $workflow . '/runs?event=schedule&per_page=1']);
+    // A bounded recent query avoids mistaking a cached historical first page for
+    // the latest execution. Always select by timestamp, never response order.
+    $endpoint = 'repos/' . $repository . '/actions/workflows/' . $workflow . '/runs?event=schedule&branch=' . rawurlencode($base) . '&per_page=100';
+    $runs = healthGithubJson(['api', $endpoint . '&created=' . rawurlencode('>=' . gmdate('Y-m-d\TH:i:s\Z', $now - 48 * 3600))]);
+    if (($runs['workflow_runs'] ?? []) === []) {
+        $runs = healthGithubJson(['api', $endpoint]);
+    }
     if (($runs['workflow_runs'] ?? []) === []) {
         throw new RuntimeException('No scheduled execution was found for ' . $workflow . '; automation health cannot be established.');
     }
-    foreach ($runs['workflow_runs'] ?? [] as $run) {
+    foreach ($policy->latestWorkflowRuns($runs['workflow_runs'] ?? []) as $run) {
         $sourceRuns[] = ['name' => (string) $run['name'], 'status' => (string) $run['status'], 'conclusion' => (string) ($run['conclusion'] ?? ''), 'url' => (string) $run['html_url'], 'created_at' => (string) $run['created_at']];
     }
 }
-$report = (new UpdateHealthReport())->evaluate($normalized, array_values(array_unique($required)), $sourceRuns, time(), (int) $options['max-age-hours'], (int) $options['check-grace-hours']);
+$report = $policy->evaluate($normalized, array_values(array_unique($required)), $sourceRuns, $now, (int) $options['max-age-hours'], (int) $options['check-grace-hours']);
 if ($json) {
     fwrite(STDOUT, json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR) . "\n");
 } else {

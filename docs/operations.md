@@ -69,6 +69,8 @@ Scratch operations use an owner-private namespace below the platform temporary d
 
 Workspaces marked as preserved are excluded from automatic cleanup regardless of age. A failed dependency restore reports its payload path; `recovery.json` contains the intended runtime path and a `config_files` map of prior file existence and base64-encoded contents. An existing runtime backup is stored alongside it under `runtime/`. Framework installation and staging failures report their own retained backup paths.
 
+Dependency transactions mark their complete backups before changing runtime or configuration files, so they remain retained after process termination. Only successful commit or complete restoration permits automatic removal. After an interrupted process, inspect these retained workspaces even when no caught error could print a recovery location; there is no automatic journal replay.
+
 If recovery is incomplete:
 
 1. stop automated writes to that checkout and retain the original error, paths, and Git revisions
@@ -85,6 +87,12 @@ Update pushes and remote rollback use an exact expected revision. If another act
 
 If a push fails after a local commit is created, the server may already have accepted it. The tool retains that recovery commit and reports the uncertainty. Inspect the local commit, the current remote ref, and any existing PR before retrying or repairing it. Do not resolve this situation with an unconditional force push. A remote rollback failure keeps the local recovery ref for inspection. Unowned residue from a partial application may require a reviewed manual repair before the checkout is clean enough for another sync.
 
+## Plugin Minimum WordPress Requirements
+
+For `full-core` repositories with managed core, `stage-runtime` and `doctor` reject staged plugins or MU plugins whose installed `Requires at least` header exceeds the local core version. The check inspects the assembled payload before publication, including relaxed-mode and allowlisted plugins, using WordPress's plugin discovery locations plus declared main files for nonstandard MU packages. Ignored or unstaged files remain excluded. A managed checksum does not override this check, and a failure preserves the previous successful stage. Resolve the mismatch through a reviewed core migration or a compatible plugin release.
+
+For `content-only`, external, or disabled core, the framework cannot determine the deployment's WordPress version. Staging remains available; `doctor` reports the compatibility check as unverified in its normal text and JSON messages. Validate the installed plugins against the externally supplied core in deployment testing. Missing minimum-version headers, themes, PHP requirements, and behavioral compatibility remain outside this minimum-version check; the real WordPress smoke test and project integration tests remain necessary.
+
 ## Automation Health and Response Targets
 
 A green scheduled updater does not establish that its generated PRs can pass required checks. In the framework source repository, the read-only GitHub health script inspects dependency/core and framework update PRs, effective required checks, workflow approval requirements, and the scheduled updater/reconciliation runs:
@@ -94,6 +102,8 @@ php scripts/ci/check_update_health.php --repo=owner/repository --json --fail-on-
 ```
 
 Authenticate the GitHub CLI with read access to the repository's PRs, Actions, and rules. This is a maintainer utility in the source repository, not a bundled downstream CLI command or a GitLab monitor. The upstream `wporg-update-health.yml` workflow uses the same read-only report. The script refuses to report health when required input cannot be established, including absent effective required checks or missing scheduled-run history.
+
+The monitor scopes PR runs to the current head commit and branch, then selects the latest execution of each workflow and event. Scheduled-run checks query a recent time window and select by timestamp instead of assuming the first API result is current. Earlier blocked or failed executions do not override their replacements.
 
 Default signals are:
 

@@ -28,6 +28,18 @@ function run_release_distribution_contract_tests(callable $assert, string $repoR
     try {
         $fixture = $root . '/source';
         (new FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($fixture);
+        mkdir($fixture . '/.wp-core-base/build', 0700, true);
+        file_put_contents($fixture . '/.wp-core-base/build/private-runtime', 'must-not-be-enumerated');
+        chmod($fixture . '/.wp-core-base/build', 0000);
+        try {
+            (new FrameworkReleaseArtifactBuilder($fixture))->copySnapshotTo($root . '/pruned-copy');
+            $assert(is_file($root . '/pruned-copy/tools/wporg-updater/src/Autoload.php')
+                && ! file_exists($root . '/pruned-copy/.wp-core-base/build'), 'Fixture copying prunes inaccessible build trees before traversing them.');
+        } finally {
+            chmod($fixture . '/.wp-core-base/build', 0700);
+            unlink($fixture . '/.wp-core-base/build/private-runtime');
+            rmdir($fixture . '/.wp-core-base/build');
+        }
         $process(['git', 'init', '-q'], $fixture);
         $process(['git', 'add', '.'], $fixture);
         $process(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'Immutable release input fixture'], $fixture);
@@ -78,6 +90,8 @@ function run_release_distribution_contract_tests(callable $assert, string $repoR
         $assert($rejected, 'Expected verification to detect content changes independently of builder output.');
         $zip->open($first['artifact']);
         file_put_contents($payload . '/README.md', (string) $zip->getFromName('wp-core-base/README.md')); $zip->close();
+        // Explicitly model legacy/PHP ZIP extraction that discards executable attributes.
+        chmod($payload . '/bin/wp-core-base', 0644);
 
         $previous = hash_file('sha256', $first['artifact']);
         file_put_contents($root . '/not-a-directory', 'sentinel');
@@ -98,7 +112,27 @@ function run_release_distribution_contract_tests(callable $assert, string $repoR
                 $config = Config::load($downstream);
                 (new FrameworkInstaller($downstream, new RuntimeInspector($config->runtime)))->apply($payload, 'vendor/wp-core-base');
                 $assert(is_file($downstream . '/vendor/wp-core-base/bin/wp-core-base') && ! is_dir($downstream . '/vendor/wp-core-base/wp-includes'), 'Expected slim release installation for ' . $host . '/' . $profile . '.');
+                $launcher = $downstream . '/vendor/wp-core-base/bin/wp-core-base';
+                $assert(is_executable($launcher), 'Expected executable launcher restored after legacy ZIP extraction for ' . $host . '/' . $profile . '.');
+                $environment = getenv(); $environment['PHP'] = PHP_BINARY;
+                $listed = json_decode($process([$launcher, 'list-dependencies', '--repo-root=' . $downstream, '--json'], $downstream, $environment), true, 512, JSON_THROW_ON_ERROR);
+                $assert(($listed['status'] ?? null) === 'success', 'Expected documented direct launcher invocation after installation for ' . $host . '/' . $profile . '.');
             }
+        }
+
+        $guarded = $root . '/guarded-distribution'; mkdir($guarded);
+        (new DownstreamScaffolder($repoRoot, $guarded, true))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
+        mkdir($guarded . '/.git'); file_put_contents($guarded . '/.git/config', 'git-control-sentinel');
+        $config = Config::load($guarded);
+        $installer = new FrameworkInstaller($guarded, new RuntimeInspector($config->runtime));
+        $frameworkBefore = file_get_contents($guarded . '/.wp-core-base/framework.php');
+        foreach (['.', '.git', '.git/objects', '.github', '.wp-core-base/build/locks', 'tools', 'tools/wporg-updater', 'bin', 'bin/wp-core-base', 'cms', 'cms/plugins', 'wp-admin', '../outside', '/absolute'] as $unsafeDistribution) {
+            foreach (['plan', 'apply'] as $operation) {
+                $rejected = false;
+                try { $installer->{$operation}($payload, $unsafeDistribution); } catch (RuntimeException) { $rejected = true; }
+                $assert($rejected, 'Expected framework ' . $operation . ' to reject protected distribution ' . $unsafeDistribution . ' before mutation.');
+            }
+            $assert(file_get_contents($guarded . '/.git/config') === 'git-control-sentinel' && file_get_contents($guarded . '/.wp-core-base/framework.php') === $frameworkBefore, 'Rejected framework destinations must preserve Git and framework controls.');
         }
 
         $swapRoot = $root . '/swap'; mkdir($swapRoot); mkdir($swapRoot . '/target'); mkdir($swapRoot . '/staging');
@@ -134,6 +168,13 @@ $config = WpOrgPluginUpdater\Config::load($argv[2]);
 SCRIPT;
                     $process([PHP_BINARY, '-r', $script, $legacyRoot, $downstream, $profile, $host, $payload], $root);
                     $assert(is_file($downstream . '/vendor/wp-core-base/' . FrameworkReleasePayload::INVENTORY), 'Expected v1.4.8 installer to accept slim release for ' . $host . '/' . $profile . '.');
+                    // An already installed v1.4.8 client cannot gain the new mode repair.
+                    // Exercise the documented one-time migration after it installs 1.5.0.
+                    $launcher = $downstream . '/vendor/wp-core-base/bin/wp-core-base';
+                    chmod($launcher, 0755);
+                    $environment = getenv(); $environment['PHP'] = PHP_BINARY;
+                    $listed = json_decode($process([$launcher, 'list-dependencies', '--repo-root=' . $downstream, '--json'], $downstream, $environment), true, 512, JSON_THROW_ON_ERROR);
+                    $assert(($listed['status'] ?? null) === 'success', 'Expected legacy install plus documented launcher-mode migration to support direct CLI use.');
                 }
             }
             foreach (['full-core', 'content-only'] as $profile) {

@@ -32,7 +32,7 @@ return array (
       1 =>
       array (
         'name' => 'Jetpack',
-        'version' => '16.1.2',
+        'version' => '16.1.3',
         'kind' => 'plugin',
       ),
       2 =>
@@ -44,7 +44,7 @@ return array (
       3 =>
       array (
         'name' => 'Redirection',
-        'version' => '5.10.0',
+        'version' => '5.10.1',
         'kind' => 'plugin',
       ),
     ),

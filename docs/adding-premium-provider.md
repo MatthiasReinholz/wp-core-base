@@ -17,6 +17,8 @@ The registry file maps provider keys to provider classes. The class file impleme
 
 The `path` field is optional when the class is already autoloadable. The normal downstream pattern is to keep the provider file in the repo and let `wp-core-base` load it directly from `path`.
 
+Scaffolded provider class files normally live under `.wp-core-base/premium-providers/`. A custom scaffold path must stay outside Git/CI controls, framework locks and tooling, and configured runtime trees; `--force` permits replacing an existing provider file but never overrides these ownership boundaries.
+
 ## Fastest Path
 
 Scaffold a provider:

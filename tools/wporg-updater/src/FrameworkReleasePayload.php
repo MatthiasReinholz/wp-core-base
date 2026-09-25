@@ -23,6 +23,14 @@ final class FrameworkReleasePayload
             || preg_match('~^tools/wporg-updater/(?:src/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.php|bin/wporg-updater\.php|templates/[a-z0-9_.-]+\.tpl|keys/framework-release-public(?:-[a-zA-Z0-9_-]+)?\.pem)$~D', $path) === 1;
     }
 
+    /** Prune unrelated trees before a development fixture enumerates their contents. */
+    public static function allowsDirectory(string $path): bool
+    {
+        return in_array($path, ['.wp-core-base', 'bin', 'docs', 'tools', 'tools/wporg-updater',
+            'tools/wporg-updater/src', 'tools/wporg-updater/bin', 'tools/wporg-updater/templates', 'tools/wporg-updater/keys'], true)
+            || preg_match('~^(?:docs|tools/wporg-updater/src)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+$~D', $path) === 1;
+    }
+
     /** @return array<string, array{sha256:string,bytes:int,mode:string}> */
     public static function inventory(string $root): array
     {

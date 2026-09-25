@@ -15,12 +15,15 @@ final class ConfigPathRules
     public static function assertSafeStageDirectory(string $stageDir, array $paths, array $ownershipRoots, ?string $repoRoot = null): void
     {
         $stageDir = self::normalizedRelativePath($stageDir, 'runtime.stage_dir');
+        $comparisonPath = $repoRoot === null ? $stageDir : self::filesystemPath($repoRoot, $stageDir);
 
         if ($stageDir === '.') {
             throw new RuntimeException('runtime.stage_dir may not be the repository root.');
         }
 
-        if (self::pathStartsWith($stageDir, '.wp-core-base') && ! self::pathStartsWith($stageDir, '.wp-core-base/build')) {
+        $controlRoot = $repoRoot === null ? '.wp-core-base' : self::filesystemPath($repoRoot, '.wp-core-base');
+        $buildRoot = $repoRoot === null ? '.wp-core-base/build' : self::filesystemPath($repoRoot, '.wp-core-base/build');
+        if (self::pathStartsWith($comparisonPath, $controlRoot) && ! self::pathStartsWith($comparisonPath, $buildRoot)) {
             throw new RuntimeException('runtime.stage_dir may not overlap the framework control tree.');
         }
 
@@ -39,7 +42,8 @@ final class ConfigPathRules
             if ($protectedRoot === '.') {
                 continue;
             }
-            if (self::pathStartsWith($stageDir, $protectedRoot) || self::pathStartsWith($protectedRoot, $stageDir)) {
+            $protectedPath = $repoRoot === null ? $protectedRoot : self::filesystemPath($repoRoot, $protectedRoot);
+            if (self::pathStartsWith($comparisonPath, $protectedPath) || self::pathStartsWith($protectedPath, $comparisonPath)) {
                 throw new RuntimeException(sprintf(
                     'runtime.stage_dir %s may not overlap protected repository path %s.',
                     $stageDir,
@@ -48,7 +52,7 @@ final class ConfigPathRules
             }
         }
 
-        $rootEntry = explode('/', $stageDir)[0];
+        $rootEntry = explode('/', $comparisonPath)[0];
         if (fnmatch('wp-*.php', $rootEntry)) {
             throw new RuntimeException(sprintf('runtime.stage_dir may not replace WordPress core file %s.', $rootEntry));
         }
@@ -65,6 +69,7 @@ final class ConfigPathRules
     public static function assertSafeDependencyPath(string $repoRoot, string $path): void
     {
         $path = self::normalizedRelativePath($path, 'dependency path');
+        $comparisonPath = self::filesystemPath($repoRoot, $path);
         if ($path === '.') {
             throw new RuntimeException('A managed or local dependency may not own the repository root.');
         }
@@ -74,11 +79,117 @@ final class ConfigPathRules
             'tools/wporg-updater', 'bin/wp-core-base',
         ], self::frameworkRoots($repoRoot));
         foreach ($protected as $controlPath) {
-            if (self::pathStartsWith($path, $controlPath) || self::pathStartsWith($controlPath, $path)) {
+            $controlPath = self::filesystemPath($repoRoot, $controlPath);
+            if (self::pathStartsWith($comparisonPath, $controlPath) || self::pathStartsWith($controlPath, $comparisonPath)) {
                 throw new RuntimeException(sprintf('Dependency path %s may not overlap repository control path %s.', $path, $controlPath));
             }
         }
         self::assertNoSymlinkDescendants($repoRoot, $path);
+    }
+
+    /**
+     * Resolve existing aliases by filesystem identity, not realpath's spelling.
+     * On macOS realpath('.GIT') can retain that spelling while naming '.git'.
+     * Missing components retain their spelling; distinct Linux case names stay distinct.
+     */
+    public static function filesystemPath(string $repoRoot, string $relativePath): string
+    {
+        $relativePath = self::normalizedRelativePath($relativePath, 'repository path');
+        $parent = realpath($repoRoot);
+        if ($parent === false || ! is_dir($parent)) {
+            throw new RuntimeException(sprintf('Repository root does not exist: %s', $repoRoot));
+        }
+        $resolved = [];
+        foreach (explode('/', $relativePath) as $segment) {
+            if ($segment === '.') {
+                continue;
+            }
+            $candidate = $parent . '/' . $segment;
+            clearstatcache(true, $candidate);
+            $identity = @lstat($candidate);
+            if (is_array($identity) && is_dir($parent) && ! is_link($parent)) {
+                $entries = scandir($parent);
+                if (! is_array($entries)) {
+                    throw new RuntimeException(sprintf('Unable to resolve repository path aliases beneath %s.', $parent));
+                }
+                if (! in_array($segment, $entries, true)) {
+                    foreach ($entries as $entry) {
+                        if ($entry === '.' || $entry === '..') {
+                            continue;
+                        }
+                        $actual = @lstat($parent . '/' . $entry);
+                        if (is_array($actual) && $identity['dev'] === $actual['dev'] && $identity['ino'] === $actual['ino']) {
+                            $segment = $entry;
+                            break;
+                        }
+                    }
+                }
+            }
+            $resolved[] = $segment;
+            $parent .= '/' . $segment;
+        }
+        return $resolved === [] ? '.' : implode('/', $resolved);
+    }
+
+    /** @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
+     * @param list<string> $ownershipRoots
+     */
+    public static function assertSafeFrameworkDistributionPath(string $repoRoot, string $path, array $paths, array $ownershipRoots): void
+    {
+        $path = self::normalizedRelativePath($path, 'distribution.path');
+        if ($path === '.') {
+            throw new RuntimeException('Framework installation cannot replace the repository root.');
+        }
+        $comparisonPath = self::filesystemPath($repoRoot, $path);
+        $protectedRoots = array_merge([
+            '.git', '.github', '.gitlab', '.gitea', '.forgejo', '.circleci', '.gitlab-ci.yml',
+            '.gitignore', '.gitattributes', '.gitmodules', '.wp-core-base',
+            'tools/wporg-updater', 'bin/wp-core-base',
+            'wp-admin', 'wp-includes', 'wp-content', 'index.php', 'license.txt', 'readme.html', 'xmlrpc.php',
+        ], array_values($paths), $ownershipRoots);
+        foreach ($protectedRoots as $protectedRoot) {
+            if ($protectedRoot === '.') {
+                continue;
+            }
+            $protectedPath = self::filesystemPath($repoRoot, $protectedRoot);
+            if (self::pathStartsWith($comparisonPath, $protectedPath) || self::pathStartsWith($protectedPath, $comparisonPath)) {
+                throw new RuntimeException(sprintf('Framework distribution path %s may not overlap protected repository path %s.', $path, $protectedRoot));
+            }
+        }
+        if (fnmatch('wp-*.php', explode('/', $comparisonPath)[0])) {
+            throw new RuntimeException('Framework distribution path may not replace a WordPress core file.');
+        }
+        self::assertNoSymlinkDescendants($repoRoot, $path);
+    }
+
+    /** Provider implementation files are tooling; they must not overwrite control or runtime data. */
+    public static function assertSafePremiumProviderPath(string $repoRoot, string $path): void
+    {
+        $path = self::normalizedRelativePath($path, 'premium provider class path');
+        $comparisonPath = self::filesystemPath($repoRoot, $path);
+        $providerRoot = self::filesystemPath($repoRoot, '.wp-core-base/premium-providers');
+        if ($comparisonPath !== $providerRoot && self::pathStartsWith($comparisonPath, $providerRoot)) {
+            self::assertNoSymlinkDescendants($repoRoot, $path);
+            return;
+        }
+        self::assertSafeDependencyPath($repoRoot, $path);
+        $runtimeRoots = ['wp-admin', 'wp-includes', 'wp-content', 'index.php', 'xmlrpc.php'];
+        if (is_file($repoRoot . '/.wp-core-base/manifest.php')) {
+            $config = Config::load($repoRoot);
+            $runtimeRoots = array_merge($runtimeRoots, array_values($config->paths), $config->ownershipRoots(), array_column($config->dependencies(), 'path'));
+        }
+        foreach ($runtimeRoots as $runtimeRoot) {
+            if ($runtimeRoot === '.') {
+                continue;
+            }
+            $runtimePath = self::filesystemPath($repoRoot, $runtimeRoot);
+            if (self::pathStartsWith($comparisonPath, $runtimePath) || self::pathStartsWith($runtimePath, $comparisonPath)) {
+                throw new RuntimeException(sprintf('Premium provider class path %s may not overlap runtime path %s.', $path, $runtimeRoot));
+            }
+        }
+        if (fnmatch('wp-*.php', explode('/', $comparisonPath)[0])) {
+            throw new RuntimeException('Premium provider class path may not replace a WordPress core file.');
+        }
     }
 
     /**

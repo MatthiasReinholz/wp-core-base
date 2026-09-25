@@ -16,7 +16,10 @@ final class WordpressSmokeRunner
         $environment['WP_CORE_BASE_SMOKE_RECEIPT'] = $receipt;
         $environment['WP_CORE_BASE_SMOKE_RECEIPT_TOKEN'] = $token;
         try {
-            $process = proc_open([PHP_BINARY, $fixture, $phase], [STDIN, STDOUT, STDERR], $pipes, $runtimeRoot, $environment);
+            // Inherit OS descriptors directly. Recasting PHP's STDOUT/STDERR
+            // resources can seek a redirected shared log backwards and overwrite
+            // earlier validation output when each child starts.
+            $process = proc_open([PHP_BINARY, $fixture, $phase], [], $pipes, $runtimeRoot, $environment);
             if (! is_resource($process) || proc_close($process) !== 0) {
                 throw new RuntimeException('WordPress runtime smoke failed during ' . $phase . '.');
             }

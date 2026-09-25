@@ -19,11 +19,12 @@ final class CoreContentOwnership
             return false;
         }
 
+        $comparisonPath = ConfigPathRules::filesystemPath($this->config->repoRoot, $relativePath);
         foreach ($this->config->dependencies() as $dependency) {
-            $ownedPath = (string) $dependency['path'];
-            if ($relativePath === $ownedPath
-                || str_starts_with($relativePath, $ownedPath . '/')
-                || str_starts_with($ownedPath, $relativePath . '/')) {
+            $ownedPath = ConfigPathRules::filesystemPath($this->config->repoRoot, (string) $dependency['path']);
+            if ($comparisonPath === $ownedPath
+                || str_starts_with($comparisonPath, $ownedPath . '/')
+                || str_starts_with($ownedPath, $comparisonPath . '/')) {
                 return false;
             }
         }

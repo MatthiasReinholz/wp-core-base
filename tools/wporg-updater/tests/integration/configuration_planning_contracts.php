@@ -133,6 +133,13 @@ function run_configuration_planning_contract_tests(callable $assert, string $fra
         foreach (['/tmp/provider.php', '../provider.php', 'providers/..', 'C:provider.php', 'C:/provider.php', "providers/\0evil.php", '.wp-core-base/manifest.php', '.wp-core-base/premium-providers.php'] as $path) {
             $assert($throws(static fn () => $scaffolder->scaffold('sample', null, $path)), 'Premium class paths must reject traversal, absolute paths and control-file collisions.');
         }
+        foreach (['.git/config', '.github/workflows/provider.php', '.wp-core-base/build/locks/mutation.lock', 'tools/wporg-updater/src/Config.php', 'lib/wp-core-base/provider.php', 'cms/plugins/demo/demo.php'] as $path) {
+            $directory = dirname($root . '/' . $path);
+            if (! is_dir($directory)) { mkdir($directory, 0700, true); }
+            file_put_contents($root . '/' . $path, 'protected-provider-sentinel');
+            $assert($throws(static fn () => $scaffolder->scaffold('sample', null, $path, true)), 'Forced premium scaffolding must reject protected path ' . $path . '.');
+            $assert(file_get_contents($root . '/' . $path) === 'protected-provider-sentinel', 'Rejected premium scaffolding must preserve control/runtime file ' . $path . '.');
+        }
         mkdir($root . '/outside', 0700);
         file_put_contents($root . '/outside/KEEP', 'preserved');
         symlink($root . '/outside', $root . '/linked-provider');
@@ -141,6 +148,8 @@ function run_configuration_planning_contract_tests(callable $assert, string $fra
         $assert($throws(static fn () => $scaffolder->scaffold('sample', 'Invalid; injected')), 'Premium class names must be validated before rendering executable PHP.');
         $scaffolded = $scaffolder->scaffold('sample');
         $assert(is_file($root . '/' . $scaffolded['path']) && PremiumProviderRegistry::load($root)->hasProvider('sample'), 'Valid custom providers must continue to scaffold and register.');
+        $customPath = $scaffolder->scaffold('sample-custom', null, 'project-tools/sample-provider.php');
+        $assert(is_file($root . '/' . $customPath['path']) && PremiumProviderRegistry::load($root)->hasProvider('sample-custom'), 'Explicit provider paths in project-owned tooling must remain supported.');
         $registryPath = $root . '/.wp-core-base/premium-providers.php';
         $validRegistry = file_get_contents($registryPath);
         foreach (['/tmp/invalid.php', '../invalid.php', 'linked-provider/provider.php'] as $path) {

@@ -118,6 +118,10 @@ final class EnvironmentDoctor
         $this->ok(sprintf('Ownership roots: %s.', implode(', ', $config->ownershipRoots())));
         $this->inspectRuntimeAllowPaths($config);
 
+        if ($config->profile !== 'full-core' || ! $config->coreManaged()) {
+            $this->warn('Plugin minimum WordPress compatibility is unverified because core is externally supplied or disabled. Validate plugin requirements against the deployment core.');
+        }
+
         if ($config->profile === 'content-only') {
             $this->okIf(
                 ! $config->coreManaged(),

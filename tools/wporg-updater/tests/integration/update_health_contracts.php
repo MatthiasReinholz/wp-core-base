@@ -9,6 +9,23 @@ function run_update_health_contract_tests(callable $assert): void
 {
     $policy = new UpdateHealthReport();
     $now = 1800000000;
+    $oldRun = ['workflow_id' => 10, 'id' => 100, 'event' => 'pull_request', 'created_at' => gmdate(DATE_ATOM, $now - 3600), 'status' => 'completed', 'conclusion' => 'action_required'];
+    $newRun = array_replace($oldRun, ['id' => 101, 'created_at' => gmdate(DATE_ATOM, $now), 'conclusion' => 'success']);
+    $assert($policy->latestWorkflowRuns([$oldRun, $newRun]) === [$newRun], 'An old approval-required run must not mask the latest successful execution.');
+    $assert($policy->latestWorkflowRuns([$newRun, $oldRun]) === [$newRun], 'Workflow selection must be independent of API ordering.');
+    $otherWorkflow = array_replace($oldRun, ['workflow_id' => 11]);
+    $assert(count($policy->latestWorkflowRuns([$oldRun, $newRun, $otherWorkflow])) === 2, 'A newer run of another workflow must not hide a blocked workflow.');
+    $otherEvent = array_replace($oldRun, ['event' => 'push']);
+    $assert(count($policy->latestWorkflowRuns([$newRun, $otherEvent])) === 2, 'Separate workflow events must retain their own current execution.');
+    $rerun = array_replace($newRun, ['run_attempt' => 2, 'conclusion' => 'failure']);
+    $assert($policy->latestWorkflowRuns([$rerun, $newRun]) === [$rerun], 'A newer attempt of the same run must remain authoritative.');
+    $invalidRun = array_replace($oldRun, ['created_at' => 'invalid']);
+    try {
+        $policy->latestWorkflowRuns([$invalidRun]);
+        $assert(false, 'Malformed workflow metadata must prevent a healthy report.');
+    } catch (RuntimeException $exception) {
+        $assert(str_contains($exception->getMessage(), 'incomplete workflow run'), 'Malformed workflow metadata fails with an actionable diagnostic.');
+    }
     $pr = ['number' => 1, 'url' => 'https://example.invalid/1', 'created_at' => gmdate(DATE_ATOM, $now - 7200),
         'queued' => false, 'checks' => ['quality' => 'SUCCESS'], 'runs' => []];
     $assert($policy->evaluate([$pr], ['quality'], [], $now)['status'] === 'healthy', 'Fresh checked update should be healthy.');

@@ -44,6 +44,9 @@ final class DependencyMutationTransaction
         if ($this->hadRuntimePath) {
             $this->inspector->copyPath((string) $runtimePath, $this->workspace->path() . '/runtime');
         }
+        // Configuration-only operations also require recovery if interrupted
+        // between their manifest and governance writes.
+        $this->workspace->retainRecovery();
     }
 
     public function beginRuntimeMutation(): void
@@ -57,7 +60,7 @@ final class DependencyMutationTransaction
     /** Called after the operation's commit point, outside its rollback catch. */
     public function commit(): void
     {
-        $this->workspace->close();
+        $this->workspace->discardRecovery();
     }
 
     public function rollback(Throwable $original): never
@@ -93,7 +96,7 @@ final class DependencyMutationTransaction
                 $original->getMessage(), $this->workspace->path(), implode(' ', $failures)), 0, $original);
         }
         try {
-            $this->workspace->close();
+            $this->workspace->discardRecovery();
         } catch (Throwable $cleanupFailure) {
             throw new RuntimeException($original->getMessage() . ' Recovery succeeded, but cleanup failed: ' . $cleanupFailure->getMessage(), 0, $original);
         }

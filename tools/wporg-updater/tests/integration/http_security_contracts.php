@@ -97,6 +97,18 @@ function run_http_security_contract_tests(callable $assert, string $repoRoot): v
         $expectFailure(fn () => (new HttpClient(timeoutSeconds: 2))->getWithOptions($origin . '/direct', [], ['retry_attempts' => 1]), 'The TLS fixture fails without explicit CA trust.');
         $expectFailure(fn () => $client->getWithOptions('http://127.0.0.1:' . $ports[0], [], $options), 'Initial HTTP URLs are rejected before sending credentials.', 'HTTPS');
         $expectFailure(fn () => $client->requestWithOptions('POST', $origin . '/cross-host', [], ['secret' => 'body'], null, true, $options), 'Sensitive request bodies cannot be redirected.', 'GET and HEAD');
+        foreach (['GET', 'HEAD'] as $method) {
+            foreach ([['token' => 'synthetic-body-secret'], null] as $jsonBody) {
+                $before = count($readLog());
+                $rawBody = $jsonBody === null ? 'token=synthetic-body-secret' : null;
+                $expectFailure(
+                    fn () => $client->requestWithOptions($method, $origin . '/cross-host', $headers, $jsonBody, $rawBody, true, $options),
+                    $method . ' rejects redirect following with ' . ($jsonBody === null ? 'a raw body.' : 'a JSON body.'),
+                    'request body'
+                );
+                $assert(count($readLog()) === $before, 'A body-bearing ' . $method . ' is rejected before any network request.');
+            }
+        }
 
         putenv('WP_CORE_BASE_HTTP_TEST_TOKEN=adapter-secret');
         $github = new GitHubReleaseClient($client, $origin);

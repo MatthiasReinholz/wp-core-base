@@ -88,6 +88,12 @@ final class FrameworkInstaller
 
         try {
             $this->runtimeInspector->copyPath($payloadRoot, $stagingPath);
+            // ZipArchive::extractTo does not retain ZIP executable modes, including
+            // payloads extracted by legacy clients. Only the approved launcher needs it.
+            $launcher = $stagingPath . '/bin/wp-core-base';
+            if (! is_file($launcher) || is_link($launcher) || ! chmod($launcher, 0755)) {
+                throw new RuntimeException('Unable to make the installed framework launcher executable.');
+            }
             $pathSwapper->swap($targetPath, $stagingPath, $backupPath, $this->repoRoot);
             $swappedIntoPlace = true;
 
@@ -214,11 +220,19 @@ final class FrameworkInstaller
     private function buildPlan(string $payloadRoot, string $distributionPath): array
     {
         $currentFramework = FrameworkConfig::load($this->repoRoot);
-        $payloadFramework = FrameworkConfig::load($payloadRoot);
         $downstreamConfig = Config::load($this->repoRoot);
-        $distributionPath = trim($distributionPath) === '' ? $currentFramework->distributionPath() : trim($distributionPath, '/');
-        $distributionPath = $distributionPath === '' ? '.' : $distributionPath;
-        $targetPath = $distributionPath === '.' ? $this->repoRoot : $this->repoRoot . '/' . $distributionPath;
+        $distributionPath = ConfigPathRules::normalizedRelativePath(
+            trim($distributionPath) === '' ? $currentFramework->distributionPath() : $distributionPath,
+            'distribution.path'
+        );
+        ConfigPathRules::assertSafeFrameworkDistributionPath(
+            $this->repoRoot,
+            $distributionPath,
+            $downstreamConfig->paths,
+            array_merge($downstreamConfig->runtime['ownership_roots'], array_column($downstreamConfig->dependencies(), 'path'))
+        );
+        $payloadFramework = FrameworkConfig::load($payloadRoot);
+        $targetPath = $this->repoRoot . '/' . $distributionPath;
         $renderedFiles = (new DownstreamScaffolder($payloadRoot, $this->repoRoot))->renderFrameworkManagedFiles(
             $distributionPath,
             [],

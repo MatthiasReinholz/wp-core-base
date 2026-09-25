@@ -8,6 +8,36 @@ namespace WpOrgPluginUpdater;
 final class UpdateHealthReport
 {
     /**
+     * Select current attempts independently of API ordering. An older blocked or
+     * failed run must not override a newer run of the same workflow and event.
+     *
+     * @param list<array<string,mixed>> $runs
+     * @return list<array<string,mixed>>
+     */
+    public function latestWorkflowRuns(array $runs): array
+    {
+        $latest = [];
+        foreach ($runs as $run) {
+            $workflow = $run['workflow_id'] ?? null;
+            $event = $run['event'] ?? null;
+            $created = $run['created_at'] ?? null;
+            $id = $run['id'] ?? null;
+            if (! is_int($workflow) || ! is_string($event) || $event === '' || ! is_string($created)
+                || strtotime($created) === false || ! is_int($id)) {
+                throw new \RuntimeException('GitHub returned an incomplete workflow run; current automation health cannot be established.');
+            }
+            $key = $workflow . ':' . $event;
+            $previous = $latest[$key] ?? null;
+            if ($previous === null || [strtotime($created), $id, (int) ($run['run_attempt'] ?? 1)]
+                > [strtotime((string) $previous['created_at']), $previous['id'], (int) ($previous['run_attempt'] ?? 1)]) {
+                $latest[$key] = $run;
+            }
+        }
+
+        return array_values($latest);
+    }
+
+    /**
      * @param list<array{number:int,url:string,created_at:string,queued:bool,checks:array<string,string>,runs:list<array{status:string,conclusion:string}>}> $pullRequests
      * @param list<string> $requiredChecks
      * @param list<array{name:string,status:string,conclusion:string,url:string,created_at:string}> $sourceRuns

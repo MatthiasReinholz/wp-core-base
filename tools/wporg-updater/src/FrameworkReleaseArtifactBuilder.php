@@ -106,12 +106,17 @@ final class FrameworkReleaseArtifactBuilder
         if (file_exists($destination) || is_link($destination)) {
             throw new RuntimeException('Snapshot fixture destination must not already exist.');
         }
-        $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->repoRoot, \FilesystemIterator::SKIP_DOTS));
+        $prefixLength = strlen(rtrim($this->repoRoot, '/\\')) + 1;
+        $directory = new \RecursiveDirectoryIterator($this->repoRoot, \FilesystemIterator::SKIP_DOTS);
+        $filter = new \RecursiveCallbackFilterIterator($directory, static function (\SplFileInfo $file) use ($prefixLength): bool {
+            $path = str_replace('\\', '/', substr($file->getPathname(), $prefixLength));
+            return ($file->isDir() && ! $file->isLink())
+                ? FrameworkReleasePayload::allowsDirectory($path)
+                : FrameworkReleasePayload::allows($path) || ($file->isLink() && FrameworkReleasePayload::allowsDirectory($path));
+        });
+        $iterator = new \RecursiveIteratorIterator($filter);
         foreach ($iterator as $file) {
-            $path = str_replace('\\', '/', $iterator->getSubPathName());
-            if (! FrameworkReleasePayload::allows($path)) {
-                continue;
-            }
+            $path = str_replace('\\', '/', substr($file->getPathname(), $prefixLength));
             if ($file->isLink() || ! $file->isFile()) {
                 throw new RuntimeException(sprintf('Release fixture contains a non-regular allowed input: %s', $path));
             }

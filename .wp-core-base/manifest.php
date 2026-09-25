@@ -304,8 +304,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/jetpack',
       'main_file' => 'jetpack.php',
-      'version' => '16.1.2',
-      'checksum' => 'sha256:0bfe398f5ff8d6cba6893f08e596cf5168047e1f35d1aca90f4b23e63258b1f4',
+      'version' => '16.1.3',
+      'checksum' => 'sha256:e4dae22f1f556f3bae0d5befeeddc2dd8a5fa4d4df2237308a6a71b903335db0',
       'archive_subdir' => '',
       'extra_labels' =>
       array (
@@ -410,8 +410,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/redirection',
       'main_file' => 'redirection.php',
-      'version' => '5.10.0',
-      'checksum' => 'sha256:ed1cafc8bac2f443db02287694a7f9b272cf4c1b4b5dff066e68b0a5fc8f7ab1',
+      'version' => '5.10.1',
+      'checksum' => 'sha256:fd81a34b2ec276fbf2eb3a24036742572128cb638e5ed69caacfd8e5ccd6e750',
       'archive_subdir' => '',
       'extra_labels' =>
       array (

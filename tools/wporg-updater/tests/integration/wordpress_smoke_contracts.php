@@ -35,6 +35,20 @@ function run_wordpress_smoke_contract_tests(callable $assert, string $repoRoot):
             WordpressSmokeRunner::run($fixture, $phase, $workspace->path(), []);
             $assert(true, 'Expected a completed smoke phase with a matching receipt to pass: ' . $phase);
         }
+        file_put_contents($fixture, '<?php ' . $require . 'fwrite(STDOUT,"child-out\\n"); fwrite(STDERR,"child-error\\n"); WordpressSmokeRunner::complete($argv[1]);');
+        $parent = $workspace->path() . '/parent.php';
+        file_put_contents($parent, '<?php ' . $require . 'fwrite(STDOUT,"parent-before\\n"); WordpressSmokeRunner::run('
+            . var_export($fixture, true) . ',"bootstrap",' . var_export($workspace->path(), true) . ',[]); fwrite(STDOUT,"parent-after\\n");');
+        $log = $workspace->path() . '/combined.log';
+        $handle = fopen($log, 'w+b');
+        if ($handle === false) { throw new RuntimeException('Unable to open redirected smoke log fixture.'); }
+        try {
+            $child = proc_open([PHP_BINARY, $parent], [1 => $handle, 2 => $handle], $pipes);
+            $assert(is_resource($child) && proc_close($child) === 0, 'Redirected smoke validation must complete successfully.');
+        } finally {
+            fclose($handle);
+        }
+        $assert(file_get_contents($log) === "parent-before\nchild-out\nchild-error\nparent-after\n", 'Smoke subprocesses must preserve earlier output and ordering in a shared redirected validation log.');
     } finally {
         $workspace->close();
     }

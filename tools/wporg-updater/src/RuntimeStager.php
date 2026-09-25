@@ -217,6 +217,7 @@ final class RuntimeStager
         }
 
         $this->runtimeInspector->assertTreeIsClean($absoluteOutput);
+        (new RuntimeCompatibilityValidator($this->config))->assertPluginCoreCompatibility($absoluteOutput);
 
         $stagedPaths = array_values(array_unique($stagedPaths));
         sort($stagedPaths);

@@ -93,6 +93,13 @@ final class TempWorkspace
     /** Keep recovery data indefinitely, outside automatic stale-workspace cleanup. */
     public function preserve(): void
     {
+        $this->retainRecovery();
+        $this->releaseLock();
+    }
+
+    /** Mark recovery before mutation; retain the active operation lock. */
+    public function retainRecovery(): void
+    {
         if ($this->closed) {
             throw new RuntimeException('Cannot preserve a closed temporary workspace.');
         }
@@ -104,10 +111,25 @@ final class TempWorkspace
             throw new RuntimeException(sprintf('Cannot preserve unrecognized workspace %s.', $this->root));
         }
         $marker['preserved'] = true;
-        if (file_put_contents($markerPath, json_encode($marker, JSON_THROW_ON_ERROR) . "\n") === false) {
-            throw new RuntimeException(sprintf('Unable to mark recovery workspace %s.', $this->root));
+        (new AtomicFileWriter())->write($markerPath, json_encode($marker, JSON_THROW_ON_ERROR) . "\n");
+    }
+
+    /** Delete recovery only after the caller proves commit or complete restoration. */
+    public function discardRecovery(): void
+    {
+        if ($this->closed) {
+            throw new RuntimeException('Cannot discard recovery from a closed temporary workspace.');
         }
-        $this->releaseLock();
+        $this->assertWorkspaceIdentity();
+        // Keep the durable marker preserved while deleting. A crash or cleanup
+        // failure cannot make the remaining recovery tree a janitor target.
+        try {
+            if (! self::removeOwnedTree($this->root)) {
+                throw new RuntimeException(sprintf('Unable to remove temporary workspace %s.', $this->root));
+            }
+        } finally {
+            $this->releaseLock();
+        }
     }
 
     public function __destruct()

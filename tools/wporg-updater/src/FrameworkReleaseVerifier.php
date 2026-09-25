@@ -210,7 +210,7 @@ final class FrameworkReleaseVerifier
     {
         $doctorOutput = $this->runVendoredCommand(
             $downstreamRoot,
-            'php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --json'
+            'vendor/wp-core-base/bin/wp-core-base doctor --repo-root=. --json'
         );
         $this->assertSuccessfulJsonResult($doctorOutput, 'doctor');
 
@@ -228,7 +228,9 @@ final class FrameworkReleaseVerifier
             2 => ['pipe', 'w'],
         ];
 
-        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory);
+        $environment = getenv();
+        $environment['PHP'] = PHP_BINARY;
+        $process = proc_open(['/bin/sh', '-lc', $command], $descriptorSpec, $pipes, $workingDirectory, $environment);
 
         if (! is_resource($process)) {
             throw new RuntimeException(sprintf('Failed to start vendored release verification command: %s', $command));

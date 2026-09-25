@@ -72,6 +72,8 @@ This is the right fit for:
 
 First place the verified official `wp-core-base-vendor-snapshot.zip` tooling payload at `vendor/wp-core-base`. It retains the `wp-core-base/` archive root and contains the launcher, framework source, templates, keys, docs, and metadata; it does not bring a second WordPress core or plugin baseline into your content-only project. Verify its signed checksum using a trusted framework public key before using the payload. Maintainer verification details are in [release-process.md](release-process.md#release-signing).
 
+If your ZIP extractor does not preserve executable permissions, run `chmod +x vendor/wp-core-base/bin/wp-core-base` after verification so the direct authoring commands work. The same one-time step applies after an update installed by v1.4.8. Current framework installers restore this launcher permission automatically.
+
 Then bootstrap:
 
 ```bash

@@ -30,6 +30,7 @@ Everything else exists to load, validate, project, or automate those contracts.
 - `RuntimeInspector` is the low-level runtime policy engine
 - `RuntimeOwnershipInspector` discovers undeclared runtime paths
 - `RuntimeStager` assembles and validates a private deployment payload before publishing it
+- `RuntimeCompatibilityValidator` checks staged plugin entrypoints' minimum WordPress headers against local managed core
 - canonical path validation protects runtime inputs, repository metadata, tooling, lock paths, and configured distribution paths
 
 Core invariant:

@@ -181,6 +181,8 @@ See [immutable artifact decisions](decisions/003-release-artifacts.md) and [file
 
 The framework ZIP keeps the `wp-core-base-vendor-snapshot.zip` asset name and `wp-core-base/` root while removing the optional runtime starter payload. Compatibility tests exercise the v1.4.8 installer with the smaller payload across both repository profiles and automation hosts, and the current consumer with a historical full snapshot. A framework update changes tooling and framework metadata; its recorded WordPress/plugin baseline does not install those versions into a downstream runtime.
 
+ZIP entry modes do not guarantee extracted filesystem modes: PHP's `ZipArchive::extractTo` discards executable attributes. The current installer explicitly restores only the approved `bin/wp-core-base` launcher to `0755` before replacing the vendor tree, and release verification invokes that launcher directly. An old v1.4.8 installer cannot perform this new repair; its migration requires `chmod +x vendor/wp-core-base/bin/wp-core-base` after installation and committing the mode change. The exact legacy compatibility tests include that documented repair before direct CLI execution.
+
 Use a tagged source checkout or Git source archive when a new full-core project needs the optional WordPress/plugin starter. GitHub's automatically generated source archives are source snapshots, not the signed framework ZIP. Verify source identity separately and run the normal runtime checks before deployment.
 
 For repeatable package-cost measurements, use the maintainer harness described in [evaluating alternatives](evaluating-alternatives.md#measuring-package-cost). Keep raw results and artifact hashes with release evidence; do not interpret extraction timing as application throughput.

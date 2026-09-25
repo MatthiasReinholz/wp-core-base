@@ -57,6 +57,9 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         if ($followRedirects && ! in_array(strtoupper($method), ['GET', 'HEAD'], true)) {
             throw new HttpPolicyViolation('Redirect following is supported only for GET and HEAD requests.');
         }
+        if ($followRedirects && ($json !== null || $body !== null)) {
+            throw new HttpPolicyViolation('Redirect following is not supported for requests with a request body.');
+        }
         $headers = HttpRequestPolicy::initialHeaders($headers, $url, $options);
 
         return $this->requestOnce($method, $url, $headers, $json, $body, $followRedirects, $options);

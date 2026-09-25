@@ -51,6 +51,56 @@ function run_filesystem_hardening_contract_tests(callable $assert): void
         }
         $assert($config->stageDir('./.wp-core-base//build/runtime/') === $repo . '/.wp-core-base/build/runtime', 'Stage paths should have one canonical spelling.');
         mkdir($repo . '/.wp-core-base', 0700);
+        mkdir($repo . '/.git', 0700);
+        file_put_contents($repo . '/.git/KEEP', 'repository metadata');
+        mkdir($repo . '/.wp-core-base/build/locks', 0700, true);
+        mkdir($repo . '/wp-admin', 0700);
+        $caseInsensitive = is_dir($repo . '/.GIT');
+        if ($caseInsensitive) {
+            foreach (['.GIT', '.Git/objects', '.Wp-core-base', '.WP-CORE-BASE/build/LOCKS', 'CMS', 'cms/PLUGINS/local-plugin', 'WP-ADMIN'] as $output) {
+                $assert($throws(static fn () => $config->stageDir($output)), 'Stage output must reject filesystem aliases of control or source paths: ' . $output);
+            }
+            $assert($throws(static fn () => (new RuntimeStager($config, $inspector))->stage('.GIT')), 'The destructive stage command must reject a Git directory alias.');
+            $assert(file_get_contents($repo . '/.git/KEEP') === 'repository metadata', 'Alias rejection must preserve existing Git metadata.');
+            foreach (['.GIT/config', '.Wp-core-base/manifest.php'] as $path) {
+                $assert($throws(static fn () => ConfigPathRules::assertSafeDependencyPath($repo, $path)), 'Dependency ownership must reject a filesystem control alias: ' . $path);
+            }
+            $aliases = $manifest;
+            $second = $aliases['dependencies'][0];
+            $second['slug'] = 'same-payload-alias';
+            $second['path'] = 'cms/plugins/LOCAL-PLUGIN';
+            $aliases['dependencies'][] = $second;
+            $assert($throws(static fn () => Config::fromArray($repo, $aliases)), 'Strict ownership must reject different spellings of the same dependency directory.');
+            $aliasedManifest = $manifest;
+            $aliasedManifest['dependencies'][0]['path'] = 'cms/plugins/LOCAL-PLUGIN';
+            $aliasedConfig = Config::fromArray($repo, $aliasedManifest);
+            $assert((new \WpOrgPluginUpdater\RuntimeOwnershipInspector($aliasedConfig))->undeclaredRuntimePaths() === [], 'Physical dependency aliases must not also be classified as undeclared runtime.');
+            file_put_contents($repo . '/cms/plugins/index.php', 'project-owned index');
+            $ownedIndex = $manifest;
+            $ownedIndex['dependencies'][] = ['slug' => 'owned-index', 'kind' => 'runtime-file', 'management' => 'local', 'source' => 'local', 'path' => 'cms/plugins/INDEX.php'];
+            $indexConfig = Config::fromArray($repo, $ownedIndex);
+            $assert(! (new \WpOrgPluginUpdater\CoreContentOwnership($indexConfig))->mayReplace('cms/plugins/index.php', false), 'Core index stubs must preserve declared file ownership through filesystem aliases.');
+            unlink($repo . '/cms/plugins/index.php');
+        } else {
+            $assert($config->stageDir('.GIT') === $repo . '/.GIT', 'A distinct path on a case-sensitive filesystem must retain its meaning.');
+            ConfigPathRules::assertSafeDependencyPath($repo, '.GIT/config');
+        }
+        foreach (['.git', '.github', '.wp-core-base/build'] as $controlPath) {
+            $unsafeSources = ['profile' => 'content-only', 'paths' => ['content_root' => '.', 'plugins_root' => $controlPath, 'themes_root' => 'themes', 'mu_plugins_root' => 'mu-plugins']];
+            $assert($throws(static fn () => Config::fromArray($repo, $unsafeSources)), 'Runtime source roots must not stage control data: ' . $controlPath);
+            $unsafeSources['paths']['plugins_root'] = 'plugins';
+            $unsafeSources['runtime']['allow_runtime_paths'] = [$controlPath];
+            $assert($throws(static fn () => Config::fromArray($repo, $unsafeSources)), 'Runtime allowlist paths must not stage control data: ' . $controlPath);
+        }
+        foreach (['wp-admin', 'wp-includes'] as $coreRoot) {
+            $coreSources = ['profile' => 'full-core', 'paths' => ['content_root' => $coreRoot, 'plugins_root' => $coreRoot . '/plugins', 'themes_root' => $coreRoot . '/themes', 'mu_plugins_root' => $coreRoot . '/mu-plugins']];
+            $assert($throws(static fn () => Config::fromArray($repo, $coreSources)), 'Enabled core updates must not overwrite separately configured runtime roots.');
+            $coreSources['core'] = ['enabled' => false];
+            $assert(Config::fromArray($repo, $coreSources)->paths['content_root'] === $coreRoot, 'Core-disabled projects retain authority over their custom runtime directory names.');
+            $ownedCore = ['profile' => 'full-core', 'paths' => ['content_root' => '.', 'plugins_root' => 'plugins', 'themes_root' => 'themes', 'mu_plugins_root' => 'mu-plugins'],
+                'dependencies' => [['slug' => 'local-core-child', 'kind' => 'runtime-directory', 'management' => 'local', 'source' => 'local', 'path' => $coreRoot . '/local-project']]];
+            $assert($throws(static fn () => Config::fromArray($repo, $ownedCore)), 'Local dependencies cannot be placed inside directories replaced by enabled core updates.');
+        }
         $frameworkMetadata = require dirname(__DIR__, 4) . '/.wp-core-base/framework.php';
         $frameworkMetadata['distribution']['path'] = 'lib/private-framework';
         file_put_contents($repo . '/.wp-core-base/framework.php', '<?php return ' . var_export($frameworkMetadata, true) . ';');
