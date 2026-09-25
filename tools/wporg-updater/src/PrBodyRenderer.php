@@ -258,13 +258,41 @@ MARKDOWN);
 
         $lastMarker = $markers[0][$markerCount - 1];
         $payloadStart = $lastMarker[1] + strlen($lastMarker[0]);
-        $commentEnd = strpos($body, '-->', $payloadStart);
-        if ($commentEnd === false || preg_match('/\A\s*:\s*(\{.*\})\s*\z/s', substr($body, $payloadStart, $commentEnd - $payloadStart), $matches) !== 1) {
+        $commentEnd = self::metadataCommentEnd($body, $payloadStart);
+        if ($commentEnd === null || preg_match('/\A\s*:\s*(\{.*\})\s*\z/s', substr($body, $payloadStart, $commentEnd - $payloadStart), $matches) !== 1) {
             return null;
         }
         $decoded = json_decode($matches[1], true);
 
         return is_array($decoded) ? $decoded : null;
+    }
+
+    private static function metadataCommentEnd(string $body, int $payloadStart): ?int
+    {
+        // Older renderers did not escape HTML delimiters in JSON string values.
+        // Only a delimiter outside a quoted JSON string can close their footer.
+        $inString = false;
+        $escaped = false;
+        $length = strlen($body);
+
+        for ($offset = $payloadStart; $offset < $length; ++$offset) {
+            $character = $body[$offset];
+            if ($inString) {
+                if ($escaped) {
+                    $escaped = false;
+                } elseif ($character === '\\') {
+                    $escaped = true;
+                } elseif ($character === '"') {
+                    $inString = false;
+                }
+            } elseif ($character === '"') {
+                $inString = true;
+            } elseif ($character === '-' && substr($body, $offset, 3) === '-->') {
+                return $offset;
+            }
+        }
+
+        return null;
     }
 
     /**

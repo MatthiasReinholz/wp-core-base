@@ -2,6 +2,39 @@
 
 This document is for downstream users moving from older setups into the current manifest-driven framework.
 
+## Upgrading An Existing Framework Installation
+
+Read the installed version and distribution path in `.wp-core-base/framework.php`, then review the release notes for every version you are crossing. Framework updates replace the vendored tooling and refresh unmodified framework-managed files. They do not upgrade your site's WordPress core, plugins, database or project-owned runtime code. Baseline versions recorded by the framework describe the optional starter repository; your runtime manifest remains authoritative.
+
+Start from a clean, committed downstream checkout. For the standard vendor path, preflight with the currently installed client:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php framework-sync --repo-root=. --check-only --fail-on-skipped-managed-files --json
+```
+
+Review `refreshed_files`, `removed_files` and `skipped_files` before creating or merging the framework update PR. The strict preflight intentionally fails when customized managed files need attention. Reconcile those changes with your customization; do not overwrite local workflows blindly. Adjust the command path when your distribution lives elsewhere. For a source checkout, use `php tools/wporg-updater/bin/wporg-updater.php` instead.
+
+Verified release and installer tests cover the v1.4.8 installer and the current installer across `full-core` and `content-only`, on GitHub and GitLab. That is a tested compatibility boundary, not a guarantee for every historical release or customized installation. Older clients must first have the correct independently trusted signing key and support the signed release format. Review their intervening release notes and rehearse in a disposable clone; do not bypass signature checks to make an old client accept a release.
+
+When crossing these versions, include the corresponding migration actions:
+
+| Starting point | Required review or action |
+| --- | --- |
+| v1.4.8 installer or a manual ZIP extraction that loses file modes | After installation, run `chmod +x vendor/wp-core-base/bin/wp-core-base` and commit the executable-bit change before using the direct launcher. The PHP-prefixed maintenance command remains usable. Newer installers restore this mode automatically. |
+| Before v1.5.0 | Fix duplicate dependency identities and unknown security/source configuration keys. Keep provider-specific configuration in `extensions`. Pass boolean flags without values and remove options belonging to other commands. Review the tooling-only artifact change and workflow quoting changes in [v1.5.0](releases/1.5.0.md). |
+| Before v1.6.1, using GitHub automation | Review the job-level cleanup/sync concurrency change in [v1.6.1](releases/1.6.1.md), including customized reconciliation workflows skipped by the installer. Upgrading does not replay cancelled historical cleanup jobs; use the [individual recovery procedure](operations.md#blocked-prs) where needed. |
+| Before v1.6.4, with existing automation PRs | Review PRs whose recorded branch differs from the actual head or whose final metadata is malformed. Correct the metadata or recreate the PR through the updater; the new guard intentionally refuses a conflicting branch. See [v1.6.4](releases/1.6.4.md). |
+| Custom premium providers | Rehearse catalog and release resolution with the installed adapter and its real API format. Return a non-empty version and an explicit timezone-bearing timestamp; malformed dates still fail validation. See the [provider contract](adding-premium-provider.md#method-contracts). |
+
+After the update and any required manual reconciliation, run:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation --json
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime --json
+```
+
+Use `doctor --json` without `--automation` for a repository that does not configure PR automation. Review the update diff, require your normal downstream checks, and merge before deploying. For `content-only` or external core, test the separately supplied core against the selected plugins; filesystem checks cannot verify that external layer. A real core/plugin/database migration requires its own backup, deployment rehearsal and rollback plan, as described in [baseline upgrades](baseline-upgrades.md).
+
 ## From `.github/wporg-updates.php`
 
 The old plugin config file is no longer the primary configuration surface.

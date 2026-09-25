@@ -182,6 +182,61 @@ function run_configuration_planning_contract_tests(callable $assert, string $fra
         foreach ([[], ['latest_version' => 3, 'latest_release_at' => '2026-09-25T08:00:00Z'], ['latest_version' => '1', 'latest_release_at' => 'tomorrow'], ['latest_version' => '1', 'latest_release_at' => '2026-02-30T08:00:00Z']] as $invalidCatalog) {
             $assert($throws(static fn () => SourceCatalog::fromArray($invalidCatalog, 'sample')), 'Malformed catalog minimum records must fail before planning.');
         }
+        $providerTimestamps = [
+            (new DateTimeImmutable('2026-09-25T08:00:00+02:30'))->format(DateTime::ISO8601),
+            '2026-09-25T08:00:00-0230',
+            '2026-09-25T08:00:00.123456+0230',
+            '2026-09-25T08:00:00.123456Z',
+            '2026-09-25T08:00Z',
+            '2026-09-25T08:00+02:30',
+            '2026-09-25T08:00-0230',
+            '2026-09-25T08:00:00+02',
+            '2026-09-25T08:00-02',
+            '20260925T080000Z',
+            '20260925T080000+0230',
+            '20260925T080000-02:30',
+            '20260925T0800Z',
+            '20260925T0800+0230',
+            '20260925T0800-02:30',
+            '20260925T080000+02',
+            '20260925T0800-02',
+            '2024-02-29T08:00:00Z',
+            '20240229T080000Z',
+        ];
+        foreach ($providerTimestamps as $timestamp) {
+            $providerCatalog = [...$catalog, 'latest_release_at' => $timestamp];
+            $providerRelease = [...$release, 'release_at' => $timestamp];
+            $providerRegistry = new ManagedSourceRegistry(new ConfigurationContractSource('legacy-vendor', $providerCatalog, $providerRelease));
+            $assert($providerRegistry->fetchCatalog($dependency) === $providerCatalog, 'Legacy provider catalog timestamps and opaque metadata must survive validation: ' . $timestamp);
+            $assert($providerRegistry->releaseDataForVersion($dependency, $providerCatalog, '2.0.1', $timestamp) === $providerRelease, 'Legacy provider release timestamps and opaque metadata must survive validation: ' . $timestamp);
+        }
+        foreach ([
+            '2026-02-29T08:00:00+0000',
+            '20260230T0800Z',
+            '2026-13-25T08:00Z',
+            '20260900T080000Z',
+            '2026-09-25T24:00Z',
+            '20260925T240000+0000',
+            '2026-09-25T08:60:00+0000',
+            '20260925T080060Z',
+            '2026-09-25T08:00:00+24:00',
+            '20260925T080000-2400',
+            '2026-09-25T08:00+02:60',
+            '20260925T0800-0260',
+            '2026-09-25T08:00:00+2',
+            '2026-09-25T08:00:00+24',
+            '2026-09-25T08:00:00+02:',
+            '2026-09-25T08:00:00+026',
+            '2026-09-25T08:00:00',
+            '20260925T080000',
+            '2026-09-25',
+            '2026-09-25T08:00:00 Europe/Berlin',
+            'tomorrow',
+            '2026-09-25T08:00:00Z +1 day',
+        ] as $timestamp) {
+            $assert($throws(static fn () => SourceCatalog::fromArray([...$catalog, 'latest_release_at' => $timestamp], 'sample')), 'Catalog timestamps must reject invalid calendar/time/offset fields, missing zones, and natural language: ' . $timestamp);
+            $assert($throws(static fn () => SourceRelease::fromArray([...$release, 'release_at' => $timestamp], 'sample', '2.0.1')), 'Release timestamps must reject invalid calendar/time/offset fields, missing zones, and natural language: ' . $timestamp);
+        }
         $assert($throws(static fn () => SourceRelease::fromArray($release, 'sample', '2.0.0')), 'Resolved release identity must match the requested version.');
         $assert($throws(static fn () => SourceRelease::fromArray(['version' => '2.0.1'], 'sample', '2.0.1')), 'Release records must declare a valid publication timestamp.');
 
