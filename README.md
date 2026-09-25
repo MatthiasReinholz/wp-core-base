@@ -143,13 +143,13 @@ That surfaces any framework-managed files that would refresh, be removed, or be 
 
 This repository currently ships:
 
-- framework release `1.4.8`
-- WordPress core `6.9.4`
+- framework release `1.5.0`
+- WordPress core `6.9.9`
 - Akismet `5.6`
 - WooCommerce `11.0.1`
-- Jetpack `16.1.2`
+- Jetpack `16.1.3`
 - Contact Form 7 `6.1.7`
-- Redirection `5.10.0`
+- Redirection `5.10.1`
 - Twenty Twenty-Three `1.6`
 - Twenty Twenty-Four `1.4`
 - Twenty Twenty-Five `1.4`

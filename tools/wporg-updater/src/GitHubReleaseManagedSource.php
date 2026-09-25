@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class GitHubReleaseManagedSource implements ManagedDependencySource
+final class GitHubReleaseManagedSource implements ManagedDependencySource, HistoricalVersionSource
 {
     public function __construct(
         private readonly GitHubReleaseClient $client,
@@ -16,6 +16,11 @@ final class GitHubReleaseManagedSource implements ManagedDependencySource
     public function key(): string
     {
         return 'github-release';
+    }
+
+    public function supportsHistoricalVersions(array $dependency): bool
+    {
+        return true;
     }
 
     public function fetchCatalog(array $dependency): array

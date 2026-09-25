@@ -115,6 +115,8 @@ final class FrameworkSyncer
 
     public function sync(bool $failOnSkippedManagedFiles = false): void
     {
+        // Applying a queued branch changes $this->framework; review scope always uses this base.
+        $baseFramework = $this->framework;
         $releases = $this->frameworkReleaseClient->fetchStableReleases($this->framework);
         $latestRelease = $this->frameworkReleaseClient->releaseData($this->framework, $releases[0]);
 
@@ -131,7 +133,7 @@ final class FrameworkSyncer
 
         foreach ($openPrs as $pr) {
             try {
-                $plannedPrs[] = $this->planExistingPullRequest($pr, $this->framework->version, (string) $latestRelease['version'], (string) $latestRelease['release_at'], $baseRevision);
+                $plannedPrs[] = $this->planExistingPullRequest($pr, $baseFramework->version, (string) $latestRelease['version'], (string) $latestRelease['release_at'], $baseRevision);
             } catch (\Throwable $throwable) {
                 fwrite(STDERR, sprintf(
                     "[warn] Ignoring malformed framework automation PR #%d: %s\n",
@@ -163,12 +165,12 @@ final class FrameworkSyncer
                 $activePlannedPrs
             );
 
-            if ($this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch, $baseRevision, $failOnSkippedManagedFiles)) {
+            if ($this->refreshPullRequest($plannedPr, $latestRelease, $blockedBy, $defaultBranch, $baseRevision, $failOnSkippedManagedFiles, $baseFramework)) {
                 $activePlannedPrs[] = $plannedPr;
             }
         }
 
-        $highestCoveredVersion = $this->framework->version;
+        $highestCoveredVersion = $baseFramework->version;
 
         foreach ($activePlannedPrs as $plannedPr) {
             if (version_compare($plannedPr['planned_target_version'], $highestCoveredVersion, '>')) {
@@ -177,7 +179,7 @@ final class FrameworkSyncer
         }
 
         if (version_compare((string) $latestRelease['version'], $highestCoveredVersion, '>')) {
-            $scope = $this->releaseClassifier->classifyScope($highestCoveredVersion, (string) $latestRelease['version']);
+            $scope = UpdatePlan::scope($baseFramework->version, (string) $latestRelease['version'], $this->releaseClassifier);
 
             $this->createPullRequestForLatest(
                 $latestRelease,
@@ -185,7 +187,8 @@ final class FrameworkSyncer
                 array_map(static fn (array $pr): int => (int) $pr['number'], $activePlannedPrs),
                 $defaultBranch,
                 $baseRevision,
-                $failOnSkippedManagedFiles
+                $failOnSkippedManagedFiles,
+                $baseFramework
             );
         }
     }
@@ -197,39 +200,16 @@ final class FrameworkSyncer
     private function planExistingPullRequest(array $pullRequest, string $baseVersion, string $latestVersion, string $latestReleaseAt, string $baseRevision): array
     {
         $metadata = PrBodyRenderer::extractMetadata((string) ($pullRequest['body'] ?? ''));
-
-        if ($metadata === null) {
-            throw new RuntimeException(sprintf('Managed framework pull request #%d is missing metadata.', $pullRequest['number']));
+        if (! is_array($metadata)) {
+            throw new RuntimeException(sprintf('Managed pull request #%d is missing metadata.', $pullRequest['number']));
         }
-
-        $targetVersion = (string) ($metadata['target_version'] ?? '');
-        $releaseAt = (string) ($metadata['release_at'] ?? '');
-        $scope = (string) ($metadata['scope'] ?? 'none');
-
-        if ($targetVersion === '' || $releaseAt === '') {
-            throw new RuntimeException(sprintf('Managed framework pull request #%d has incomplete metadata.', $pullRequest['number']));
-        }
-
-        $requiresCodeUpdate = $this->branchRefreshRequired($metadata, $baseRevision);
-
-        if (
-            $this->releaseClassifier->samePatchLine($targetVersion, $latestVersion) &&
-            version_compare($latestVersion, $targetVersion, '>') &&
-            $this->releaseClassifier->classifyScope($targetVersion, $latestVersion) === 'patch'
-        ) {
-            $targetVersion = $latestVersion;
-            $releaseAt = $latestReleaseAt;
-            $scope = 'patch';
-            $requiresCodeUpdate = true;
-        }
-
-        $metadata['base_version'] = $metadata['base_version'] ?? $baseVersion;
+        $plan = UpdatePlan::refresh($metadata, $baseVersion, $latestVersion, $latestReleaseAt, $baseRevision, $this->releaseClassifier);
+        $metadata['base_version'] = $plan->baseVersion;
         $pullRequest['metadata'] = $metadata;
-        $pullRequest['planned_target_version'] = $targetVersion;
-        $pullRequest['planned_release_at'] = $releaseAt;
-        $pullRequest['planned_scope'] = $scope;
-        $pullRequest['requires_code_update'] = $requiresCodeUpdate;
-
+        $pullRequest['planned_target_version'] = $plan->targetVersion;
+        $pullRequest['planned_release_at'] = $plan->releaseAt;
+        $pullRequest['planned_scope'] = $plan->scope;
+        $pullRequest['requires_code_update'] = $plan->requiresBranchRefresh;
         return $pullRequest;
     }
 
@@ -238,7 +218,7 @@ final class FrameworkSyncer
      * @param array<string, mixed> $latestRelease
      * @param list<int> $blockedBy
      */
-    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch, string $baseRevision, bool $failOnSkippedManagedFiles): bool
+    private function refreshPullRequest(array $plannedPr, array $latestRelease, array $blockedBy, string $defaultBranch, string $baseRevision, bool $failOnSkippedManagedFiles, FrameworkConfig $baseFramework): bool
     {
         $metadata = $plannedPr['metadata'];
         $targetVersion = (string) $plannedPr['planned_target_version'];
@@ -254,7 +234,7 @@ final class FrameworkSyncer
 
         $branchGuard = (bool) $plannedPr['requires_code_update'] ? $this->beginBranchRollbackGuard($branch) : null;
 
-        if ($this->pullRequestAlreadySatisfied($this->framework->version, $targetVersion)) {
+        if ($this->pullRequestAlreadySatisfied($baseFramework->version, $targetVersion)) {
             $this->closeSupersededPullRequest(
                 $plannedPr,
                 sprintf(
@@ -271,9 +251,9 @@ final class FrameworkSyncer
         try {
             if ((bool) $plannedPr['requires_code_update']) {
                 $result = [];
-                $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData, $failOnSkippedManagedFiles);
+                $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData, $failOnSkippedManagedFiles, $branchGuard);
 
-                $changed = $this->gitRunner->commitAndPush(
+                $changed = $branchGuard->commitAndPush(
                     $branch,
                     sprintf('Update wp-core-base from %s to %s', (string) $metadata['base_version'], $targetVersion),
                     $result['changed_paths']
@@ -307,7 +287,8 @@ final class FrameworkSyncer
             $metadata['slug'] = 'wp-core-base';
             $metadata['base_branch'] = $defaultBranch;
             $metadata['base_revision'] = $baseRevision;
-            $metadata['base_version'] = $metadata['base_version'] ?? $this->framework->version;
+            $metadata['base_version'] = $baseFramework->version;
+            $metadata['base_wordpress_core'] = $baseFramework->baseline['wordpress_core'];
             $metadata['target_version'] = $targetVersion;
             $metadata['scope'] = $scope;
             $metadata['release_at'] = $releaseAt;
@@ -328,7 +309,7 @@ final class FrameworkSyncer
                 sourceReference: $this->framework->releaseSourceReference(),
                 sourceReferenceUrl: $this->framework->releaseSourceReferenceUrl(),
                 releaseUrl: (string) $releaseData['release_url'],
-                currentBaseline: (string) ($metadata['base_wordpress_core'] ?? $this->framework->baseline['wordpress_core']),
+                currentBaseline: $baseFramework->baseline['wordpress_core'],
                 targetBaseline: (string) $releaseData['target_wordpress_core'],
                 notesSections: (array) $releaseData['notes_sections'],
                 skippedManagedFiles: $skippedFiles,
@@ -357,7 +338,7 @@ final class FrameworkSyncer
      * @param array<string, mixed> $latestRelease
      * @param list<int> $blockedBy
      */
-    private function createPullRequestForLatest(array $latestRelease, string $scope, array $blockedBy, string $defaultBranch, string $baseRevision, bool $failOnSkippedManagedFiles): void
+    private function createPullRequestForLatest(array $latestRelease, string $scope, array $blockedBy, string $defaultBranch, string $baseRevision, bool $failOnSkippedManagedFiles, FrameworkConfig $baseFramework): void
     {
         $existingPullRequest = $this->findOpenPullRequestForTarget((string) $latestRelease['version']);
 
@@ -371,13 +352,12 @@ final class FrameworkSyncer
         }
 
         $branch = $this->newBranchName((string) $latestRelease['version']);
-        $baseFramework = $this->framework;
         $branchGuard = $this->beginBranchRollbackGuard($branch);
 
         try {
-            $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $latestRelease, $failOnSkippedManagedFiles);
+            $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $latestRelease, $failOnSkippedManagedFiles, $branchGuard);
             $this->framework = FrameworkConfig::load($this->repoRoot);
-            $changed = $this->gitRunner->commitAndPush(
+            $changed = $branchGuard->commitAndPush(
                 $branch,
                 sprintf('Update wp-core-base from %s to %s', $baseFramework->version, (string) $latestRelease['version']),
                 $result['changed_paths']
@@ -446,11 +426,16 @@ final class FrameworkSyncer
      * @param array<string, mixed> $releaseData
      * @return array{changed_paths:list<string>, skipped_files:list<string>}
      */
-    private function checkoutAndApplyFrameworkVersion(string $defaultBranch, string $branch, array $releaseData, bool $failOnSkippedManagedFiles): array
+    private function checkoutAndApplyFrameworkVersion(string $defaultBranch, string $branch, array $releaseData, bool $failOnSkippedManagedFiles, ?BranchRollbackGuard $branchGuard = null): array
     {
         $this->gitRunner->checkoutBranch($defaultBranch, $branch);
-        $installerResult = $this->withFrameworkPayload($releaseData, function (string $payloadRoot): array {
-            return (new FrameworkInstaller($this->repoRoot, $this->runtimeInspector))->apply(
+        $branchGuard?->recordCheckout($branch);
+        $installerResult = $this->withFrameworkPayload($releaseData, function (string $payloadRoot) use ($branchGuard): array {
+            $installer = new FrameworkInstaller($this->repoRoot, $this->runtimeInspector);
+            $plan = $installer->plan($payloadRoot, $this->framework->distributionPath());
+            $branchGuard?->trackMutationPaths($plan['changed_paths']);
+            $branchGuard?->trackMutationPaths(['.wp-core-base/framework.php', FrameworkRuntimeFiles::governanceDataPath($this->config)]);
+            return $installer->apply(
                 $payloadRoot,
                 $this->framework->distributionPath()
             );
@@ -505,7 +490,8 @@ final class FrameworkSyncer
      */
     private function withFrameworkPayload(array $releaseData, callable $callback): mixed
     {
-        $tempDir = sys_get_temp_dir() . '/wp-core-base-framework-meta-' . bin2hex(random_bytes(6));
+        $workspace = TempWorkspace::create($this->repoRoot, 'framework-metadata');
+        $tempDir = $workspace->path();
         $archivePath = $tempDir . '/framework.zip';
         $extractPath = $tempDir . '/extract';
 
@@ -523,9 +509,11 @@ final class FrameworkSyncer
 
             ZipExtractor::extractValidated($zip, $extractPath);
             $zip->close();
-            return $callback($this->resolveExtractedPayloadRoot($extractPath));
+            $payloadRoot = $this->resolveExtractedPayloadRoot($extractPath);
+            FrameworkPayloadIdentity::assertMatches(FrameworkConfig::load($payloadRoot), $this->framework, (string) ($releaseData['version'] ?? ''));
+            return $callback($payloadRoot);
         } finally {
-            $this->runtimeInspector->clearPath($tempDir);
+            $workspace->close();
         }
     }
 
@@ -700,22 +688,6 @@ final class FrameworkSyncer
         $guard->begin();
         $guard->trackBranch($branch);
         return $guard;
-    }
-
-    /**
-     * @param array<string, mixed> $metadata
-     */
-    private function branchRefreshRequired(array $metadata, string $baseRevision): bool
-    {
-        if ($baseRevision === '') {
-            return false;
-        }
-
-        $recordedBaseRevision = $metadata['base_revision'] ?? null;
-
-        return ! is_string($recordedBaseRevision)
-            || $recordedBaseRevision === ''
-            || ! hash_equals($recordedBaseRevision, $baseRevision);
     }
 
     /**

@@ -11,6 +11,7 @@ final class DownstreamScaffolder
     public function __construct(
         private readonly string $frameworkRoot,
         private readonly string $repoRoot,
+        private readonly bool $quiet = false,
     ) {
     }
 
@@ -135,23 +136,23 @@ final class DownstreamScaffolder
 
         $frameworkConfig = $this->frameworkMetadataForDownstream($toolPath, $managedFileChecksums);
         (new FrameworkWriter())->write($frameworkConfig);
-        fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/.wp-core-base/framework.php'));
+        $this->writeOutput(sprintf("[ok] Wrote %s\n", $this->repoRoot . '/.wp-core-base/framework.php'));
 
         $config = Config::load($this->repoRoot);
         (new AdminGovernanceExporter())->refresh($config);
-        fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config)));
+        $this->writeOutput(sprintf("[ok] Wrote %s\n", $this->repoRoot . '/' . FrameworkRuntimeFiles::governanceDataPath($config)));
 
-        fwrite(STDOUT, "\n");
-        fwrite(STDOUT, "Next steps:\n");
-        fwrite(STDOUT, sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
-        fwrite(STDOUT, sprintf("[next] Review the local usage guidance at %s/.wp-core-base/USAGE.md and %s/AGENTS.md.\n", $this->repoRoot, $this->repoRoot));
-        fwrite(STDOUT, sprintf("[next] Register custom premium providers in %s/.wp-core-base/premium-providers.php if your project needs premium workflow sources.\n", $this->repoRoot));
-        fwrite(STDOUT, sprintf("[next] Run `%s`.\n", $this->updaterCommand($toolPath, 'doctor --repo-root=.')));
-        fwrite(STDOUT, sprintf("[next] Run `%s` before enabling scheduled automation.\n", $doctorCommand));
-        fwrite(STDOUT, "[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
+        $this->writeOutput("\n");
+        $this->writeOutput("Next steps:\n");
+        $this->writeOutput(sprintf("[next] Review the generated manifest at %s/.wp-core-base/manifest.php.\n", $this->repoRoot));
+        $this->writeOutput(sprintf("[next] Review the local usage guidance at %s/.wp-core-base/USAGE.md and %s/AGENTS.md.\n", $this->repoRoot, $this->repoRoot));
+        $this->writeOutput(sprintf("[next] Register custom premium providers in %s/.wp-core-base/premium-providers.php if your project needs premium workflow sources.\n", $this->repoRoot));
+        $this->writeOutput(sprintf("[next] Run `%s`.\n", $this->updaterCommand($toolPath, 'doctor --repo-root=.')));
+        $this->writeOutput(sprintf("[next] Run `%s` before enabling scheduled automation.\n", $doctorCommand));
+        $this->writeOutput("[next] Classify managed, local, ignored, and ownership-root runtime paths before enabling the scheduled workflow.\n");
 
         if (str_starts_with(trim($toolPath, '/'), 'vendor/')) {
-            fwrite(STDOUT, sprintf(
+            $this->writeOutput(sprintf(
                 "[next] If your repo ignores /vendor/, add a narrow exception so Git can track %s and future framework self-update PRs can stay reviewable.\n",
                 trim($toolPath, '/')
             ));
@@ -250,12 +251,12 @@ final class DownstreamScaffolder
             $existing = file_get_contents($target);
 
             if ($existing === $rendered) {
-                fwrite(STDOUT, sprintf("[ok] Already up to date: %s\n", $target));
+                $this->writeOutput(sprintf("[ok] Already up to date: %s\n", $target));
                 return;
             }
 
             if ($managed && $adoptExistingManagedFiles) {
-                fwrite(STDOUT, sprintf("[ok] Adopted existing framework-managed file without overwrite: %s\n", $target));
+                $this->writeOutput(sprintf("[ok] Adopted existing framework-managed file without overwrite: %s\n", $target));
                 return;
             }
 
@@ -267,7 +268,7 @@ final class DownstreamScaffolder
                     ));
                 }
 
-                fwrite(STDOUT, sprintf("[warn] Skipped existing file without --force: %s\n", $target));
+                $this->writeOutput(sprintf("[warn] Skipped existing file without --force: %s\n", $target));
                 return;
             }
         }
@@ -276,7 +277,7 @@ final class DownstreamScaffolder
             throw new RuntimeException(sprintf('Unable to write scaffolded file: %s', $target));
         }
 
-        fwrite(STDOUT, sprintf("[ok] Wrote %s\n", $target));
+        $this->writeOutput(sprintf("[ok] Wrote %s\n", $target));
     }
 
     /**
@@ -631,6 +632,13 @@ YAML;
 
     private function printHeading(string $heading): void
     {
-        fwrite(STDOUT, $heading . "\n\n");
+        $this->writeOutput($heading . "\n\n");
     }
+    private function writeOutput(string $message): void
+    {
+        if (! $this->quiet) {
+            fwrite(STDOUT, $message);
+        }
+    }
+
 }

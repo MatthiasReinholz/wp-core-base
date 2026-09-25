@@ -20,7 +20,8 @@ final class Config
      * @param array{api_base:string} $github
      * @param array{api_base:string} $gitlab
      * @param array{provider:string, api_base:string, base_branch:?string, dry_run:bool, managed_kinds:list<string>} $automation
-     * @param array{managed_release_min_age_hours:int, github_release_verification:string} $security
+     * @param array{managed_release_min_age_hours:int, github_release_verification:string, extensions?:array<string,mixed>} $security
+     * @param array<string,mixed> $extensions
      */
     public function __construct(
         public readonly string $repoRoot,
@@ -34,6 +35,7 @@ final class Config
         public readonly array $automation,
         public readonly array $security,
         public readonly array $dependencies,
+        public readonly array $extensions = [],
     ) {
     }
 
@@ -82,11 +84,31 @@ final class Config
         $github = self::normalizeGithub($data['github'] ?? []);
         $gitlab = self::normalizeGitlab($data['gitlab'] ?? []);
         $automation = self::normalizeAutomation($data['automation'] ?? [], $github, $gitlab);
-        $security = self::normalizeSecurity($data['security'] ?? []);
+        $security = self::normalizeSecurity(self::arraySection($data, 'security'));
+        $extensions = self::normalizeExtensions(array_key_exists('extensions', $data) ? $data['extensions'] : [], 'extensions');
         $dependencies = self::normalizeDependencies($data['dependencies'] ?? [], $paths);
         self::assertProfileCoreCompatibility($profile, $core);
-        self::assertSafeStageDirectory($runtime['stage_dir'], $paths, $runtime['ownership_roots']);
-        self::assertDependencyPathConsistency($dependencies, $runtime['manifest_mode']);
+        foreach (array_merge(array_values($paths), $runtime['ownership_roots'], $runtime['allow_runtime_paths']) as $sourcePath) {
+            // A root content directory is supported, but individual runtime
+            // ownership and allowlist entries may never authorize control data.
+            if ($sourcePath !== '.') {
+                ConfigPathRules::assertSafeDependencyPath($repoRoot, $sourcePath);
+            }
+        }
+        foreach (array_merge([$paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']], $runtime['ownership_roots'], $runtime['allow_runtime_paths']) as $sourcePath) {
+            if ($sourcePath === '.') {
+                throw new RuntimeException('Runtime ownership roots may not own the repository root.');
+            }
+        }
+        if ($core['enabled']) {
+            self::assertRuntimePathsOutsideCore($repoRoot, array_merge(array_values($paths), $runtime['ownership_roots'], $runtime['allow_runtime_paths']));
+        }
+        self::assertDependencyPathsSafe($repoRoot, $dependencies);
+        if ($core['enabled']) {
+            self::assertRuntimePathsOutsideCore($repoRoot, array_column(array_filter($dependencies, static fn (array $dependency): bool => $dependency['management'] !== 'ignored'), 'path'));
+        }
+        self::assertSafeStageDirectory($runtime['stage_dir'], $paths, array_merge($runtime['ownership_roots'], array_column($dependencies, 'path')), $repoRoot);
+        self::assertDependencyPathConsistency($dependencies, $runtime['manifest_mode'], $repoRoot);
 
         return new self(
             repoRoot: $repoRoot,
@@ -100,6 +122,7 @@ final class Config
             automation: $automation,
             security: $security,
             dependencies: $dependencies,
+            extensions: $extensions,
         );
     }
 
@@ -382,11 +405,11 @@ final class Config
 
     public function stageDir(string $outputOverride = ''): string
     {
-        if ($outputOverride !== '') {
-            return $this->repoRoot . '/' . ConfigPathRules::normalizeStageOutputOverride($outputOverride);
-        }
-
-        return $this->repoRoot . '/' . ltrim($this->runtime['stage_dir'], '/');
+        $relativePath = $outputOverride !== ''
+            ? ConfigPathRules::normalizeStageOutputOverride($outputOverride)
+            : ConfigPathRules::normalizedRelativePath($this->runtime['stage_dir'], 'runtime.stage_dir');
+        ConfigPathRules::assertSafeStageDirectory($relativePath, $this->paths, array_merge($this->runtime['ownership_roots'], array_column($this->dependencies, 'path')), $this->repoRoot);
+        return rtrim($this->repoRoot, '/') . '/' . $relativePath;
     }
 
     public function rootForKind(string $kind): string
@@ -462,6 +485,11 @@ final class Config
      */
     public function withDependencies(array $dependencies): self
     {
+        self::assertDependencyPathsSafe($this->repoRoot, $dependencies);
+        if ($this->coreEnabled()) {
+            self::assertRuntimePathsOutsideCore($this->repoRoot, array_column(array_filter($dependencies, static fn (array $dependency): bool => $dependency['management'] !== 'ignored'), 'path'));
+        }
+        self::assertDependencyPathConsistency($dependencies, $this->runtime['manifest_mode'], $this->repoRoot);
         return new self(
             repoRoot: $this->repoRoot,
             manifestPath: $this->manifestPath,
@@ -474,6 +502,7 @@ final class Config
             automation: $this->automation,
             security: $this->security,
             dependencies: $dependencies,
+            extensions: $this->extensions,
         );
     }
 
@@ -491,6 +520,7 @@ final class Config
             'gitlab' => $this->gitlab,
             'automation' => $this->automation,
             'security' => $this->security,
+            ...($this->extensions !== [] ? ['extensions' => $this->extensions] : []),
             'dependencies' => array_map(static function (array $dependency): array {
                 return [
                     'name' => $dependency['name'],
@@ -591,33 +621,9 @@ final class Config
      * @param array{content_root:string, plugins_root:string, themes_root:string, mu_plugins_root:string} $paths
      * @param list<string> $ownershipRoots
      */
-    private static function assertSafeStageDirectory(string $stageDir, array $paths, array $ownershipRoots): void
+    private static function assertSafeStageDirectory(string $stageDir, array $paths, array $ownershipRoots, string $repoRoot): void
     {
-        if ($stageDir === '.') {
-            throw new RuntimeException('runtime.stage_dir may not be the repository root.');
-        }
-
-        if ($stageDir === '.wp-core-base' || (self::pathStartsWith($stageDir, '.wp-core-base') && ! self::pathStartsWith($stageDir, '.wp-core-base/build'))) {
-            throw new RuntimeException(sprintf(
-                'runtime.stage_dir %s may not overlap the framework control tree outside .wp-core-base/build.',
-                $stageDir
-            ));
-        }
-
-        $protectedRoots = array_values(array_unique(array_merge(
-            [$paths['content_root'], $paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']],
-            $ownershipRoots
-        )));
-
-        foreach ($protectedRoots as $protectedRoot) {
-            if (self::pathStartsWith($stageDir, $protectedRoot) || self::pathStartsWith($protectedRoot, $stageDir)) {
-                throw new RuntimeException(sprintf(
-                    'runtime.stage_dir %s may not overlap live runtime root %s.',
-                    $stageDir,
-                    $protectedRoot
-                ));
-            }
-        }
+        ConfigPathRules::assertSafeStageDirectory($stageDir, $paths, $ownershipRoots, $repoRoot);
     }
 
     /**
@@ -722,17 +728,20 @@ final class Config
 
     /**
      * @param array<string, mixed> $value
-     * @return array{managed_release_min_age_hours:int, github_release_verification:string}
+     * @return array{managed_release_min_age_hours:int, github_release_verification:string, extensions?:array<string,mixed>}
      */
     private static function normalizeSecurity(array $value): array
     {
+        self::assertKnownKeys($value, ['managed_release_min_age_hours', 'github_release_verification', 'extensions'], 'security');
+        $extensions = self::normalizeExtensions(array_key_exists('extensions', $value) ? $value['extensions'] : [], 'security.extensions');
         return [
+            ...($extensions !== [] ? ['extensions' => $extensions] : []),
             'managed_release_min_age_hours' => self::nonNegativeInt(
-                $value['managed_release_min_age_hours'] ?? 0,
+                array_key_exists('managed_release_min_age_hours', $value) ? $value['managed_release_min_age_hours'] : 0,
                 'security.managed_release_min_age_hours'
             ),
             'github_release_verification' => self::enumValue(
-                $value['github_release_verification'] ?? 'checksum-sidecar-optional',
+                array_key_exists('github_release_verification', $value) ? $value['github_release_verification'] : 'checksum-sidecar-optional',
                 'security.github_release_verification',
                 ['none', 'checksum-sidecar-optional', 'checksum-sidecar-required']
             ),
@@ -771,10 +780,20 @@ final class Config
             $version = self::nullableString($dependency['version'] ?? null);
             $checksum = self::nullableString($dependency['checksum'] ?? null);
             $archiveSubdir = self::nullableString($dependency['archive_subdir'] ?? '') ?? '';
+            if ($archiveSubdir !== '') {
+                $archiveSubdir = ConfigPathRules::normalizedRelativePath($archiveSubdir, sprintf('dependencies[%s].archive_subdir', $slug));
+            }
             $extraLabels = LabelHelper::normalizeList(
                 self::stringList($dependency['extra_labels'] ?? [], sprintf('dependencies[%s].extra_labels', $slug))
             );
-            $sourceConfig = is_array($dependency['source_config'] ?? null) ? $dependency['source_config'] : [];
+            $sourceConfig = self::arraySection($dependency, 'source_config');
+            self::assertKnownKeys($sourceConfig, [
+                'github_repository', 'github_release_asset_pattern', 'github_token_env',
+                'gitlab_project', 'gitlab_release_asset_pattern', 'gitlab_token_env', 'gitlab_api_base',
+                'generic_json_url', 'min_release_age_hours', 'verification_mode', 'checksum_asset_pattern',
+                'credential_key', 'provider', 'provider_product_id', 'extensions',
+            ], sprintf('dependencies[%s].source_config', $slug));
+            $sourceExtensions = self::normalizeExtensions(array_key_exists('extensions', $sourceConfig) ? $sourceConfig['extensions'] : [], sprintf('dependencies[%s].source_config.extensions', $slug));
             $policy = is_array($dependency['policy'] ?? null) ? $dependency['policy'] : [];
 
             if (in_array($kind, ['plugin', 'theme', 'mu-plugin-package'], true) && $mainFile === null) {
@@ -861,7 +880,7 @@ final class Config
             $credentialKey = self::nullableString($sourceConfig['credential_key'] ?? null);
             $provider = self::nullableString($sourceConfig['provider'] ?? null);
             $providerProductId = isset($sourceConfig['provider_product_id']) && $sourceConfig['provider_product_id'] !== ''
-                ? (int) $sourceConfig['provider_product_id']
+                ? self::nonNegativeInt($sourceConfig['provider_product_id'], sprintf('dependencies[%s].source_config.provider_product_id', $slug))
                 : null;
 
             $normalizedSourceConfig = PremiumSourceResolver::normalizeSourceConfig($source, $sourceConfig);
@@ -950,6 +969,7 @@ final class Config
                 'archive_subdir' => trim($archiveSubdir, '/'),
                 'extra_labels' => $extraLabels,
                 'source_config' => [
+                    ...($sourceExtensions !== [] ? ['extensions' => $sourceExtensions] : []),
                     'github_repository' => $githubRepository,
                     'github_release_asset_pattern' => $githubReleaseAssetPattern,
                     'github_token_env' => $githubTokenEnv,
@@ -985,11 +1005,46 @@ final class Config
         return $dependencies;
     }
 
+    /** @param list<array<string,mixed>> $dependencies */
+    private static function assertDependencyPathsSafe(string $repoRoot, array $dependencies): void
+    {
+        foreach ($dependencies as $dependency) {
+            if ($dependency['management'] !== 'ignored') {
+                ConfigPathRules::assertSafeDependencyPath($repoRoot, (string) $dependency['path']);
+            }
+        }
+    }
+
+    /** @param list<string> $paths */
+    private static function assertRuntimePathsOutsideCore(string $repoRoot, array $paths): void
+    {
+        foreach ($paths as $path) {
+            if ($path === '.') {
+                continue;
+            }
+            $comparisonPath = ConfigPathRules::filesystemPath($repoRoot, $path);
+            foreach (['wp-admin', 'wp-includes'] as $corePath) {
+                $corePath = ConfigPathRules::filesystemPath($repoRoot, $corePath);
+                if (self::pathStartsWith($comparisonPath, $corePath) || self::pathStartsWith($corePath, $comparisonPath)) {
+                    throw new RuntimeException(sprintf('Runtime ownership path %s may not overlap core-managed directory %s.', $path, $corePath));
+                }
+            }
+        }
+    }
+
     /**
      * @param list<array<string, mixed>> $dependencies
      */
-    private static function assertDependencyPathConsistency(array $dependencies, string $manifestMode): void
+    private static function assertDependencyPathConsistency(array $dependencies, string $manifestMode, string $repoRoot): void
     {
+        $identities = [];
+        foreach ($dependencies as $dependency) {
+            $identity = (string) $dependency['component_key'];
+            if (isset($identities[$identity])) {
+                throw new RuntimeException(sprintf('Duplicate dependency component_key %s is not allowed in any manifest mode.', $identity));
+            }
+            $identities[$identity] = true;
+        }
         if ($manifestMode !== 'strict') {
             return;
         }
@@ -997,7 +1052,7 @@ final class Config
         $pathsByDependency = [];
 
         foreach ($dependencies as $dependency) {
-            $path = (string) $dependency['path'];
+            $path = ConfigPathRules::filesystemPath($repoRoot, (string) $dependency['path']);
             $pathsByDependency[$path][] = (string) $dependency['component_key'];
         }
 
@@ -1012,7 +1067,7 @@ final class Config
         }
 
         $dependencyPaths = array_map(
-            static fn (array $dependency): string => (string) $dependency['path'],
+            static fn (array $dependency): string => ConfigPathRules::filesystemPath($repoRoot, (string) $dependency['path']),
             $dependencies
         );
         sort($dependencyPaths);
@@ -1058,6 +1113,59 @@ final class Config
             $management === 'ignored' && $source === 'local' => 'ignored',
             default => throw new RuntimeException(sprintf('Invalid management/source combination: %s/%s', $management, $source)),
         };
+    }
+
+    /** @param array<string,mixed> $data @return array<string,mixed> */
+    private static function arraySection(array $data, string $key): array
+    {
+        if (! array_key_exists($key, $data)) {
+            return [];
+        }
+        if (! is_array($data[$key])) {
+            throw new RuntimeException(sprintf('Config value "%s" must be an array.', $key));
+        }
+        return $data[$key];
+    }
+
+    /** @param array<string,mixed> $value @param list<string> $allowed */
+    private static function assertKnownKeys(array $value, array $allowed, string $section): void
+    {
+        foreach (array_keys($value) as $key) {
+            if (! in_array($key, $allowed, true)) {
+                throw new RuntimeException(sprintf('Unknown config value "%s.%s". Put custom data under %s.extensions.', $section, $key, $section));
+            }
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private static function normalizeExtensions(mixed $value, string $key): array
+    {
+        if (! is_array($value)) {
+            throw new RuntimeException(sprintf('Config value "%s" must be an extension namespace map.', $key));
+        }
+        foreach ($value as $namespace => $extension) {
+            if (! is_string($namespace) || trim($namespace) === '') {
+                throw new RuntimeException(sprintf('Config value "%s" must use non-empty namespace keys.', $key));
+            }
+            self::assertExtensionValue($extension, $key . '.' . $namespace);
+        }
+        return $value;
+    }
+
+    private static function assertExtensionValue(mixed $value, string $key, int $depth = 0): void
+    {
+        if ($depth > 32 || (is_float($value) && ! is_finite($value))) {
+            throw new RuntimeException(sprintf('Extension value "%s" exceeds supported nesting or contains a non-finite number.', $key));
+        }
+        if (is_array($value)) {
+            foreach ($value as $name => $child) {
+                self::assertExtensionValue($child, $key . '.' . $name, $depth + 1);
+            }
+            return;
+        }
+        if ($value !== null && ! is_scalar($value)) {
+            throw new RuntimeException(sprintf('Extension value "%s" must contain only arrays, scalar values, or null.', $key));
+        }
     }
 
     private static function isHttpsUrl(string $url): bool
@@ -1171,15 +1279,7 @@ final class Config
 
     private static function normalizedRelativePath(mixed $value, string $key): string
     {
-        $path = self::string($value, $key);
-        $normalized = str_replace('\\', '/', $path);
-        $normalized = trim($normalized, '/');
-
-        if ($normalized === '' || str_contains($normalized, '../') || str_starts_with($normalized, '..')) {
-            throw new RuntimeException(sprintf('Config value "%s" must be a safe relative path.', $key));
-        }
-
-        return $normalized;
+        return ConfigPathRules::normalizedRelativePath($value, $key);
     }
 
     private static function nullableNormalizedRelativePath(mixed $value, string $key): ?string
@@ -1219,7 +1319,7 @@ final class Config
 
     private static function pathStartsWith(string $path, string $prefix): bool
     {
-        return $path === $prefix || str_starts_with($path, $prefix . '/');
+        return ConfigPathRules::pathStartsWith($path, $prefix);
     }
 
     /**
@@ -1229,25 +1329,6 @@ final class Config
      */
     private static function assertSafeRuntimeAllowPaths(array $allowRuntimePaths, array $paths, array $ownershipRoots): void
     {
-        $broadRoots = array_values(array_unique(array_merge(
-            [$paths['content_root'], $paths['plugins_root'], $paths['themes_root'], $paths['mu_plugins_root']],
-            $ownershipRoots
-        )));
-
-        foreach ($allowRuntimePaths as $allowPath) {
-            if (! self::pathStartsWith($allowPath, $paths['content_root'])) {
-                throw new RuntimeException(sprintf(
-                    'runtime.allow_runtime_paths entry %s must live under paths.content_root.',
-                    $allowPath
-                ));
-            }
-
-            if (in_array($allowPath, $broadRoots, true)) {
-                throw new RuntimeException(sprintf(
-                    'runtime.allow_runtime_paths entry %s is too broad. Declare specific child paths instead.',
-                    $allowPath
-                ));
-            }
-        }
+        ConfigPathRules::assertSafeRuntimeAllowPaths($allowRuntimePaths, $paths, $ownershipRoots);
     }
 }

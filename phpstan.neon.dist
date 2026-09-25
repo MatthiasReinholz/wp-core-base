@@ -4,6 +4,7 @@ parameters:
         - tools/wporg-updater/src
         - tools/wporg-updater/bin/wporg-updater.php
         - scripts/ci
+        - tools/wporg-updater/tests/support/WordpressSmokeRunner.php
     bootstrapFiles:
         - tools/wporg-updater/src/Autoload.php
     tmpDir: .phpstan

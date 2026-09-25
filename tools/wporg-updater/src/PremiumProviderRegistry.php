@@ -24,6 +24,7 @@ final class PremiumProviderRegistry
 
     public static function load(string $repoRoot): self
     {
+        ConfigPathRules::assertNoSymlinkDescendants($repoRoot, self::DEFAULT_RELATIVE_PATH);
         $path = rtrim($repoRoot, '/') . '/' . self::DEFAULT_RELATIVE_PATH;
 
         if (! is_file($path)) {
@@ -39,20 +40,10 @@ final class PremiumProviderRegistry
         $definitions = [];
 
         foreach ($loaded as $provider => $definition) {
-            if (! is_string($provider) || ! preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $provider)) {
-                throw new RuntimeException(sprintf(
-                    'Premium provider keys in %s must use lowercase letters, numbers, and single hyphen separators.',
-                    $path
-                ));
+            if (! is_string($provider)) {
+                throw new RuntimeException('Premium provider registry keys must be strings.');
             }
-
-            if (in_array($provider, ['wordpress.org', 'github-release', 'gitlab-release', 'premium', 'local'], true)) {
-                throw new RuntimeException(sprintf(
-                    'Premium provider key `%s` is reserved and may not be used in %s.',
-                    $provider,
-                    $path
-                ));
-            }
+            PremiumSourceResolver::assertCustomProviderKey($provider);
 
             if (! is_array($definition)) {
                 throw new RuntimeException(sprintf('Premium provider %s must define an array in %s.', $provider, $path));
@@ -73,11 +64,8 @@ final class PremiumProviderRegistry
             $normalizedPath = null;
 
             if (is_string($sourcePath)) {
-                $normalizedPath = trim(str_replace('\\', '/', $sourcePath), '/');
-
-                if ($normalizedPath === '' || str_contains($normalizedPath, '../') || str_starts_with($normalizedPath, '/')) {
-                    throw new RuntimeException(sprintf('Premium provider %s path must be a safe relative path.', $provider));
-                }
+                $normalizedPath = ConfigPathRules::normalizedRelativePath($sourcePath, sprintf('premium provider %s path', $provider));
+                ConfigPathRules::assertNoSymlinkDescendants($repoRoot, $normalizedPath);
             }
 
             $definitions[$provider] = [
@@ -146,6 +134,7 @@ final class PremiumProviderRegistry
             $path = $definition['path'];
 
             if ($path !== null) {
+                ConfigPathRules::assertNoSymlinkDescendants($this->repoRoot, $path);
                 $absolutePath = $this->repoRoot . '/' . $path;
 
                 if (! is_file($absolutePath)) {

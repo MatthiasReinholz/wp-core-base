@@ -10,6 +10,8 @@ env:
 
 permissions:
   contents: write
+  pull-requests: read
+  actions: read
 
 concurrency:
   group: wp-core-base-release-${{ github.event.pull_request.head.ref }}
@@ -24,6 +26,9 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event.pull_request.head.ref }}
+      SOURCE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
 
     steps:
       - name: Derive release version
@@ -53,20 +58,23 @@ jobs:
           coverage: none
 
       - name: Validate release metadata
-        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag=${{ steps.release.outputs.version }}
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=. --tag="$RELEASE_VERSION"
 
       - name: Verify merged release PR passed CI
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
         run: |
-          COMMIT_SHA="${{ github.event.pull_request.merge_commit_sha }}"
-          bash scripts/ci/check_framework_release_ci.sh "${GITHUB_REPOSITORY}" "${{ steps.release.outputs.version }}" "$COMMIT_SHA"
+          [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          bash scripts/ci/check_framework_release_ci.sh "${GITHUB_REPOSITORY}" "${RELEASE_TAG#release/}" "$SOURCE_COMMIT"
 
       - name: Build vendored framework snapshot
         run: |
           php tools/wporg-updater/bin/wporg-updater.php build-release-artifact \
             --repo-root=. \
+            --source-revision="$SOURCE_COMMIT" \
             --output=dist/wp-core-base-vendor-snapshot.zip \
             --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256
 
@@ -83,175 +91,45 @@ jobs:
             --passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE
 
       - name: Verify release artifact
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           php tools/wporg-updater/bin/wporg-updater.php release-verify \
             --repo-root=. \
-            --tag=${{ steps.release.outputs.version }} \
+            --tag="$RELEASE_VERSION" \
             --artifact=dist/wp-core-base-vendor-snapshot.zip \
             --checksum-file=dist/wp-core-base-vendor-snapshot.zip.sha256 \
             --signature-file=dist/wp-core-base-vendor-snapshot.zip.sha256.sig
 
-      - name: Assess published release state
-        id: release_state
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_API_URL: ${{ github.api_url }}
-          VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          tag_exists='false'
-
-          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
-            tag_exists='true'
-          fi
-
-          echo "tag_exists=${tag_exists}" >> "$GITHUB_OUTPUT"
-
-          bash scripts/ci/check_framework_release_assets.sh \
-            "${GITHUB_REPOSITORY}" \
-            "${VERSION}" \
-            dist/wp-core-base-vendor-snapshot.zip \
-            dist/wp-core-base-vendor-snapshot.zip.sha256 \
-            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
-
-          publish_required="$(grep '^publish_required=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2-)"
-          release_state_reason="$(grep '^reason=' "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2-)"
-
-          if [ "${tag_exists}" = 'true' ] && [ "${publish_required}" = 'true' ]; then
-            echo "Remote tag ${VERSION} already exists, but the published release is not current (${release_state_reason})." >&2
-            exit 1
-          fi
-
-      - name: Report existing verified release
-        if: ${{ steps.release_state.outputs.publish_required != 'true' && steps.release_state.outputs.tag_exists == 'true' }}
-        run: echo "GitHub Release ${{ steps.release.outputs.version }} already contains the current verified assets; nothing to publish."
-
       - name: Configure git identity
-        if: ${{ steps.release_state.outputs.tag_exists != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Create annotated tag
-        if: ${{ steps.release_state.outputs.tag_exists != 'true' }}
-        run: git -c tag.gpgsign=false tag -a "${{ steps.release.outputs.version }}" -m "wp-core-base ${{ steps.release.outputs.version }}"
-
-      - name: Push tag
-        if: ${{ steps.release_state.outputs.tag_exists != 'true' }}
-        run: git push origin "${{ steps.release.outputs.version }}"
-
-      - name: Create GitHub release
-        if: ${{ steps.release_state.outputs.publish_required == 'true' }}
+      - name: Publish verified release with ownership receipts
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_PLAIN: ${{ steps.release.outputs.plain }}
         run: |
-          gh release create "${{ steps.release.outputs.version }}" \
+          bash scripts/ci/publish_framework_release.sh \
+            "$GITHUB_REPOSITORY" "$RELEASE_VERSION" "$SOURCE_COMMIT" \
+            "docs/releases/${RELEASE_PLAIN}.md" \
             dist/wp-core-base-vendor-snapshot.zip \
             dist/wp-core-base-vendor-snapshot.zip.sha256 \
             dist/wp-core-base-vendor-snapshot.zip.sha256.sig \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "wp-core-base ${{ steps.release.outputs.version }}" \
-            --notes-file "docs/releases/${{ steps.release.outputs.plain }}.md"
+            "${RUNNER_TEMP}/wp-core-base-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
 
-      - name: Verify published release assets are current
-        if: ${{ steps.release_state.outputs.publish_required == 'true' }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_API_URL: ${{ github.api_url }}
+      - name: Preserve publication receipts in job summary
+        if: always()
         run: |
-          bash scripts/ci/check_framework_release_assets.sh \
-            --require-current \
-            "${GITHUB_REPOSITORY}" \
-            "${{ steps.release.outputs.version }}" \
-            dist/wp-core-base-vendor-snapshot.zip \
-            dist/wp-core-base-vendor-snapshot.zip.sha256 \
-            dist/wp-core-base-vendor-snapshot.zip.sha256.sig
-
-      - name: Roll back tag and release on publish failure
-        if: ${{ failure() }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_API_URL: ${{ github.api_url }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          set -euo pipefail
-
-          release_lookup() {
-            local output_file="$1"
-
-            curl -sS \
-              -o "${output_file}" \
-              -w "%{http_code}" \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}"
-          }
-
-          assert_remote_tag_deleted() {
-            local attempt
-
-            for attempt in 1 2 3 4 5; do
-              if ! git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
-                return 0
-              fi
-
-              if [ "${attempt}" -lt 5 ]; then
-                sleep 1
-              fi
-            done
-
-            echo "Remote tag ${VERSION} still exists after delete attempts." >&2
-            exit 1
-          }
-
-          assert_release_deleted() {
-            local attempt
-            local release_lookup_status
-
-            for attempt in 1 2 3 4 5; do
-              release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
-
-              if [ "${release_lookup_status}" = '404' ]; then
-                return 0
-              fi
-
-              if [ "${release_lookup_status}" != '200' ]; then
-                echo "Failed to verify GitHub Release ${VERSION} deletion (status ${release_lookup_status})." >&2
-                exit 1
-              fi
-
-              if [ "${attempt}" -lt 5 ]; then
-                sleep 1
-              fi
-            done
-
-            echo "GitHub Release ${VERSION} still exists after delete attempts." >&2
-            exit 1
-          }
-
-          release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
-
-          if [ "${release_lookup_status}" = '200' ]; then
-            release_id="$(jq -r '.id' /tmp/wp-core-base-release-rollback.json)"
-
-            if [ -z "${release_id}" ] || [ "${release_id}" = 'null' ]; then
-              echo "GitHub Release ${VERSION} lookup succeeded but did not return a usable release id." >&2
-              exit 1
-            fi
-
-            curl -fsSL \
-              -X DELETE \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}" >/dev/null
+          journal="${RUNNER_TEMP}/wp-core-base-publication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+          if [ -f "$journal" ]; then
+            {
+              echo '### Release publication receipts'
+              echo '```json'
+              cat "$journal"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-
-          git tag -d "$VERSION" || true
-          git push --delete origin "$VERSION" || true
-
-          assert_remote_tag_deleted
-          assert_release_deleted

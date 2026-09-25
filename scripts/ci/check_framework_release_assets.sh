@@ -5,9 +5,17 @@ set -euo pipefail
 REQUIRE_CURRENT='false'
 EXPECTED_TITLE=''
 EXPECTED_NOTES_FILE=''
+RELEASE_ID=''
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/ci/release_http.sh
+source "${SCRIPT_DIR}/release_http.sh"
 
 while [ "$#" -gt 0 ]; do
   case "${1}" in
+    --release-id)
+      RELEASE_ID="${2:-}"
+      shift 2
+      ;;
     --require-current)
       REQUIRE_CURRENT='true'
       shift
@@ -84,100 +92,8 @@ write_output() {
   fi
 }
 
-api_request() {
-  curl -sS \
-    -o "$2" \
-    -w "%{http_code}" \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$1"
-}
-
-url_scheme() {
-  # shellcheck disable=SC2016
-  php -r '$scheme = parse_url($argv[1], PHP_URL_SCHEME); echo is_string($scheme) ? $scheme : "";' "$1"
-}
-
-url_host() {
-  # shellcheck disable=SC2016
-  php -r '$host = parse_url($argv[1], PHP_URL_HOST); echo is_string($host) ? $host : "";' "$1"
-}
-
-allowed_asset_redirect_host() {
-  case "$1" in
-    api.github.com|uploads.github.com|github.com|objects.githubusercontent.com|objects-origin.githubusercontent.com|release-assets.githubusercontent.com|github-releases.githubusercontent.com)
-      return 0
-      ;;
-    *.githubusercontent.com)
-      return 0
-      ;;
-  esac
-
-  return 1
-}
-
-assert_allowed_asset_redirect_url() {
-  local redirect_url="$1"
-  local redirect_scheme
-  local redirect_host
-
-  redirect_scheme="$(url_scheme "$redirect_url")"
-  redirect_host="$(url_host "$redirect_url")"
-
-  if [ "$redirect_scheme" != 'https' ]; then
-    echo "Release asset redirect must use https: ${redirect_url}" >&2
-    exit 1
-  fi
-
-  if [ -z "$redirect_host" ] || ! allowed_asset_redirect_host "$redirect_host"; then
-    echo "Release asset redirect host is not allowlisted: ${redirect_url}" >&2
-    exit 1
-  fi
-}
-
-download_asset() {
-  local asset_api_url="$1"
-  local destination="$2"
-  local probe_output
-  local status_code
-  local redirect_url
-
-  probe_output="$(
-    curl -sS \
-      -o "$destination" \
-      -w "%{http_code}\n%{redirect_url}" \
-      -H "Accept: application/octet-stream" \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$asset_api_url"
-  )"
-
-  status_code="$(printf '%s' "$probe_output" | sed -n '1p')"
-  redirect_url="$(printf '%s' "$probe_output" | sed -n '2p')"
-
-  case "$status_code" in
-    200)
-      return
-      ;;
-    302|303|307|308)
-      rm -f "$destination"
-
-      if [ -z "$redirect_url" ]; then
-        echo "Release asset download redirect did not provide a destination URL: ${asset_api_url}" >&2
-        exit 1
-      fi
-
-      assert_allowed_asset_redirect_url "$redirect_url"
-      curl --proto '=https' -fsSL "$redirect_url" -o "$destination"
-      return
-      ;;
-  esac
-
-  rm -f "$destination"
-  echo "Failed to download release asset via ${asset_api_url} (status ${status_code})." >&2
-  exit 1
-}
+api_request() { release_api_request GET "$1" "$2"; }
+download_asset() { release_download_asset "$1" "$2"; }
 
 mark_state() {
   local exists="$1"
@@ -213,6 +129,12 @@ normalize_text_file() {
 
 release_json="$tmp_dir/release.json"
 release_url="${API_ROOT}/repos/${REPOSITORY}/releases/tags/${TAG}"
+if [ -n "$RELEASE_ID" ]; then
+  [[ "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'Invalid release ID.' >&2; exit 1; }
+  release_url="${API_ROOT}/repos/${REPOSITORY}/releases/${RELEASE_ID}"
+fi
+[[ "$REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo 'Invalid repository.' >&2; exit 1; }
+[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid release tag.' >&2; exit 1; }
 status_code="$(api_request "$release_url" "$release_json")"
 
 case "$status_code" in

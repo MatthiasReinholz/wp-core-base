@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class GitLabReleaseManagedSource implements ManagedDependencySource
+final class GitLabReleaseManagedSource implements ManagedDependencySource, HistoricalVersionSource
 {
     public function __construct(
         private readonly GitLabReleaseClient $client,
@@ -16,6 +16,11 @@ final class GitLabReleaseManagedSource implements ManagedDependencySource
     public function key(): string
     {
         return 'gitlab-release';
+    }
+
+    public function supportsHistoricalVersions(array $dependency): bool
+    {
+        return true;
     }
 
     public function fetchCatalog(array $dependency): array

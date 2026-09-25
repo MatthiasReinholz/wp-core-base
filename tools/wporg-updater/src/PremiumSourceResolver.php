@@ -16,6 +16,16 @@ final class PremiumSourceResolver
         return ['wordpress.org', 'github-release', 'gitlab-release', 'generic-json', 'premium', 'local'];
     }
 
+    public static function assertCustomProviderKey(string $provider): void
+    {
+        if (in_array($provider, self::allowedSources(), true)) {
+            throw new RuntimeException(sprintf('Premium provider key `%s` is reserved.', $provider));
+        }
+        if (preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/D', $provider) !== 1) {
+            throw new RuntimeException('Premium provider keys must use lowercase letters, numbers, and single hyphen separators.');
+        }
+    }
+
     public static function isPremiumSource(string $source): bool
     {
         return $source === 'premium';
@@ -102,11 +112,7 @@ final class PremiumSourceResolver
 
         $provider = trim($provider);
 
-        if (! preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $provider)) {
-            throw new RuntimeException(
-                'Premium provider keys must use lowercase letters, numbers, and single hyphen separators.'
-            );
-        }
+        self::assertCustomProviderKey($provider);
 
         return $provider;
     }

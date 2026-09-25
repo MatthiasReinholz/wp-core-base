@@ -55,6 +55,67 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php refresh-admin-
 5. merge approved PRs only after required runtime validation checks pass
 6. deploy through your existing process
 
+## Commands, Locks, and Staging Publication
+
+Every repository-dependent CLI command takes the same lock before reading mutable configuration, including `doctor`, `stage-runtime`, and `framework-sync --check-only`. Help does not acquire it. The lock lives at `.wp-core-base/build/locks/mutation.lock`; different command names do not create independent locks. It coordinates framework commands in the same canonical checkout, not editors, separate clones, or deployment readers.
+
+The default wait limit is 300 seconds. Set `WP_CORE_BASE_LOCK_TIMEOUT_SECONDS` to a positive integer when a job needs a different bound. A timeout reports the recorded holder PID, acquisition time, and operation. Check whether that process is active and resolve its failure before retrying. Never delete or replace the lock file to bypass contention: processes already holding the old file could continue while a second writer acquires a new one. An exited process releases its OS lock even though the diagnostic file remains.
+
+Staging accepts a canonical relative output such as `.wp-core-base/build/runtime`. Repository metadata, the lock directory and its ancestors, live core/content paths, framework tooling/distribution paths, traversal aliases, and symlink ancestors are rejected. Assembly and validation occur in a private sibling directory; a validation failure leaves the previous complete stage unchanged. Publication uses directory renames and rollback, so an unsynchronized reader can briefly observe no directory between renames. Build or deploy only after `stage-runtime` succeeds. A failed rollback preserves its backup and reports the recovery location.
+
+## Private Workspaces and Recovery
+
+Scratch operations use an owner-private namespace below the platform temporary directory: `wp-core-base-private-<owner>/repo-<canonical-path-hash>/`. Each operation has a marker, an active-operation lock, and a `payload/` directory. Stale cleanup requires matching ownership/repository metadata, an inactive lock, and sufficient age. Its default age is one hour; `WP_CORE_BASE_TEMP_DIR_MAX_AGE_SECONDS` accepts a positive override. Existing legacy prefix-named directories have no ownership marker and are intentionally left untouched.
+
+Workspaces marked as preserved are excluded from automatic cleanup regardless of age. A failed dependency restore reports its payload path; `recovery.json` contains the intended runtime path and a `config_files` map of prior file existence and base64-encoded contents. An existing runtime backup is stored alongside it under `runtime/`. Framework installation and staging failures report their own retained backup paths.
+
+Dependency transactions mark their complete backups before changing runtime or configuration files, so they remain retained after process termination. Only successful commit or complete restoration permits automatic removal. After an interrupted process, inspect these retained workspaces even when no caught error could print a recovery location; there is no automatic journal replay.
+
+If recovery is incomplete:
+
+1. stop automated writes to that checkout and retain the original error, paths, and Git revisions
+2. inspect the backup and recovery metadata as data; confirm that the recorded paths belong to this checkout and do not pass through symlinks
+3. compare the backup, current tree, manifest, governance data, and framework lock; restore the intended consistent state in a reviewed repair rather than blindly copying paths from a record
+4. run `doctor` and `stage-runtime`, inspect the Git diff, and resume automation only after the runtime contract passes
+5. remove the preserved backup manually only after the repair is verified and no operation still uses it
+
+Recovery records and backups may contain project code or private configuration. Keep their private permissions and avoid attaching their contents to public issues.
+
+## Concurrent Git Changes and Uncertain Pushes
+
+Update pushes and remote rollback use an exact expected revision. If another actor advances the branch, the lease fails and that actor's commit is preserved. A branch merely observed at the beginning of a run is not authority to restore or delete it later. Local rollback likewise uses recorded ownership and conditional ref updates; unrelated untracked files are retained.
+
+If a push fails after a local commit is created, the server may already have accepted it. The tool retains that recovery commit and reports the uncertainty. Inspect the local commit, the current remote ref, and any existing PR before retrying or repairing it. Do not resolve this situation with an unconditional force push. A remote rollback failure keeps the local recovery ref for inspection. Unowned residue from a partial application may require a reviewed manual repair before the checkout is clean enough for another sync.
+
+## Plugin Minimum WordPress Requirements
+
+For `full-core` repositories with managed core, `stage-runtime` and `doctor` reject staged plugins or MU plugins whose installed `Requires at least` header exceeds the local core version. The check inspects the assembled payload before publication, including relaxed-mode and allowlisted plugins, using WordPress's plugin discovery locations plus declared main files for nonstandard MU packages. Ignored or unstaged files remain excluded. A managed checksum does not override this check, and a failure preserves the previous successful stage. Resolve the mismatch through a reviewed core migration or a compatible plugin release.
+
+For `content-only`, external, or disabled core, the framework cannot determine the deployment's WordPress version. Staging remains available; `doctor` reports the compatibility check as unverified in its normal text and JSON messages. Validate the installed plugins against the externally supplied core in deployment testing. Missing minimum-version headers, themes, PHP requirements, and behavioral compatibility remain outside this minimum-version check; the real WordPress smoke test and project integration tests remain necessary.
+
+## Automation Health and Response Targets
+
+A green scheduled updater does not establish that its generated PRs can pass required checks. In the framework source repository, the read-only GitHub health script inspects dependency/core and framework update PRs, effective required checks, workflow approval requirements, and the scheduled updater/reconciliation runs:
+
+```bash
+php scripts/ci/check_update_health.php --repo=owner/repository --json --fail-on-actionable
+```
+
+Authenticate the GitHub CLI with read access to the repository's PRs, Actions, and rules. This is a maintainer utility in the source repository, not a bundled downstream CLI command or a GitLab monitor. The upstream `wporg-update-health.yml` workflow uses the same read-only report. The script refuses to report health when required input cannot be established, including absent effective required checks or missing scheduled-run history.
+
+The monitor scopes PR runs to the current head commit and branch, then selects the latest execution of each workflow and event. Scheduled-run checks query a recent time window and select by timestamp instead of assuming the first API result is current. Earlier blocked or failed executions do not override their replacements.
+
+Default signals are:
+
+- approval-required or failed required checks: immediate attention
+- a PR at least 24 hours old with missing or unfinished required checks: attention
+- an unqueued update open for at least seven days: review overdue
+- latest scheduled updater/reconciliation run at least 48 hours old, or a failed completed run: attention
+
+`--max-age-hours` and `--check-grace-hours` configure the PR thresholds. Intentional queueing suppresses the ordinary review-age warning; it does not hide broken or approval-required checks. `--fail-on-actionable` returns a nonzero status when the completed report finds actionable items. Data-read failures also fail the command rather than producing a false healthy result.
+
+The repository maintainer owns framework automation triage. Each downstream team should assign an update owner and an escalation channel. Triage critical upstream advisories within one business day and record a patch/mitigation decision; the seven-day routine review target is not a security-update delay. Review workflow changes and approval requirements, rerun legitimate checks through the normal authorization path, and retain required checks. This monitor does not approve workflows, bypass branch protection, merge PRs, or decide whether an advisory affects a deployed site.
+
 ## Reviewing Update PRs
 
 For dependency update PRs, pay attention to:
@@ -73,7 +134,7 @@ For WordPress core PRs, pay attention to:
 For framework update PRs, pay attention to:
 
 - current and target `wp-core-base` version
-- the bundled WordPress baseline before and after the update
+- the upstream baseline metadata before and after the update; this is informational for framework updates, not a downstream core/plugin installation
 - release-note sections from `wp-core-base` itself
 - any scaffolded workflow files that were intentionally skipped because they were locally customized
 

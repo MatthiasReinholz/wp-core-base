@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'version' => '1.4.8',
+  'version' => '1.5.0',
   'release_channel' => 'stable',
   'distribution' =>
   array (
@@ -20,7 +20,7 @@ return array (
   ),
   'baseline' =>
   array (
-    'wordpress_core' => '6.9.4',
+    'wordpress_core' => '6.9.9',
     'managed_components' =>
     array (
       0 =>
@@ -32,7 +32,7 @@ return array (
       1 =>
       array (
         'name' => 'Jetpack',
-        'version' => '16.1.2',
+        'version' => '16.1.3',
         'kind' => 'plugin',
       ),
       2 =>
@@ -44,7 +44,7 @@ return array (
       3 =>
       array (
         'name' => 'Redirection',
-        'version' => '5.10.0',
+        'version' => '5.10.1',
         'kind' => 'plugin',
       ),
     ),

@@ -42,6 +42,11 @@ url=""
 redirect_url=""
 auth_header_present="false"
 method="GET"
+follow_redirects=false
+https_only=false
+connect_timeout=false
+total_timeout=false
+size_limit=false
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -64,9 +69,26 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --proto)
+      [ "$2" != '=https' ] || https_only=true
       shift 2
       ;;
-    -fsSL|-sS|-f|-s|-S|-L)
+    --connect-timeout)
+      connect_timeout=true
+      shift 2
+      ;;
+    --max-time)
+      total_timeout=true
+      shift 2
+      ;;
+    --max-filesize)
+      size_limit=true
+      shift 2
+      ;;
+    -fsSL|-L)
+      follow_redirects=true
+      shift
+      ;;
+    -sS|-f|-s|-S|--tlsv1.2)
       shift
       ;;
     *)
@@ -76,6 +98,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+[ "$follow_redirects" = false ] && [ "$https_only" = true ] && [ "$connect_timeout" = true ] && [ "$total_timeout" = true ] && [ "$size_limit" = true ] || {
+  echo 'Release helpers must use bounded HTTPS without implicit redirects.' >&2
+  exit 1
+}
+
 printf '%s %s\n' "${method}" "${url}" >> "${FAKE_CURL_LOG:-/dev/null}"
 
 status="200"
@@ -83,6 +110,7 @@ body_file=""
 
   case "$url" in
     */commits/*/pulls)
+      status="${FAKE_API_READ_STATUS:-200}"
       body_file="${FAKE_PULLS_FIXTURE:?}"
       ;;
   */actions/workflows/*/runs\?head_sha=*)
@@ -156,7 +184,19 @@ body_file=""
       body_file="${FAKE_REMOTE_SIGNATURE_FILE:?}"
     fi
     ;;
+  https://api.github.com/assets/returned)
+    if [ "$auth_header_present" = true ]; then echo 'Credentials restored after origin change.' >&2; exit 1; fi
+    body_file="${FAKE_REMOTE_ARTIFACT_FILE:?}"
+    ;;
   https://objects.githubusercontent.com/artifact)
+    case "${FAKE_REDIRECT_CHAIN:-}" in
+      evil) status=302; redirect_url=https://evil.example.invalid/artifact ;;
+      http) status=302; redirect_url=http://objects.githubusercontent.com/artifact ;;
+      port) status=302; redirect_url=https://objects.githubusercontent.com:444/artifact ;;
+      credentials) status=302; redirect_url=https://user:secret@objects.githubusercontent.com/artifact ;;
+      loop) status=302; redirect_url=https://objects.githubusercontent.com/artifact ;;
+      returnapi) status=302; redirect_url=https://api.github.com/assets/returned ;;
+    esac
     body_file="${FAKE_REMOTE_ARTIFACT_FILE:?}"
     ;;
   https://objects.githubusercontent.com/checksum)
@@ -291,134 +331,6 @@ assert_count() {
   fi
 }
 
-run_finalize_preflight() {
-  local output_file="$1"
-  local github_output_file="$2"
-
-  (
-    set -euo pipefail
-    version="v1.3.2"
-    tag_exists="false"
-    publish_required=""
-    reason=""
-
-    if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
-      tag_exists="true"
-    fi
-
-    echo "tag_exists=${tag_exists}" >> "${github_output_file}"
-
-    GITHUB_OUTPUT="${github_output_file}" \
-      bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" \
-        --expected-title "${EXPECTED_RELEASE_TITLE}" \
-        --expected-notes-file "${EXPECTED_RELEASE_NOTES_PATH}" \
-        example/repo \
-        "${version}" \
-        "${ARTIFACT_PATH}" \
-        "${CHECKSUM_PATH}" \
-        "${SIGNATURE_PATH}"
-
-    publish_required="$(grep '^publish_required=' "${github_output_file}" | tail -n1 | cut -d= -f2-)"
-    reason="$(grep '^reason=' "${github_output_file}" | tail -n1 | cut -d= -f2-)"
-
-    if [ "${tag_exists}" = "true" ] && [ "${publish_required}" = "true" ]; then
-      echo "Remote tag ${version} already exists, but the published release is not current (${reason})." >&2
-      exit 1
-    fi
-
-    if [ "${tag_exists}" = "true" ] && [ "${publish_required}" = "false" ]; then
-      echo "GitHub Release ${version} already contains the current verified assets and metadata; nothing to publish."
-    fi
-  ) > "${output_file}" 2>&1
-}
-
-run_finalize_rollback() {
-  local rollback_output_file="$1"
-
-  (
-    set -euo pipefail
-    version="v1.3.2"
-
-    release_lookup() {
-      local response_file="$1"
-
-      curl -sS \
-        -o "${response_file}" \
-        -w "%{http_code}" \
-        -H "Accept: application/vnd.github+json" \
-        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${version}"
-    }
-
-    assert_remote_tag_deleted() {
-      local attempt
-
-      for attempt in 1 2 3 4 5; do
-        if ! git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
-          return 0
-        fi
-
-        if [ "${attempt}" -lt 5 ]; then
-          sleep 1
-        fi
-      done
-
-      echo "Remote tag ${version} still exists after delete attempts." >&2
-      exit 1
-    }
-
-    assert_release_deleted() {
-      local attempt
-      local release_lookup_status
-
-      for attempt in 1 2 3 4 5; do
-        release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
-
-        if [ "${release_lookup_status}" = '404' ]; then
-          return 0
-        fi
-
-        if [ "${release_lookup_status}" != '200' ]; then
-          echo "Failed to verify GitHub Release ${version} deletion (status ${release_lookup_status})." >&2
-          exit 1
-        fi
-
-        if [ "${attempt}" -lt 5 ]; then
-          sleep 1
-        fi
-      done
-
-      echo "GitHub Release ${version} still exists after delete attempts." >&2
-      exit 1
-    }
-
-    release_lookup_status="$(release_lookup /tmp/wp-core-base-release-rollback.json)"
-
-    if [ "${release_lookup_status}" = '200' ]; then
-      release_id="$(jq -r '.id' /tmp/wp-core-base-release-rollback.json)"
-
-      if [ -z "${release_id}" ] || [ "${release_id}" = 'null' ]; then
-        echo "GitHub Release ${version} lookup succeeded but did not return a usable release id." >&2
-        exit 1
-      fi
-
-      curl -fsSL \
-        -X DELETE \
-        -H "Accept: application/vnd.github+json" \
-        -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/${release_id}" >/dev/null
-    fi
-
-    git tag -d "$version" || true
-    git push --delete origin "$version" || true
-
-    assert_remote_tag_deleted
-    assert_release_deleted
-  ) > "${rollback_output_file}" 2>&1
-}
-
 export PATH="${FAKE_BIN}:${PATH}"
 export GITHUB_TOKEN="fixture-token"
 export FAKE_CURL_LOG="${CURL_LOG}"
@@ -437,6 +349,25 @@ unset FAKE_RUNS_FIXTURE_SEQUENCE
 export FAKE_RUNS_FIXTURE="${FIXTURE_ROOT}/runs-push-success.json"
 bash "${REPO_ROOT}/scripts/ci/check_framework_release_ci.sh" example/repo v1.3.2 merge-commit-sha > "${CI_SUCCESS_OUTPUT}"
 assert_contains "${CI_SUCCESS_OUTPUT}" "successful wporg-validate-runtime.yml push run on merged commit merge-commit-sha"
+
+PR_SUCCESS_OUTPUT="${TMP_DIR}/pr-success.out"
+bash "${REPO_ROOT}/scripts/ci/check_framework_release_pr.sh" example/repo v1.3.2 merge-commit-sha > "$PR_SUCCESS_OUTPUT"
+assert_contains "$PR_SUCCESS_OUTPUT" 'Verified release commit merge-commit-sha'
+for helper in check_framework_release_ci.sh check_framework_release_pr.sh; do
+  for status in 302 500; do
+    : > "$CURL_LOG"
+    if FAKE_API_READ_STATUS="$status" bash "${SCRIPT_DIR}/${helper}" example/repo v1.3.2 merge-commit-sha > "$TMP_DIR/gate-failure.out" 2>&1; then
+      echo "Expected ${helper} to reject API response ${status}." >&2; exit 1
+    fi
+    assert_contains "$TMP_DIR/gate-failure.out" "Release API read failed (HTTP ${status})"
+    assert_count "$CURL_LOG" 'GET ' 1
+  done
+  : > "$CURL_LOG"
+  if GITHUB_API_URL=http://api.github.com bash "${SCRIPT_DIR}/${helper}" example/repo v1.3.2 merge-commit-sha > "$TMP_DIR/gate-http.out" 2>&1; then
+    echo "Expected ${helper} to reject an insecure API URL." >&2; exit 1
+  fi
+  assert_count "$CURL_LOG" 'GET ' 0
+done
 
 CI_DELAYED_SUCCESS_OUTPUT="${TMP_DIR}/ci-delayed-success.out"
 export FAKE_RUNS_FIXTURE_SEQUENCE="${FIXTURE_ROOT}/runs-push-pending.json:${FIXTURE_ROOT}/runs-push-success.json"
@@ -620,55 +551,34 @@ assert_contains "${ASSET_STALE_NOTES_OUTPUT}" "notes body does not match expecte
 assert_contains "${ASSET_STALE_NOTES_GITHUB_OUTPUT}" "publish_required=true"
 assert_contains "${ASSET_STALE_NOTES_GITHUB_OUTPUT}" "reason=notes-mismatch"
 
-RERUN_OUTPUT="${TMP_DIR}/finalize-rerun.out"
-RERUN_GITHUB_OUTPUT="${TMP_DIR}/finalize-rerun.github-output"
-export FAKE_GIT_LS_REMOTE_STATE="present"
-export FAKE_RELEASE_STATUS="200"
+# Every redirect hop is checked, including a CDN redirect back to the API.
 export FAKE_RELEASE_FIXTURE="${FIXTURE_ROOT}/release-current.json"
 export FAKE_REMOTE_ARTIFACT_FILE="${REMOTE_DIR}/artifact-current"
-export FAKE_REMOTE_CHECKSUM_FILE="${REMOTE_DIR}/checksum-current"
-export FAKE_REMOTE_SIGNATURE_FILE="${REMOTE_DIR}/signature-current"
-unset FAKE_GIT_LS_REMOTE_SEQUENCE
-unset FAKE_RELEASE_STATUS_SEQUENCE
-: > "${CURL_LOG}"
-: > "${GIT_LOG}"
-run_finalize_preflight "${RERUN_OUTPUT}" "${RERUN_GITHUB_OUTPUT}"
-assert_contains "${RERUN_OUTPUT}" "GitHub Release v1.3.2 already contains the current verified assets and metadata; nothing to publish."
-assert_contains "${RERUN_GITHUB_OUTPUT}" "tag_exists=true"
-assert_contains "${RERUN_GITHUB_OUTPUT}" "publish_required=false"
-assert_contains "${RERUN_GITHUB_OUTPUT}" "reason=current"
+export FAKE_REDIRECT_ARTIFACT_URL="https://objects.githubusercontent.com/artifact"
+export FAKE_REDIRECT_CHECKSUM_URL="https://objects.githubusercontent.com/checksum"
+export FAKE_REDIRECT_SIGNATURE_URL="https://objects.githubusercontent.com/signature"
+for chain in evil http port credentials loop; do
+  export FAKE_REDIRECT_CHAIN="$chain"
+  : > "$CURL_LOG"
+  if bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" example/repo v1.3.2 "$ARTIFACT_PATH" "$CHECKSUM_PATH" "$SIGNATURE_PATH" > "$TMP_DIR/chain-$chain.out" 2>&1; then
+    echo "Expected redirect chain $chain to be rejected." >&2; exit 1
+  fi
+  if grep -Eq 'GET (http:|https://evil|https://user|https://objects.githubusercontent.com:444)' "$CURL_LOG"; then
+    echo 'Unsafe redirect was requested.' >&2; exit 1
+  fi
+done
+export FAKE_REDIRECT_CHAIN=returnapi
+bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" example/repo v1.3.2 "$ARTIFACT_PATH" "$CHECKSUM_PATH" "$SIGNATURE_PATH" > "$TMP_DIR/chain-return-api.out"
+unset FAKE_REDIRECT_CHAIN
 
-ROLLBACK_TAG_FAILURE_OUTPUT="${TMP_DIR}/rollback-tag-failure.out"
-ROLLBACK_RELEASE_FIXTURE="${TMP_DIR}/rollback-release-fixture.json"
-printf '{ "id": 123 }\n' > "${ROLLBACK_RELEASE_FIXTURE}"
-export FAKE_GIT_LS_REMOTE_STATE="present"
-export FAKE_RELEASE_STATUS="404"
-export FAKE_RELEASE_FIXTURE="${ROLLBACK_RELEASE_FIXTURE}"
-: > "${CURL_LOG}"
-: > "${GIT_LOG}"
-if GITHUB_API_URL="https://api.github.com" \
-  GITHUB_REPOSITORY="example/repo" \
-  run_finalize_rollback "${ROLLBACK_TAG_FAILURE_OUTPUT}"; then
-  echo "Expected rollback to fail when the remote tag still exists after delete attempts." >&2
-  exit 1
+# An API-supplied initial asset URL cannot select another authenticated origin.
+jq '.assets[0].url="https://evil.example.invalid/artifact"' "$FIXTURE_ROOT/release-current.json" > "$TMP_DIR/initial-evil.json"
+export FAKE_RELEASE_FIXTURE="$TMP_DIR/initial-evil.json"
+: > "$CURL_LOG"
+if bash "${REPO_ROOT}/scripts/ci/check_framework_release_assets.sh" example/repo v1.3.2 "$ARTIFACT_PATH" "$CHECKSUM_PATH" "$SIGNATURE_PATH" > "$TMP_DIR/initial-evil.out" 2>&1; then
+  echo 'Expected initial asset origin rejection.' >&2; exit 1
 fi
-assert_contains "${ROLLBACK_TAG_FAILURE_OUTPUT}" "Remote tag v1.3.2 still exists after delete attempts."
-assert_count "${GIT_LOG}" "ls-remote --exit-code --tags origin refs/tags/v1.3.2" "5"
+if grep -Fq 'GET https://evil' "$CURL_LOG"; then echo 'Initial evil URL was requested.' >&2; exit 1; fi
 
-ROLLBACK_RELEASE_FAILURE_OUTPUT="${TMP_DIR}/rollback-release-failure.out"
-export FAKE_GIT_LS_REMOTE_STATE="absent"
-export FAKE_RELEASE_STATUS="200"
-export FAKE_RELEASE_FIXTURE="${ROLLBACK_RELEASE_FIXTURE}"
-: > "${CURL_LOG}"
-: > "${GIT_LOG}"
-if GITHUB_API_URL="https://api.github.com" \
-  GITHUB_REPOSITORY="example/repo" \
-  run_finalize_rollback "${ROLLBACK_RELEASE_FAILURE_OUTPUT}"; then
-  echo "Expected rollback to fail when the GitHub Release still exists after delete attempts." >&2
-  exit 1
-fi
-assert_contains "${ROLLBACK_RELEASE_FAILURE_OUTPUT}" "GitHub Release v1.3.2 still exists after delete attempts."
-assert_contains "${CURL_LOG}" "DELETE https://api.github.com/repos/example/repo/releases/123"
-assert_count "${CURL_LOG}" "GET https://api.github.com/repos/example/repo/releases/tags/v1.3.2" "6"
-
+PATH="${PATH#*:}" bash "${REPO_ROOT}/scripts/ci/test_release_publication.sh"
 echo "Release helper scripts verified."

@@ -1,0 +1,17 @@
+{
+  "phpstan": {
+    "version": "2.2.15",
+    "url": "https://github.com/phpstan/phpstan/releases/download/2.2.15/phpstan.phar",
+    "sha256": "adccacab7cd31a262a5da17478ad5befea6f808afc32cf5f3e8af09702165f90"
+  },
+  "actionlint": {
+    "version": "1.7.12",
+    "linux-amd64": {"sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"},
+    "darwin-arm64": {"sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f"}
+  },
+  "shellcheck": {
+    "version": "0.11.0",
+    "linux-amd64": {"sha256": "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6"},
+    "darwin-arm64": {"sha256": "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"}
+  }
+}

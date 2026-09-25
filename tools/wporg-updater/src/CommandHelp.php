@@ -8,7 +8,7 @@ final class CommandHelp
 {
     public static function render(?string $topic, string $commandPrefix, string $phpCommandPrefix): string
     {
-        return match ($topic) {
+        $help = match ($topic) {
             null, '', 'general' => self::general($commandPrefix, $phpCommandPrefix),
             'add-dependency' => self::addDependency($commandPrefix),
             'adopt-dependency' => self::adoptDependency($commandPrefix),
@@ -19,6 +19,14 @@ final class CommandHelp
             'sync' => self::sync($phpCommandPrefix),
             default => self::general($commandPrefix, $phpCommandPrefix),
         };
+        if ($topic !== null && isset(\WpOrgPluginUpdater\Cli\CommandOptions::definitions()[$topic])) {
+            $options = [];
+            foreach (\WpOrgPluginUpdater\Cli\CommandOptions::forCommand($topic) as $name => $type) {
+                $options[] = '--' . $name . ($type === 'value' ? '=VALUE' : '');
+            }
+            $help .= "Accepted options:\n  " . implode("\n  ", $options) . "\n";
+        }
+        return $help;
     }
 
     private static function general(string $commandPrefix, string $phpCommandPrefix): string
@@ -36,7 +44,7 @@ Usage:
   {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--automation-provider=github|gitlab] [--force] [--adopt-existing-managed-files]
   {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only] [--fail-on-skipped-managed-files] [--json]
   {$phpCommandPrefix} prepare-framework-release [--repo-root=/path] --release-type=patch|minor|major|custom [--version=v1.0.1]
-  {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--json]
+  {$phpCommandPrefix} build-release-artifact [--repo-root=/path] --output=/path/to/wp-core-base-vendor-snapshot.zip [--checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256] [--source-revision=COMMIT] [--fixture] [--json]
   {$phpCommandPrefix} release-sign --artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig --private-key-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PEM [--passphrase-env=WP_CORE_BASE_RELEASE_PRIVATE_KEY_PASSPHRASE]
   {$phpCommandPrefix} release-verify [--repo-root=/path] [--tag=v1.0.0] [--artifact=/path/to/wp-core-base-vendor-snapshot.zip --checksum-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256 --signature-file=/path/to/wp-core-base-vendor-snapshot.zip.sha256.sig [--public-key-file=/path/to/framework-release-public.pem]] [--json]
   {$phpCommandPrefix} suggest-manifest [--repo-root=/path]

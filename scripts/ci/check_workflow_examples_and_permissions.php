@@ -3,16 +3,16 @@
 declare(strict_types=1);
 
 use WpOrgPluginUpdater\DownstreamScaffolder;
+use WpOrgPluginUpdater\TempWorkspace;
 
 require dirname(__DIR__, 2) . '/tools/wporg-updater/src/Autoload.php';
 
 $repoRoot = dirname(__DIR__, 2);
-$tempRoot = sys_get_temp_dir() . '/wporg-workflow-parity-' . bin2hex(random_bytes(4));
-
-mkdir($tempRoot, 0777, true);
+$workspace = TempWorkspace::create($repoRoot, 'workflow-parity');
+$tempRoot = $workspace->path();
 
 try {
-    (new DownstreamScaffolder($repoRoot, $tempRoot))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
+    (new DownstreamScaffolder($repoRoot, $tempRoot, true))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
 
     $exampleMappings = [
         '.github/workflows/wporg-updates.yml' => 'docs/examples/downstream-workflow.yml',
@@ -39,9 +39,19 @@ try {
         }
     }
 
+    foreach (array_merge(
+        glob($repoRoot . '/.github/workflows/*.yml') ?: [],
+        glob($repoRoot . '/tools/wporg-updater/templates/*workflow*.tpl') ?: [],
+        glob($repoRoot . '/docs/examples/*workflow*.yml') ?: []
+    ) as $workflowPath) {
+        assertNoRunExpressions((string) file_get_contents($workflowPath), $workflowPath);
+    }
+
     $expectedPermissions = [
         '.github/workflows/finalize-wp-core-base-release.yml' => [
             'contents' => 'write',
+            'pull-requests' => 'read',
+            'actions' => 'read',
         ],
         '.github/workflows/prepare-wp-core-base-release.yml' => [
             'contents' => 'write',
@@ -50,6 +60,7 @@ try {
         '.github/workflows/release-wp-core-base.yml' => [
             'contents' => 'write',
             'pull-requests' => 'read',
+            'actions' => 'read',
         ],
         '.github/workflows/wporg-updates.yml' => [
             'contents' => 'write',
@@ -65,6 +76,13 @@ try {
             'contents' => 'read',
             'pull-requests' => 'read',
             'issues' => 'read',
+        ],
+        '.github/workflows/wporg-update-health.yml' => [
+            'contents' => 'read',
+            'pull-requests' => 'read',
+            'actions' => 'read',
+            'checks' => 'read',
+            'statuses' => 'read',
         ],
         '.github/workflows/wporg-validate-runtime.yml' => [
             'contents' => 'read',
@@ -113,7 +131,7 @@ try {
 
     fwrite(STDOUT, "Workflow examples and permissions verified.\n");
 } finally {
-    clearPath($tempRoot);
+    $workspace->close();
 }
 
 /**
@@ -263,29 +281,25 @@ function permissionsWithinBaseline(array $actual, array $expected): bool
     return true;
 }
 
-function clearPath(string $path): void
-{
-    if (is_link($path) || is_file($path)) {
-        @unlink($path);
-        return;
-    }
-
-    if (! is_dir($path)) {
-        return;
-    }
-
-    foreach (scandir($path) ?: [] as $entry) {
-        if ($entry === '.' || $entry === '..') {
-            continue;
-        }
-
-        clearPath($path . '/' . $entry);
-    }
-
-    @rmdir($path);
-}
-
 function normalizeWorkflow(string $contents): string
 {
     return ltrim((string) preg_replace('/^(?:#.*\R)+\R*/', '', $contents));
+}
+
+/** Dynamic GitHub values belong in quoted environment variables, never shell source. */
+function assertNoRunExpressions(string $contents, string $path): void
+{
+    $runIndent = null;
+    foreach (preg_split('/\r\n|\n|\r/', $contents) ?: [] as $index => $line) {
+        $indent = strlen($line) - strlen(ltrim($line));
+        if ($runIndent !== null && trim($line) !== '' && $indent <= $runIndent) {
+            $runIndent = null;
+        }
+        if (preg_match('/^(\s*)(?:-\s+)?run\s*:\s*(.*)$/', $line, $matches) === 1) {
+            $runIndent = strlen($matches[1]) + (str_starts_with(ltrim($line), '- ') ? 2 : 0);
+        }
+        if ($runIndent !== null && str_contains($line, '${{')) {
+            throw new RuntimeException(sprintf('%s:%d interpolates a GitHub expression into shell source; pass it through env and quote it.', $path, $index + 1));
+        }
+    }
 }

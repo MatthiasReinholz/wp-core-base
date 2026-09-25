@@ -85,12 +85,18 @@ The release flow is intentionally staged:
 - `prepare-wp-core-base-release` derives the version bump, refreshes an existing release branch when appropriate, updates `.wp-core-base/framework.php`, scaffolds `docs/releases/<version>.md` when needed, and opens `release/vX.Y.Z`
 - `finalize-wp-core-base-release` reacts only to a merged release PR into `main`, verifies that the exact merged commit already passed `wp-core-base CI` on `main`, creates the annotated tag from the merge commit, builds the vendorable snapshot through `build-release-artifact`, and publishes `wp-core-base-vendor-snapshot.zip` plus its SHA-256 checksum file
 - `finalize-wp-core-base-release` also signs the checksum sidecar and publishes the detached signature `wp-core-base-vendor-snapshot.zip.sha256.sig`
-- both publish workflows verify that the GitHub Release assets match the freshly built local snapshot after publication
+- both publish workflows verify the uploaded draft assets against the freshly built snapshot before publication
 - `release-wp-core-base` is the manual recovery workflow for publishing a GitHub Release from an already existing tag after a failed finalize run, including checksum-sidecar signing and asset freshness checks against the current tag build
 
 This keeps release intent reviewable in a PR instead of bundling version bumps, tagging, and publishing into one manual step.
 
-The artifact builder applies explicit exclusions for non-release material such as temp paths, CI-only scripts, and framework tests so the vendored snapshot boundary stays predictable.
+Official artifacts are built from an exact immutable Git commit through an explicit allowlist. Dirty, untracked, ignored, runtime-core, plugin, test, private-key, cache, and local configuration inputs are excluded. The retained snapshot root and asset name remain compatible with the v1.4.8 installer, while the payload contains only tooling, templates, public keys, documentation, and framework/runtime metadata.
+
+Each artifact includes `.wp-core-base/release-inventory.json` with source revision and per-file hashes, sizes, and normalized modes. Sorted ZIP entries use a fixed timestamp normalized in UTC, normalized modes, and stored compression for reproducibility across compression-library versions. The verifier independently compares the inventory to extracted contents before installation. Historical full snapshots remain accepted.
+
+The publication helper creates a draft, uploads assets, verifies the uploaded bytes and metadata, and only then publishes it. A resource journal records positive creation receipts: the exact tag object and numeric release ID. Existing releases and tags are never deleted or overwritten by a rerun. An identical published release is a no-op; inconsistent existing releases require explicit operator recovery. Failed publication never automatically deletes a remote release or tag. GitHub release deletion has no conditional state check: a release observed as a draft can be published by another actor before a delete arrives. Positive receipts therefore support operator recovery, not permission for automatic deletion. An ambiguous network outcome preserves state and the journal rather than guessing whether a mutation succeeded.
+
+`build-release-artifact --source-revision=<commit>` selects the immutable input explicitly. `--fixture` is solely for a non-Git development fixture, cannot replace an official build, and records `fixture` provenance. Release tooling never silently falls back to working-tree inputs.
 
 ## Authoritative Source Changes
 
@@ -100,18 +106,15 @@ The framework release source is intentionally singular.
 - downstream `framework-sync` follows the source recorded in the installed framework metadata
 - current upstream publication remains GitHub-specific until maintainers intentionally migrate that official source
 
-If the authoritative source ever moves to a different Git platform, treat it as a coordinated maintainer migration:
+If the authoritative source ever moves to a different Git platform, treat it as a coordinated trust migration:
 
-1. prepare the future source host and confirm its API base, repository/project identifier, and release publication flow
-2. update `.wp-core-base/framework.php` in the migration release so the installed framework metadata points at the future source
-3. coordinate adoption of that release across downstreams before depending on the new host operationally
-4. publish all subsequent framework releases only on the new authoritative source
+1. prepare and independently verify the future source host, API base, repository/project identity, public keys, and publication flow
+2. announce the migration through the currently trusted source while keeping that release's embedded source identity unchanged
+3. each downstream explicitly reviews and commits the new `release_source` coordinates in its installed `.wp-core-base/framework.php`; preserve the trusted key overlap and record the operator's verification
+4. publish a matching, non-downgrade release on the new source and run normal signed preflight against that deliberately configured source
+5. maintain an announced migration window for downstreams that still follow the old source
 
-Practical implication:
-
-- downstreams only follow the authoritative source recorded in their installed framework metadata
-- provider-neutral code does not make source moves transparent by itself
-- if the project ever develops long-lived downstreams that cannot move in coordination, add an explicit bridge-release process before attempting a host migration
+A normal framework update cannot silently change its authoritative source or asset name: the signed payload must match the installed trust configuration. Merely adopting a release that embeds different coordinates will fail identity validation. The framework does not discover parallel legacy sources or infer permission to migrate them.
 
 ## Release Signing
 
@@ -135,14 +138,15 @@ Use this procedure when rotating framework release signing keys:
 
 1. Generate the new keypair outside the repository and keep the private key in your secret manager.
 2. Commit only the new public key as `tools/wporg-updater/keys/framework-release-public-<yyyymm>.pem`.
-3. Configure release workflows to sign with the new private key secret.
-4. Run `release-verify` against a signed artifact and confirm verification succeeds with the new key.
-5. Keep the prior public key committed during the overlap window so existing release lines remain verifiable.
-6. After the overlap window ends, update `tools/wporg-updater/keys/framework-release-public.pem` to the active key and remove fully retired rotated public keys.
+3. Publish a bridge release containing the new public key while still signing with the previous trusted key. Allow downstreams to adopt that release; clients that skip it need an independently verified key update before they can trust the later signer.
+4. After the announced migration window, configure release workflows to sign with the new private key secret.
+5. Run `release-verify` against a signed artifact and confirm verification succeeds with the new key.
+6. Keep the prior public key committed during the overlap window so existing release lines remain verifiable.
+7. After the overlap window ends, update `tools/wporg-updater/keys/framework-release-public.pem` to the active key and remove fully retired rotated public keys.
 
 Key selection order during verification:
 
-- `--public-key` CLI override (if passed)
+- `--public-key-file` CLI override (if passed)
 - `tools/wporg-updater/keys/framework-release-public.pem`
 - `tools/wporg-updater/keys/framework-release-public-*.pem`
 - absolute paths from `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` (comma-separated)
@@ -151,7 +155,7 @@ Emergency rotation (suspected compromise):
 
 1. Remove compromised public keys from committed key paths and any `WP_CORE_BASE_RELEASE_PUBLIC_KEY_PATHS` values.
 2. Rotate signing secrets to a known-good private key.
-3. Re-sign and republish affected checksum signatures.
+3. Prepare and verify a new corrective release signed by the trusted key. Existing published releases remain immutable under the normal publication helper; any exceptional historical-asset repair needs separate, explicit operator review.
 4. Publish a security advisory with revoked key ID(s), replacement key ID, and affected version range.
 
 ## Branch Protection Expectations
@@ -165,3 +169,20 @@ The default branch should require:
 
 Release publishing should happen only from the default branch state that already passed those checks.
 The publish workflows enforce that requirement directly by checking the successful `wp-core-base CI` push run for the exact merged release commit instead of assuming branch protection was configured correctly.
+
+## Recovery evidence
+
+A failed publication prints the journal path and its non-secret JSON contents to the job log. Both publication workflows also preserve that JSON in an always-run job-summary step because hosted runner files disappear after the job. Inspect its `created_tag_object`, `created_release_id`, `ambiguous`, and `published` fields together with current remote state before making a manual repair. The helper preserves remote releases and tags on every failure, including confirmed creation followed by a later error. Inspect current state and coordinate with other publishers before any explicit operator repair; a draft read alone does not prove deletion remains safe. Preserve a release whose status cannot be established. Successful framework installation commits before backup cleanup; a cleanup warning does not reverse the install. If any restore fails, recovery paths are retained and reported for inspection.
+
+See [immutable artifact decisions](decisions/003-release-artifacts.md) and [filesystem recovery decisions](decisions/001-filesystem-recovery.md).
+
+
+## Distribution compatibility and measurements
+
+The framework ZIP keeps the `wp-core-base-vendor-snapshot.zip` asset name and `wp-core-base/` root while removing the optional runtime starter payload. Compatibility tests exercise the v1.4.8 installer with the smaller payload across both repository profiles and automation hosts, and the current consumer with a historical full snapshot. A framework update changes tooling and framework metadata; its recorded WordPress/plugin baseline does not install those versions into a downstream runtime.
+
+ZIP entry modes do not guarantee extracted filesystem modes: PHP's `ZipArchive::extractTo` discards executable attributes. The current installer explicitly restores only the approved `bin/wp-core-base` launcher to `0755` before replacing the vendor tree, and release verification invokes that launcher directly. An old v1.4.8 installer cannot perform this new repair; its migration requires `chmod +x vendor/wp-core-base/bin/wp-core-base` after installation and committing the mode change. The exact legacy compatibility tests include that documented repair before direct CLI execution.
+
+Use a tagged source checkout or Git source archive when a new full-core project needs the optional WordPress/plugin starter. GitHub's automatically generated source archives are source snapshots, not the signed framework ZIP. Verify source identity separately and run the normal runtime checks before deployment.
+
+For repeatable package-cost measurements, use the maintainer harness described in [evaluating alternatives](evaluating-alternatives.md#measuring-package-cost). Keep raw results and artifact hashes with release evidence; do not interpret extraction timing as application throughput.

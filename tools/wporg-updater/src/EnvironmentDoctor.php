@@ -28,9 +28,9 @@ final class EnvironmentDoctor
 
         $this->okIf(is_dir($this->repoRoot), sprintf('Repository root exists: %s', $this->repoRoot), 'Repository root does not exist.');
         $this->okIf(PHP_VERSION_ID >= 80100, sprintf('PHP version is %s.', PHP_VERSION), 'PHP 8.1 or newer is required.');
-        $this->warnIf(PHP_VERSION_ID < 80300, sprintf('PHP version is %s. PHP 8.3 is recommended to match CI.', PHP_VERSION));
+        $this->warnIf(PHP_VERSION_ID < 80400, sprintf('PHP version is %s. PHP 8.4 or 8.5 is recommended for maintained operational runtimes.', PHP_VERSION));
 
-        foreach (['curl', 'dom', 'json', 'libxml', 'simplexml', 'zip'] as $extension) {
+        foreach (['curl', 'dom', 'json', 'libxml', 'mbstring', 'openssl', 'simplexml', 'zip'] as $extension) {
             $this->okIf(extension_loaded($extension), sprintf('PHP extension loaded: %s', $extension), sprintf('Missing required PHP extension: %s', $extension));
         }
 
@@ -117,6 +117,10 @@ final class EnvironmentDoctor
         ));
         $this->ok(sprintf('Ownership roots: %s.', implode(', ', $config->ownershipRoots())));
         $this->inspectRuntimeAllowPaths($config);
+
+        if ($config->profile !== 'full-core' || ! $config->coreManaged()) {
+            $this->warn('Plugin minimum WordPress compatibility is unverified because core is externally supplied or disabled. Validate plugin requirements against the deployment core.');
+        }
 
         if ($config->profile === 'content-only') {
             $this->okIf(
@@ -990,7 +994,9 @@ final class EnvironmentDoctor
                 'Reconcile workflow should gate pull_request_target closed events to merged PRs.'
             );
             $this->okIf(
-                str_contains($reconcileWorkflow, 'managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}')
+                (str_contains($reconcileWorkflow, 'managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}')
+                    || (str_contains($reconcileWorkflow, 'PR_NUMBER: ${{ github.event.pull_request.number }}')
+                        && str_contains($reconcileWorkflow, 'managed-pr-cleanup --pr-number="$PR_NUMBER"')))
                 && str_contains($reconcileWorkflow, 'ref: ${{ github.event.repository.default_branch }}'),
                 'Reconcile workflow cleans managed branches from trusted default-branch code on every labeled close event.',
                 'Reconcile workflow should run managed-pr-cleanup from an explicit default-branch checkout.'

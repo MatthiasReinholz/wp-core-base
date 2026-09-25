@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use WpOrgPluginUpdater\DownstreamScaffolder;
+use WpOrgPluginUpdater\EnvironmentDoctor;
 use WpOrgPluginUpdater\FrameworkConfig;
 
 /**
@@ -22,6 +23,29 @@ function run_workflow_contract_tests(
     $scaffoldedAgents = (string) file_get_contents($tempScaffoldRoot . '/AGENTS.md');
     $scaffoldedWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates.yml');
     $scaffoldedReconcileWorkflow = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml');
+    $reconcilePath = $tempScaffoldRoot . '/.github/workflows/wporg-updates-reconcile.yml';
+    $cleanupCommand = 'managed-pr-cleanup --pr-number="$PR_NUMBER"';
+    $binding = 'PR_NUMBER: ${{ github.event.pull_request.number }}';
+    $trustedRef = 'ref: ${{ github.event.repository.default_branch }}';
+    try {
+        foreach ([
+            [$scaffoldedReconcileWorkflow, true, 'quoted environment binding'],
+            [str_replace($cleanupCommand, 'managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}', $scaffoldedReconcileWorkflow), true, 'legacy numeric PR expression'],
+            [str_replace($binding, 'PR_NUMBER: 123', $scaffoldedReconcileWorkflow), false, 'wrong PR binding'],
+            [str_replace($cleanupCommand, 'managed-pr-cleanup --pr-number=$PR_NUMBER', $scaffoldedReconcileWorkflow), false, 'unquoted PR variable'],
+            [str_replace($trustedRef, 'ref: ${{ github.head_ref }}', $scaffoldedReconcileWorkflow), false, 'untrusted checkout'],
+        ] as [$workflow, $accepted, $case]) {
+            file_put_contents($reconcilePath, $workflow);
+            $doctor = new EnvironmentDoctor($tempScaffoldRoot, false);
+            $doctor->run(true, 'github');
+            $cleanupMessages = array_values(array_filter($doctor->report()['messages'], static fn (array $entry): bool =>
+                str_contains($entry['message'], 'Reconcile workflow cleans managed branches')
+                || str_contains($entry['message'], 'Reconcile workflow should run managed-pr-cleanup')));
+            $assert(count($cleanupMessages) === 1 && $cleanupMessages[0]['level'] === ($accepted ? 'ok' : 'error'), 'Automation doctor must evaluate cleanup command, PR binding and checkout together: ' . $case);
+        }
+    } finally {
+        file_put_contents($reconcilePath, $scaffoldedReconcileWorkflow);
+    }
     $scaffoldedBlocker = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-update-pr-blocker.yml');
     $scaffoldedValidate = (string) file_get_contents($tempScaffoldRoot . '/.github/workflows/wporg-validate-runtime.yml');
     $documentedWorkflow = (string) file_get_contents($repoRoot . '/docs/examples/downstream-workflow.yml');
@@ -53,7 +77,7 @@ function run_workflow_contract_tests(
     $assert(str_contains($scaffoldedReconcileWorkflow, $checkoutActionSha), 'Expected scaffolded reconciliation workflow to pin actions/checkout by full commit SHA.');
     $assert(str_contains($scaffoldedReconcileWorkflow, $setupPhpActionSha), 'Expected scaffolded reconciliation workflow to pin setup-php by full commit SHA.');
     $assert(str_contains($scaffoldedReconcileWorkflow, "github.event.pull_request.merged == true"), 'Expected scaffolded reconciliation workflow to narrow closed-PR reconciliation to merged PRs.');
-    $assert(str_contains($scaffoldedReconcileWorkflow, 'managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}'), 'Expected scaffolded reconciliation workflow to clean managed branches for closed automation PRs.');
+    $assert(str_contains($scaffoldedReconcileWorkflow, 'managed-pr-cleanup --pr-number="$PR_NUMBER"'), 'Expected scaffolded reconciliation workflow to clean managed branches for closed automation PRs.');
     $assert(str_contains($scaffoldedReconcileWorkflow, 'ref: ${{ github.event.repository.default_branch }}'), 'Expected managed branch cleanup to execute trusted default-branch code.');
     $assert(str_contains($scaffoldedReconcileWorkflow, "cleanup:\n    if:") && str_contains($scaffoldedReconcileWorkflow, "contents: write\n      pull-requests: read"), 'Expected managed branch cleanup to have a dedicated least-privilege job.');
     $assert(str_contains($scaffoldedReconcileWorkflow, "automation:dependency-update"), 'Expected scaffolded reconciliation workflow to gate merged-PR reconciliation to framework automation PRs.');

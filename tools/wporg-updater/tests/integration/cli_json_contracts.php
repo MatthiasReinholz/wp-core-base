@@ -158,13 +158,13 @@ function run_cli_json_contract_tests(
         'php',
         'tools/wporg-updater/bin/wporg-updater.php',
         'help',
-        '--json',
+        '--repo-root=.',
         'sync',
     ]);
     $assert($helpWithOptionBeforeTopic['exit_code'] === 0, 'Expected help mode to succeed when options precede a topic token.');
-    $assert(str_contains($helpWithOptionBeforeTopic['stdout'], "sync\n\nPurpose:"), 'Expected help mode to preserve the topic token when boolean options are present.');
+    $assert(str_contains($helpWithOptionBeforeTopic['stdout'], "sync\n\nPurpose:"), 'Expected help mode to preserve the topic token when options precede the topic.');
 
-    $doctorJsonSplitRepoRoot = run_command_json($repoRoot, [
+    $doctorJsonSplitRepoRoot = run_command_json_allow_failure($repoRoot, [
         'php',
         'tools/wporg-updater/bin/wporg-updater.php',
         'doctor',
@@ -172,7 +172,10 @@ function run_cli_json_contract_tests(
         '.',
         '--json',
     ]);
-    $assert(($doctorJsonSplitRepoRoot['status'] ?? null) === 'success', 'Expected split-form --repo-root value parsing to work in JSON mode.');
+    $assert($doctorJsonSplitRepoRoot['exit_code'] === 2, 'Expected ambiguous split-form option values to fail.');
+    $assert(str_contains((string) ($doctorJsonSplitRepoRoot['payload']['error'] ?? ''), '--repo-root=value'), 'Expected split-form errors to explain the explicit equals syntax.');
+    $doctorJsonEqualsRepoRoot = run_command_json($repoRoot, ['php', 'tools/wporg-updater/bin/wporg-updater.php', 'doctor', '--repo-root=.', '--json']);
+    $assert(($doctorJsonEqualsRepoRoot['status'] ?? null) === 'success', 'Expected explicit --repo-root=value parsing to work in JSON mode.');
 
     $managedPlanJsonRoot = sys_get_temp_dir() . '/wporg-authoring-plan-json-' . bin2hex(random_bytes(4));
     mkdir($managedPlanJsonRoot . '/cms/plugins', 0777, true);

@@ -64,7 +64,7 @@ It:
 - refreshes framework-managed workflows when they still match the last managed version
 - leaves locally customized workflow files untouched and reports that drift in the PR
 
-The scaffolded downstream setup includes a weekly `wp-core-base` self-update workflow.
+The scaffolded downstream setup includes a weekly `wp-core-base` self-update workflow. Current official ZIPs contain framework tooling rather than a second WordPress/plugin runtime. Updating them does not install the baseline versions listed in framework metadata into your site; core and dependency updates remain separate PRs.
 
 Recommended preflight before merging a framework update:
 
@@ -73,7 +73,7 @@ Recommended preflight before merging a framework update:
 3. rerun with `--fail-on-skipped-managed-files` in CI when customized framework-managed files must block rollout
 4. reconcile any skipped workflow files manually before merging the framework update PR
 
-The framework release source is singular. If upstream ever moves the official framework release source to another Git platform, downstreams will follow the source recorded in their installed `.wp-core-base/framework.php` only after they adopt the migration release that updates that metadata. The framework does not maintain parallel legacy-source discovery.
+The framework release source is singular. A signed payload must match the source and asset name already recorded in the installed `.wp-core-base/framework.php`. A source migration therefore requires an explicit, Git-reviewed change to that trust configuration after independent verification; a normal update cannot silently switch it. See [authoritative source changes](release-process.md#authoritative-source-changes).
 
 ## Dependency Classes
 

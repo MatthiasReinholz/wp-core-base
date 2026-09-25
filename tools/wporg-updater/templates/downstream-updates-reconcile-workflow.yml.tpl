@@ -47,7 +47,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
           WPORG_REPO_ROOT: ${{ github.workspace }}
-        run: __WPORG_CLEANUP_COMMAND__ --pr-number=${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid pull request number" >&2; exit 1; }
+          __WPORG_CLEANUP_COMMAND__ --pr-number="$PR_NUMBER"
 
   sync:
     timeout-minutes: 30

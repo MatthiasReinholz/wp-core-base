@@ -461,12 +461,13 @@ vendor/wp-core-base/bin/wp-core-base add-dependency \
 
 Use `adopt-dependency` when you already have a `local` plugin or theme in the repo and want to convert it into a managed upstream dependency.
 
-This is the safe migration path because a single adoption is atomic:
+A single adoption uses a recovery transaction:
 
 - the existing runtime path is preserved
 - the managed snapshot is prepared and sanitized first
 - the manifest is only rewritten after the runtime tree has been replaced successfully
-- if the adoption fails, the original local runtime tree is restored
+- if adoption fails, the transaction attempts to restore the original runtime tree, manifest, and generated governance metadata
+- if any restore fails, it preserves recovery files and reports their location; follow the [recovery procedure](operations.md#private-workspaces-and-recovery) before retrying
 
 ### Adopt a local plugin into WordPress.org management
 
@@ -528,7 +529,7 @@ Recommended migration pattern:
 
 Important scope note:
 
-- a single `adopt-dependency` run is atomic
+- a single `adopt-dependency` run records rollback state for its runtime and metadata changes; it is not a database transaction or a guarantee against process or filesystem failure
 - a batch of several separate commands is not transactional across invocations
 - if you are migrating many entries, do them one by one and review each result
 

@@ -6,7 +6,7 @@ namespace WpOrgPluginUpdater;
 
 use RuntimeException;
 
-final class WordPressOrgManagedSource implements ManagedDependencySource
+final class WordPressOrgManagedSource implements ManagedDependencySource, HistoricalVersionSource
 {
     /** @var list<string> */
     private const ALLOWED_REDIRECT_HOSTS = [
@@ -25,6 +25,11 @@ final class WordPressOrgManagedSource implements ManagedDependencySource
     public function key(): string
     {
         return 'wordpress.org';
+    }
+
+    public function supportsHistoricalVersions(array $dependency): bool
+    {
+        return true;
     }
 
     public function fetchCatalog(array $dependency): array

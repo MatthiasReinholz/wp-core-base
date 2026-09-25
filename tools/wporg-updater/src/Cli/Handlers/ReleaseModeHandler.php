@@ -63,7 +63,7 @@ final class ReleaseModeHandler implements CliModeHandler
                 throw new RuntimeException('build-release-artifact requires --output=/path/to/wp-core-base-vendor-snapshot.zip.');
             }
 
-            $report = (new FrameworkReleaseArtifactBuilder($this->repoRoot))->build($artifact, $checksumFile);
+            $report = (new FrameworkReleaseArtifactBuilder($this->repoRoot))->build($artifact, $checksumFile, is_string($options['source-revision'] ?? null) ? $options['source-revision'] : null, isset($options['fixture']));
 
             if ($this->jsonOutput) {
                 ($this->emitJson)([

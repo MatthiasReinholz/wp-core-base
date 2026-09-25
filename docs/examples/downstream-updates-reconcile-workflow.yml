@@ -50,7 +50,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_API_URL: ${{ github.api_url }}
           WPORG_REPO_ROOT: ${{ github.workspace }}
-        run: php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php managed-pr-cleanup --pr-number=${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid pull request number" >&2; exit 1; }
+          php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php managed-pr-cleanup --pr-number="$PR_NUMBER"
 
   sync:
     timeout-minutes: 30
