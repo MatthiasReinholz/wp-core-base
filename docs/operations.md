@@ -112,6 +112,8 @@ hour after closure needs cleanup; a changed head or unverifiable ownership needs
 manual review. A current same-repository open PR using the branch excludes it
 from cleanup attention. The monitor never deletes branches.
 
+The cleanup command also preserves branches currently used by an open same-repository PR, including a reopened original PR. Its JSON output keeps `branch` and `deleted` and adds `reason` (`deleted`, `branch-absent`, or `reused-by-open-pr`) and `reused_by_pull_request` (a PR number for reuse, otherwise null). Reuse is a successful preservation decision. Failed or ambiguous open-PR inventory reads prevent deletion and require retry or investigation; the branch revision lease still protects concurrent pushes.
+
 `--cleanup-lookback-days` (1–365, default 30) and `--cleanup-grace-hours` (1–8760,
 default 1) configure this scope. JSON reports include the selected scope and each
 closure's classification. The inventory is capped at 200 PRs per automation label;

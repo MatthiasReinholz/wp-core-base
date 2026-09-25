@@ -10,7 +10,9 @@ use WpOrgPluginUpdater\FrameworkReleaseSignature;
 use WpOrgPluginUpdater\FrameworkReleaseSource;
 use WpOrgPluginUpdater\FrameworkSyncer;
 use WpOrgPluginUpdater\GitCommandRunner;
+use WpOrgPluginUpdater\GitHubClient;
 use WpOrgPluginUpdater\GitHubReleaseClient;
+use WpOrgPluginUpdater\GitLabClient;
 use WpOrgPluginUpdater\GitLabReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\PrBodyRenderer;
@@ -109,6 +111,17 @@ function run_http_security_contract_tests(callable $assert, string $repoRoot): v
                 $assert(count($readLog()) === $before, 'A body-bearing ' . $method . ' is rejected before any network request.');
             }
         }
+
+        $expectFailure(
+            fn () => (new GitHubClient($client, 'owner/project', 'fixture-token', $origin))->listOpenPullRequests(),
+            'GitHub rejects a scalar entry in an otherwise valid open-PR JSON list instead of returning a partial inventory.',
+            'invalid entry in the open pull request inventory'
+        );
+        $expectFailure(
+            fn () => (new GitLabClient($client, '42', 'fixture-token', $origin . '/api/v4'))->listOpenPullRequests(),
+            'GitLab rejects a scalar entry in an otherwise valid open-MR JSON list instead of returning a partial inventory.',
+            'invalid entry in the open merge request inventory'
+        );
 
         putenv('WP_CORE_BASE_HTTP_TEST_TOKEN=adapter-secret');
         $github = new GitHubReleaseClient($client, $origin);

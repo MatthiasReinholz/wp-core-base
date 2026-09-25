@@ -53,6 +53,15 @@ while (true) {
         $responseHeaders = [];
         $body = str_repeat('a', 64) . "  package.zip\n";
         switch ($path) {
+            case '/repos/owner/project/pulls':
+                $responseHeaders['Content-Type'] = 'application/json';
+                $body = json_encode([['number' => 42, 'state' => 'open'], 'invalid-entry'], JSON_THROW_ON_ERROR);
+                break;
+            case '/api/v4/projects/42/merge_requests':
+                $responseHeaders['Content-Type'] = 'application/json';
+                $body = json_encode([['iid' => 42, 'state' => 'opened', 'source_project_id' => 42, 'target_project_id' => 42,
+                    'source_branch' => 'codex/wporg-fixture', 'target_branch' => 'main'], 'invalid-entry'], JSON_THROW_ON_ERROR);
+                break;
             case '/start':
                 $status = 302;
                 $responseHeaders['Location'] = '/nested/../hop';

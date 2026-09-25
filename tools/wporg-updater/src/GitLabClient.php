@@ -119,9 +119,10 @@ final class GitLabClient implements AutomationClient
             }
 
             foreach ($chunk as $pullRequest) {
-                if (is_array($pullRequest)) {
-                    $pullRequests[] = $this->normalizeMergeRequest($pullRequest);
+                if (! is_array($pullRequest)) {
+                    throw new RuntimeException('GitLab returned an invalid entry in the open merge request inventory.');
                 }
+                $pullRequests[] = $this->normalizeMergeRequest($pullRequest);
             }
 
             $page++;

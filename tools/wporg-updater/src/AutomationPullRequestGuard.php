@@ -47,6 +47,17 @@ final class AutomationPullRequestGuard
                 (int) ($pullRequest['number'] ?? 0)
             ));
         }
+
+        $headRef = (string) $pullRequest['head']['ref'];
+        if ($branch !== $headRef) {
+            throw new RuntimeException(sprintf(
+                '%s #%d resolved to branch %s instead of its pull request head %s and will not be refreshed.',
+                $subject,
+                (int) ($pullRequest['number'] ?? 0),
+                $branch,
+                $headRef
+            ));
+        }
     }
 
     /**
