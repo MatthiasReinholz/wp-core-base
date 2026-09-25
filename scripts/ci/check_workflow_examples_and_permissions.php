@@ -52,6 +52,7 @@ try {
             'contents' => 'write',
             'pull-requests' => 'read',
             'actions' => 'read',
+            'security-events' => 'read',
         ],
         '.github/workflows/prepare-wp-core-base-release.yml' => [
             'contents' => 'write',
@@ -61,6 +62,7 @@ try {
             'contents' => 'write',
             'pull-requests' => 'read',
             'actions' => 'read',
+            'security-events' => 'read',
         ],
         '.github/workflows/wporg-updates.yml' => [
             'contents' => 'write',

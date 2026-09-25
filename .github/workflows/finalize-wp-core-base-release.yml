@@ -12,6 +12,7 @@ permissions:
   contents: write
   pull-requests: read
   actions: read
+  security-events: read
 
 concurrency:
   group: wp-core-base-release-${{ github.event.pull_request.head.ref }}
@@ -69,6 +70,21 @@ jobs:
         run: |
           [[ "$SOURCE_COMMIT" =~ ^[a-f0-9]{40}$ ]] || exit 1
           bash scripts/ci/check_framework_release_ci.sh "${GITHUB_REPOSITORY}" "${RELEASE_TAG#release/}" "$SOURCE_COMMIT"
+
+      - name: Verify exact-revision security review
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_API_URL: ${{ github.api_url }}
+        run: |
+          php scripts/ci/check_security_review.php --github --commit="$SOURCE_COMMIT" --wait-seconds=1200 \
+            | tee "${RUNNER_TEMP}/wp-core-base-security-review.json"
+          {
+            echo '### Security review (known runtime findings remain open)'
+            echo '```json'
+            cat "${RUNNER_TEMP}/wp-core-base-security-review.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build vendored framework snapshot
         run: |

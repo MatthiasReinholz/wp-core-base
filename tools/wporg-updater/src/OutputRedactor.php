@@ -127,18 +127,24 @@ final class OutputRedactor
                 }
 
                 if (isset($parts['query'])) {
-                    parse_str($parts['query'], $query);
-
-                    foreach ($query as $key => $value) {
-                        if (! is_string($key) || preg_match('/(?:token|secret|password|license|key)/i', $key) !== 1) {
-                            continue;
-                        }
-
-                        $redacted = preg_replace(
-                            '/([?&]' . preg_quote($key, '/') . '=)[^&#\s]*/i',
-                            '$1[REDACTED]',
-                            $redacted
-                        ) ?? $redacted;
+                    // Classify decoded names without parse_str's key rewriting,
+                    // array merging or input-count limit. Preserve every raw
+                    // pair so encoded names and duplicate credentials are safe.
+                    $query = preg_replace_callback(
+                        '/(^|&)([^=&]+)=([^&]*)/',
+                        static function (array $pair): string {
+                            $name = urldecode($pair[2]);
+                            $sensitive = preg_match(
+                                '/(?:token|secret|password|license|key|credential|signature)|^(?:sig|policy|googleaccessid)(?:\[|$)/i',
+                                $name
+                            ) === 1;
+                            return $sensitive ? $pair[1] . $pair[2] . '=[REDACTED]' : $pair[0];
+                        },
+                        $parts['query']
+                    ) ?? $parts['query'];
+                    $queryStart = strpos($redacted, '?');
+                    if ($queryStart !== false) {
+                        $redacted = substr_replace($redacted, $query, $queryStart + 1, strlen($parts['query']));
                     }
                 }
 

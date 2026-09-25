@@ -103,13 +103,23 @@ A green scheduled updater does not establish that its generated PRs can pass req
 php scripts/ci/check_update_health.php --repo=owner/repository --json --fail-on-actionable
 ```
 
-Authenticate the GitHub CLI with read access to the repository's PRs, Actions, and rules. This is a maintainer utility in the source repository, not a bundled downstream CLI command or a GitLab monitor. The upstream `wporg-update-health.yml` workflow uses the same read-only report. The script refuses to report health when required input cannot be established, including absent effective required checks or missing scheduled-run history.
+Authenticate the GitHub CLI with read access to the repository's contents, PRs, Actions, and rules. This is a maintainer utility in the source repository, not a bundled downstream CLI command or a GitLab monitor. The upstream `wporg-update-health.yml` workflow uses the same read-only report. The script refuses to report health when required input cannot be established, including absent effective required checks or missing scheduled-run history.
 
-The report covers open PRs and scheduled sync health. It does not inventory
-closed-PR cleanup runs or orphan branches, so a healthy result does not establish
-that every generated branch was removed. After closing several automation PRs,
-check each corresponding cleanup job and replay any missed close event as
-described under [blocked PRs](#blocked-prs).
+The report also inspects automation PRs closed or merged within the last 30 days.
+It rechecks their ownership metadata and exact branch references, using the same
+ownership rules as cleanup. An unchanged managed branch retained more than one
+hour after closure needs cleanup; a changed head or unverifiable ownership needs
+manual review. A current same-repository open PR using the branch excludes it
+from cleanup attention. The monitor never deletes branches.
+
+`--cleanup-lookback-days` (1–365, default 30) and `--cleanup-grace-hours` (1–8760,
+default 1) configure this scope. JSON reports include the selected scope and each
+closure's classification. The inventory is capped at 200 PRs per automation label;
+reaching that cap fails the report rather than hiding possible omissions. Reduce
+the lookback for a bounded follow-up if needed. Incomplete API responses and ref
+read failures also fail the report. A healthy result covers this recent window,
+not every historical branch or every cleanup workflow run. Recover missed close
+events through the procedure under [blocked PRs](#blocked-prs).
 
 The monitor scopes PR runs to the current head commit and branch, then selects the latest execution of each workflow and event. Scheduled-run checks query a recent time window and select by timestamp instead of assuming the first API result is current. Earlier blocked or failed executions do not override their replacements.
 
@@ -119,6 +129,7 @@ Default signals are:
 - a PR at least 24 hours old with missing or unfinished required checks: attention
 - an unqueued update open for at least seven days: review overdue
 - latest scheduled updater/reconciliation run at least 48 hours old, or a failed completed run: attention
+- a recent closed automation PR retaining its branch past the cleanup grace: cleanup or manual review
 
 `--max-age-hours` and `--check-grace-hours` configure the PR thresholds. Intentional queueing suppresses the ordinary review-age warning; it does not hide broken or approval-required checks. `--fail-on-actionable` returns a nonzero status when the completed report finds actionable items. Data-read failures also fail the command rather than producing a false healthy result.
 

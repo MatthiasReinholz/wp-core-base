@@ -38,6 +38,49 @@ final class UpdateHealthReport
     }
 
     /**
+     * @param list<array{number:int,url:string,closed_at:string,branch:string,expected_head:string,observed_head:?string,reused_by_open_pr:bool,identity_error:?string}> $closures
+     * @return array{pull_requests:list<array{number:int,url:string,closed_at:string,branch:string,age_hours:int,state:string,reason:string}>,actionable_count:int}
+     */
+    public function evaluateCleanup(array $closures, int $now, int $graceHours = 1): array
+    {
+        $reports = [];
+        $actionable = 0;
+        foreach ($closures as $closure) {
+            $closed = strtotime($closure['closed_at']);
+            if ($closed === false || $closed > $now) {
+                throw new \RuntimeException('Invalid closure timestamp for update PR #' . $closure['number']);
+            }
+            $age = (int) floor(($now - $closed) / 3600);
+            if ($closure['identity_error'] === null && $closure['observed_head'] === null) {
+                $state = 'cleaned';
+                $reason = 'The managed branch is absent.';
+            } elseif ($closure['identity_error'] === null && $closure['reused_by_open_pr']) {
+                $state = 'reused';
+                $reason = 'A current same-repository open PR uses this branch; preserve it.';
+            } elseif ($age < $graceHours) {
+                $state = 'pending';
+                $reason = 'The close event is still within the cleanup grace period.';
+            } else {
+                $actionable++;
+                if ($closure['identity_error'] !== null) {
+                    $state = 'manual_review';
+                    $reason = 'Cleanup ownership cannot be established: ' . $closure['identity_error'];
+                } elseif ($closure['expected_head'] === '' || $closure['expected_head'] !== $closure['observed_head']) {
+                    $state = 'manual_review';
+                    $reason = 'The retained branch does not match the closed PR head; review ownership before any cleanup.';
+                } else {
+                    $state = 'cleanup_required';
+                    $reason = 'The unchanged managed branch remains after the cleanup grace period.';
+                }
+            }
+            $reports[] = ['number' => $closure['number'], 'url' => $closure['url'], 'closed_at' => $closure['closed_at'],
+                'branch' => $closure['branch'], 'age_hours' => $age, 'state' => $state, 'reason' => $reason];
+        }
+
+        return ['pull_requests' => $reports, 'actionable_count' => $actionable];
+    }
+
+    /**
      * @param list<array{number:int,url:string,created_at:string,queued:bool,checks:array<string,string>,runs:list<array{status:string,conclusion:string}>}> $pullRequests
      * @param list<string> $requiredChecks
      * @param list<array{name:string,status:string,conclusion:string,url:string,created_at:string}> $sourceRuns

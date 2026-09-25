@@ -60,8 +60,16 @@ function run_upstream_workflow_contract_tests(
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'check_framework_release_ci.sh'), 'Expected manual recovery release workflow to verify the merged release PR passed CI before publishing.');
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, 'publish_framework_release.sh'), 'Expected manual recovery to share ownership-aware publication.');
     foreach ([$upstreamFinalizeWorkflow, $upstreamRecoveryReleaseWorkflow] as $publisher) {
+        $securityGate = strpos($publisher, 'php scripts/ci/check_security_review.php --github --commit=');
+        $artifactBuild = strpos($publisher, 'php tools/wporg-updater/bin/wporg-updater.php build-release-artifact');
+        $assert($securityGate !== false && $artifactBuild !== false && $securityGate < $artifactBuild, 'Expected live exact-revision security review before building or signing a release.');
+        $assert(str_contains($publisher, 'security-events: read'), 'Expected release security gate to have read-only scanner access.');
+        $assert(str_contains($publisher, "- name: Verify exact-revision security review\n        shell: bash\n"), 'Expected security receipt pipeline to use explicit bash pipefail so a rejected review blocks publication.');
         $assert(str_contains($publisher, "pull-requests: read") && str_contains($publisher, "actions: read"), 'Expected publication gates to declare permission to read PR and Actions evidence.');
         $assert(str_contains($publisher, "if: always()") && str_contains($publisher, 'cat "$journal"') && str_contains($publisher, '"$GITHUB_STEP_SUMMARY"'), 'Expected publication receipts to survive disposable hosted runners in the job summary.');
+    }
+    foreach (['check_security_review.php', 'test_security_review.php', 'test_security_review_github.php', 'test_security_review_cli.php', 'test_update_cleanup_health.php'] as $policyScript) {
+        $assert(str_contains($upstreamValidateWorkflow, 'php scripts/ci/' . $policyScript), 'Expected normal CI to verify source security and cleanup health policies: ' . $policyScript);
     }
     $assert(! str_contains($upstreamRecoveryReleaseWorkflow, '--clobber'), 'Expected existing published assets to remain immutable during recovery.');
     $assert(str_contains($upstreamRecoveryReleaseWorkflow, "group: wp-core-base-release-release/\${{ inputs.version }}"), 'Expected manual recovery release workflow to serialize publication by release version.');

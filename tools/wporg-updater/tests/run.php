@@ -2822,6 +2822,59 @@ $fallbackDelay = $nextRetryDelayMicroseconds->invoke(
     ['status' => 503, 'body' => '', 'headers' => []]
 );
 $assert($fallbackDelay === 123_000, 'Expected retry delay calculation to fall back when no rate-limit headers are available.');
+$headerlessDelayAfterRateLimit = $nextRetryDelayMicroseconds->invoke(
+    $httpClientForRetryContracts,
+    $cappedDelay * 2,
+    ['status' => 503, 'body' => '', 'headers' => []]
+);
+$assert($headerlessDelayAfterRateLimit === 900_000_000, 'Expected headerless retries after a rate-limited response to retain the retry-delay cap.');
+$largestHeaderDelay = $nextRetryDelayMicroseconds->invoke(
+    $httpClientForRetryContracts,
+    250_000,
+    ['status' => 429, 'body' => '', 'headers' => ['retry-after' => (string) PHP_INT_MAX]]
+);
+$assert($largestHeaderDelay === 900_000_000, 'Expected large Retry-After values to remain bounded integers before conversion to microseconds.');
+$initialRetryDelay = new ReflectionMethod(HttpClient::class, 'initialRetryDelayMicroseconds');
+foreach ([250 => 250_000, 0 => 0, -1 => 0, 900_000 => 900_000_000, PHP_INT_MAX => 900_000_000] as $milliseconds => $expected) {
+    $assert($initialRetryDelay->invoke($httpClientForRetryContracts, $milliseconds) === $expected, 'Expected configured initial retry delay to be bounded before multiplication: ' . $milliseconds);
+}
+$boundedRetryDelay = new ReflectionMethod(HttpClient::class, 'boundedRetryDelayMicroseconds');
+foreach ([250_000 => 250_000, 0 => 0, -1 => 0, 900_000_000 => 900_000_000, 1_800_000_000 => 900_000_000, PHP_INT_MAX => 900_000_000] as $microseconds => $expected) {
+    $assert($boundedRetryDelay->invoke($httpClientForRetryContracts, $microseconds) === $expected, 'Expected the shared retry sleep boundary, including exception retries, to bound its delay: ' . $microseconds);
+}
+
+$sensitiveQueryNames = [
+    'token', '%74oken', 'TOKEN', 'token[value]', 'token%5Bvalue%5D',
+    'access.token', 'access%2Etoken', 'access+token', 'license_key',
+    'X-Amz-Signature', 'X-Amz-Credential', 'X-Amz-Security-Token',
+    'X-Goog-Signature', 'X-Goog-Credential', 'GoogleAccessId',
+    'AWSAccessKeyId', 'Key-Pair-Id', 'Signature', 'Policy', 'sig', '%73ig', 'sig[value]',
+];
+foreach ($sensitiveQueryNames as $rawName) {
+    $message = 'Download failed: https://downloads.example.test/file.zip?version=1&' . $rawName . '=inert-download-value&format=zip#section';
+    $expected = 'Download failed: https://downloads.example.test/file.zip?version=1&' . $rawName . '=[REDACTED]&format=zip#section';
+    $assert(OutputRedactor::redact($message) === $expected, 'Expected URL redaction to recognize the decoded credential name and preserve its raw spelling: ' . $rawName);
+}
+$duplicateCredentialUrl = 'https://downloads.example.test/file.zip?token=inert-first&format=zip&token=inert-second&%74oken=inert-third';
+$assert(
+    OutputRedactor::redact($duplicateCredentialUrl) === 'https://downloads.example.test/file.zip?token=[REDACTED]&format=zip&token=[REDACTED]&%74oken=[REDACTED]',
+    'Expected URL redaction to retain query ordering and redact every repeated or encoded credential.'
+);
+$assert(
+    OutputRedactor::redact('https://downloads.example.test/file.zip?token=inert%26nested%3Dvalue;tail&v=1') === 'https://downloads.example.test/file.zip?token=[REDACTED]&v=1',
+    'Expected URL redaction to remove the complete credential value without interpreting encoded separators or semicolons as new pairs.'
+);
+$benignQueryUrl = 'https://downloads.example.test/file.zip?version=1&format=zip&feature[]=one&feature[]=two&path=a%2Fb&flag#view';
+$assert(OutputRedactor::redact($benignQueryUrl) === $benignQueryUrl, 'Expected non-credential query names, values, repeated arrays, flags and fragments to retain their exact bytes.');
+$assert(
+    OutputRedactor::redact('https://user:pass@downloads.example.test/file.zip?sig=inert-signature&version=1#view') === 'https://[REDACTED]:[REDACTED]@downloads.example.test/file.zip?sig=[REDACTED]&version=1#view',
+    'Expected credential query replacement to retain the correct offsets after URL user information has been redacted.'
+);
+$redactedSyncReport = SyncReport::build(['Download failed: ' . $duplicateCredentialUrl], []);
+$assert(
+    $redactedSyncReport['fatal_errors'] === ['Download failed: https://downloads.example.test/file.zip?token=[REDACTED]&format=zip&token=[REDACTED]&%74oken=[REDACTED]'],
+    'Expected persisted sync failures to receive the same complete raw-query credential redaction.'
+);
 
 $fakeFilterClient = new FakeGitHubAutomationClient();
 $fakeFilterClient->openPullRequests = [

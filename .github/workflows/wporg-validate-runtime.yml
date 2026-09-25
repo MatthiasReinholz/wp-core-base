@@ -44,10 +44,18 @@ jobs:
         run: php tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --github
 
       - name: Lint PHP sources
-        run: find tools/wporg-updater -name '*.php' -print0 | xargs -0 -n1 php -l
+        run: find tools/wporg-updater scripts/ci -name '*.php' -print0 | xargs -0 -n1 php -l
 
       - name: Verify workflow examples and permissions
         run: php scripts/ci/check_workflow_examples_and_permissions.php
+
+      - name: Verify source security review and operational policies
+        run: |
+          php scripts/ci/check_security_review.php
+          php scripts/ci/test_security_review.php
+          php scripts/ci/test_security_review_github.php
+          php scripts/ci/test_security_review_cli.php
+          php scripts/ci/test_update_cleanup_health.php
 
       - name: Run test suite
         env:
