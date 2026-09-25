@@ -145,7 +145,7 @@ Asset transport checks every HTTPS redirect hop and never restores credentials a
 
 For vulnerability reporting and supported security response expectations, see [SECURITY.md](../SECURITY.md).
 
-Specific scanner dispositions retain their reasoning separately; see the [CodeQL alert 258 review](security-reviews/2026-09-25-codeql-258.md). A dismissed finding does not replace compatibility checks or upstream security maintenance.
+Specific scanner dispositions retain their reasoning separately; see the [CodeQL alert 258 review](security-reviews/2026-09-25-codeql-258.md) and [v1.6.0 baseline review](security-reviews/2026-09-25-baseline.md). A dismissed finding does not replace compatibility checks or upstream security maintenance. A completed analysis job also does not imply that its findings are closed: release review must inspect the alert inventory for the exact proposed revision.
 
 A download-host allowlist authorizes a destination, not credential forwarding. GitHub and GitLab asset requests bind initial credentials to the configured API origin, including its port. Cross-origin redirects retain only `Accept`, `Accept-Encoding`, `Accept-Language`, and `User-Agent` from caller headers. Ordinary API GETs do not follow redirects implicitly; sidecar GETs opt in with a one MiB response limit. Non-HTTPS, user-information-bearing, malformed, looping, or over-budget redirects fail without retrying the policy violation. See [premium provider credential origins](adding-premium-provider.md#credential-origins).
 
