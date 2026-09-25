@@ -172,6 +172,28 @@ The default branch should require:
 Release publishing should happen only from the default branch state that already passed those checks.
 The publish workflows enforce that requirement directly by checking the successful `wp-core-base CI` push run for the exact merged release commit instead of assuming branch protection was configured correctly.
 
+## Exact-revision security review
+
+Both publication workflows run `scripts/ci/check_security_review.php` before building or signing the framework artifact. They retain `contents: write` for publishing and grant `security-events: read` for scanner evidence. Normal PR CI runs the offline register and source-hash checks without scanner access.
+
+Local source check:
+
+```bash
+php scripts/ci/check_security_review.php
+```
+
+For the live check, check out the proposed immutable commit and supply its full SHA:
+
+```bash
+php scripts/ci/check_security_review.php --github --repo=MatthiasReinholz/wp-core-base --commit="$(git rev-parse HEAD)" --wait-seconds=1200
+```
+
+The live reader requires authenticated GitHub CLI access to Actions and code scanning. In Actions it binds the register to `GITHUB_REPOSITORY`; local use requires that environment identity or an explicit `--repo`, with conflicting overrides rejected. It checks the source register and reviewed files against committed bytes, the repository identity, and the latest exact-commit scanner run on the default branch. Every required analysis must come from that run attempt or later, without errors or warnings. Paginated inventories must be complete and internally consistent. If a newer default-branch scan replaces the alert instances before an older revision is published, the older revision fails the exact-SHA check even if it has a successful historical analysis. Obtain fresh scanner evidence for that exact intended revision on the default-branch ref, or prepare a new reviewed release; do not substitute later-branch evidence. Pending scans may wait for the configured interval; failed scans, incomplete evidence, unexpected alerts or changed findings fail closed. A failed check may be rerun after evidence is available; do not bypass it. If repeating the scanner, rerun all jobs: repeating only failed jobs can leave one category older than the new attempt and does not satisfy freshness.
+
+The register at `.github/security-review.json` is a reviewed-open-findings record, not a security exception that dismisses alerts. It binds findings to exact locations and source hashes. Renew it only after reviewing changed sources and scanner results; a previously recorded alert disappearing also requires review. See the [baseline review](security-reviews/2026-09-25-baseline.md). Successful output explicitly retains `runtime_security_cleared: false` and appears in the publication job summary.
+
+This policy belongs to this source repository, not to downstream consumers. Recovery for a historical tag still requires exact-revision evidence; a tag without the register or current matching scanner instances cannot satisfy the new gate. Prefer a newly reviewed corrective release instead of weakening the gate or replacing published assets.
+
 ## Recovery evidence
 
 A failed publication prints the journal path and its non-secret JSON contents to the job log. Both publication workflows also preserve that JSON in an always-run job-summary step because hosted runner files disappear after the job. Inspect its `created_tag_object`, `created_release_id`, `ambiguous`, and `published` fields together with current remote state before making a manual repair. The helper preserves remote releases and tags on every failure, including confirmed creation followed by a later error. Inspect current state and coordinate with other publishers before any explicit operator repair; a draft read alone does not prove deletion remains safe. Preserve a release whose status cannot be established. Successful framework installation commits before backup cleanup; a cleanup warning does not reverse the install. If any restore fails, recovery paths are retained and reported for inspection.

@@ -162,8 +162,9 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
                 }
             }
 
+            $delayMicroseconds = $this->boundedRetryDelayMicroseconds($delayMicroseconds);
             usleep($delayMicroseconds);
-            $delayMicroseconds *= 2;
+            $delayMicroseconds = $this->boundedRetryDelayMicroseconds($delayMicroseconds * 2);
         }
     }
 
@@ -177,8 +178,7 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         $this->assertAllowedUrl($url, $options);
 
         $attempts = max(1, (int) ($options['retry_attempts'] ?? 3));
-        $delayMilliseconds = max(0, (int) ($options['retry_initial_delay_milliseconds'] ?? 250));
-        $delayMicroseconds = $delayMilliseconds * 1000;
+        $delayMicroseconds = $this->initialRetryDelayMicroseconds((int) ($options['retry_initial_delay_milliseconds'] ?? 250));
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             try {
@@ -195,8 +195,9 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
                 }
             }
 
+            $delayMicroseconds = $this->boundedRetryDelayMicroseconds($delayMicroseconds);
             usleep($delayMicroseconds);
-            $delayMicroseconds *= 2;
+            $delayMicroseconds = $this->boundedRetryDelayMicroseconds($delayMicroseconds * 2);
         }
 
         throw new RuntimeException(sprintf('Exceeded retry budget for %s %s.', $method, $url));
@@ -538,10 +539,22 @@ final class HttpClient implements ArchiveDownloader, JsonHttpTransport
         $headerDelay = $this->retryDelayFromHeaders($response['headers']);
 
         if ($headerDelay !== null && $headerDelay > 0) {
-            return min(self::MAX_RETRY_DELAY_SECONDS * 1_000_000, $headerDelay * 1_000_000);
+            // Bound before conversion so even a saturated Retry-After integer
+            // cannot overflow into a floating-point delay.
+            return min(self::MAX_RETRY_DELAY_SECONDS, $headerDelay) * 1_000_000;
         }
 
-        return $fallbackMicroseconds;
+        return $this->boundedRetryDelayMicroseconds($fallbackMicroseconds);
+    }
+
+    private function initialRetryDelayMicroseconds(int $milliseconds): int
+    {
+        return min(self::MAX_RETRY_DELAY_SECONDS * 1000, max(0, $milliseconds)) * 1000;
+    }
+
+    private function boundedRetryDelayMicroseconds(int $microseconds): int
+    {
+        return min(self::MAX_RETRY_DELAY_SECONDS * 1_000_000, max(0, $microseconds));
     }
 
     /**

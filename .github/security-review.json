@@ -1,0 +1,101 @@
+{
+    "schema_version": 1,
+    "repository": "MatthiasReinholz/wp-core-base",
+    "wordpress_version": "7.1.2",
+    "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
+    "workflow_path": "dynamic/github-code-scanning/codeql",
+    "sources": {
+        "wp-includes/js/dist/block-editor.js": "3a3744f6196133ff2ce0f3769667d1cf25a2e4bc0936460ec16c39268a3cd7fd",
+        "wp-includes/js/dist/block-editor.min.js": "72cbf44f5f43a69b18425496ad639cf43a12c8ad91e240c69c652de20484ac68",
+        "wp-includes/js/dist/block-library.js": "c86641cf66fcbffd08dac0350db2ee17e1c9aa9ecec89669e217a0b71ef2e85c",
+        "wp-includes/js/dist/block-library.min.js": "42d66f582f11c65744d432979a3c3db40cd39816dc5982b3f18d73548f8aed06",
+        "wp-includes/js/dist/blocks.js": "2b2c683fd532eda7ec18f091fd92ca89d3c3d9a2a498c8e3e31b3f23ecb2a220",
+        "wp-includes/js/dist/blocks.min.js": "4b5f1f4b23be291fa9ccce79a1011911f913b155361e0fdcd32381c6969fa31b",
+        "wp-includes/js/dist/dom.js": "6eadc71a563d14ab3d70f5ac0b846e1018486bca5532f326165e83daf0e72ec5",
+        "wp-includes/js/dist/dom.min.js": "2967abbcc9c417099aa80b0dd01fcb6b2330e4209508cdee29f345ff7f570332",
+        "wp-includes/js/dist/format-library.js": "6efcc0f5a67a79533bd0f7b356a40bfee140b9c148ccd5c9f2d05f7527ff21fa",
+        "wp-includes/js/dist/format-library.min.js": "ffcd1bbb5f2e679df21875f60d364a10e16b12b13109f758923655ce8ce2ae88",
+        "wp-includes/js/dist/rich-text.js": "c177d32871d6c4950ea3b20c5341739cb060ca48e87c1837d15a6d4ca959eb6d",
+        "wp-includes/js/dist/rich-text.min.js": "78bea1675ada804957a8f24c31a80592b05424afab953655b91e9094c7299ffb",
+        "wp-includes/js/dist/script-modules/interactivity-router/index.js": "4ae36182ac85892655412ddd2e5d02d1369b4c1f69b8b27a771ba8e11857d279",
+        "wp-includes/js/dist/script-modules/interactivity-router/index.min.js": "fd2d205414f8786aa43273fc6a7e9bdf7a8373750269bc3e54f0f22849ddc55c"
+    },
+    "analysis_categories": [
+        "/language:javascript-typescript",
+        "/language:actions"
+    ],
+    "findings": [
+        {
+            "number": 230,
+            "rule_id": "js/redos",
+            "tool": "CodeQL",
+            "category": "/language:javascript-typescript",
+            "location": {
+                "path": "wp-includes/js/dist/block-library.js",
+                "start_line": 59694,
+                "end_line": 59694,
+                "start_column": 73,
+                "end_column": 78
+            },
+            "source_paths": [
+                "wp-includes/js/dist/block-library.js",
+                "wp-includes/js/dist/block-library.min.js"
+            ],
+            "review_document": "docs/security-reviews/2026-09-25-baseline.md"
+        },
+        {
+            "number": 231,
+            "rule_id": "js/redos",
+            "tool": "CodeQL",
+            "category": "/language:javascript-typescript",
+            "location": {
+                "path": "wp-includes/js/dist/script-modules/interactivity-router/index.js",
+                "start_line": 531,
+                "end_line": 531,
+                "start_column": 77,
+                "end_column": 83
+            },
+            "source_paths": [
+                "wp-includes/js/dist/script-modules/interactivity-router/index.js",
+                "wp-includes/js/dist/script-modules/interactivity-router/index.min.js"
+            ],
+            "review_document": "docs/security-reviews/2026-09-25-baseline.md"
+        },
+        {
+            "number": 242,
+            "rule_id": "js/incomplete-sanitization",
+            "tool": "CodeQL",
+            "category": "/language:javascript-typescript",
+            "location": {
+                "path": "wp-includes/js/dist/script-modules/interactivity-router/index.js",
+                "start_line": 430,
+                "end_line": 430,
+                "start_column": 14,
+                "end_column": 25
+            },
+            "source_paths": [
+                "wp-includes/js/dist/script-modules/interactivity-router/index.js",
+                "wp-includes/js/dist/script-modules/interactivity-router/index.min.js"
+            ],
+            "review_document": "docs/security-reviews/2026-09-25-baseline.md"
+        }
+    ],
+    "manual_findings": [
+        {
+            "id": "inherited-editor-content",
+            "source_paths": [
+                "wp-includes/js/dist/dom.js",
+                "wp-includes/js/dist/blocks.js",
+                "wp-includes/js/dist/block-editor.js",
+                "wp-includes/js/dist/format-library.js",
+                "wp-includes/js/dist/rich-text.js",
+                "wp-includes/js/dist/dom.min.js",
+                "wp-includes/js/dist/blocks.min.js",
+                "wp-includes/js/dist/block-editor.min.js",
+                "wp-includes/js/dist/format-library.min.js",
+                "wp-includes/js/dist/rich-text.min.js"
+            ],
+            "review_document": "docs/security-reviews/2026-09-25-baseline.md"
+        }
+    ]
+}

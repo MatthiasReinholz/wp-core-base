@@ -36,6 +36,11 @@ php tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=.
 php tools/wporg-updater/bin/wporg-updater.php stage-runtime --repo-root=. --output=.wp-core-base/build/runtime
 php tools/wporg-updater/bin/wporg-updater.php release-verify --repo-root=.
 php scripts/ci/check_workflow_examples_and_permissions.php
+php scripts/ci/check_security_review.php
+php scripts/ci/test_security_review.php
+php scripts/ci/test_security_review_github.php
+php scripts/ci/test_security_review_cli.php
+php scripts/ci/test_update_cleanup_health.php
 ```
 
 Also syntax-check touched PHP files with `php -l`.
@@ -50,6 +55,7 @@ When changing the bundled baseline:
 2. update managed dependency checksums if managed trees changed
 3. keep the `Current Baseline` section in `README.md` accurate
 4. make sure the repository still passes `doctor` and `stage-runtime`
+5. renew `.github/security-review.json` and its review documents when reviewed runtime source changes; never regenerate hashes as a substitute for reviewing the changed code and scanner findings
 
 Core or plugin baseline migrations must also pass the database-backed upgrade fixture for both profiles. See [baseline upgrades and rollback](baseline-upgrades.md) for the pinned starting point, test commands, evidence boundaries and downstream rehearsal procedure.
 
