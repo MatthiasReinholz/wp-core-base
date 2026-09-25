@@ -143,7 +143,7 @@ That surfaces any framework-managed files that would refresh, be removed, or be 
 
 This repository currently ships:
 
-- framework release `1.5.0`
+- framework release `1.6.0`
 - WordPress core `6.9.9`
 - Akismet `5.6`
 - WooCommerce `11.0.1`
