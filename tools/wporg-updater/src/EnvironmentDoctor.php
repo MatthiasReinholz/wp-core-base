@@ -978,6 +978,7 @@ final class EnvironmentDoctor
         }
 
         if ($reconcileWorkflow !== null) {
+            $reconcileConcurrency = $this->normalizeWorkflowContractMappings($reconcileWorkflow);
             $this->okIf(
                 str_contains($reconcileWorkflow, "pull_request_target:") && str_contains($reconcileWorkflow, "- closed"),
                 'Reconcile workflow is wired to closed pull_request_target events.',
@@ -1008,9 +1009,12 @@ final class EnvironmentDoctor
                 'Reconcile workflow should scope pull_request_target closed execution to automation PR labels.'
             );
             $this->okIf(
-                str_contains($reconcileWorkflow, "concurrency:") && str_contains($reconcileWorkflow, "group: wp-core-base-dependency-sync"),
-                'Reconcile workflow defines the shared dependency-sync concurrency group.',
-                'Reconcile workflow should define concurrency.group=wp-core-base-dependency-sync.'
+                $reconcileConcurrency !== null
+                && preg_match('/^concurrency:/m', $reconcileConcurrency) !== 1
+                && $this->workflowJobHasConcurrency($reconcileConcurrency, 'cleanup', 'wp-core-base-managed-pr-cleanup-${{ github.event.pull_request.number }}')
+                && $this->workflowJobHasConcurrency($reconcileConcurrency, 'sync', 'wp-core-base-dependency-sync'),
+                'Reconcile workflow isolates per-PR cleanup and serializes only sync with dependency updates.',
+                'Reconcile workflow should use per-PR cleanup concurrency and shared dependency-sync job concurrency, without workflow-level concurrency.'
             );
             $this->okIf(
                 ! str_contains($reconcileWorkflow, "\npull_request:\n"),
@@ -1041,6 +1045,82 @@ final class EnvironmentDoctor
                 'PR blocker workflow should avoid pull_request and use pull_request_target for PR metadata checks.'
             );
         }
+    }
+
+    /** Normalize supported block-style keys and group strings, not general YAML documents. */
+    private function normalizeWorkflowContractMappings(string $workflow): ?string
+    {
+        $normalized = [];
+        foreach (preg_split('/\r\n|\n|\r/', $workflow) ?: [] as $line) {
+            if (preg_match('/^( *)(?:([\'"])(.*?)\2|([A-Za-z0-9_-]+))[ \t]*:(.*)$/D', $line, $entry) !== 1) {
+                $normalized[] = rtrim($line);
+                continue;
+            }
+
+            $key = $entry[2] === '"'
+                ? json_decode('"' . $entry[3] . '"', true)
+                : ($entry[2] === "'" ? str_replace("''", "'", $entry[3]) : $entry[4]);
+            if (! is_string($key)) {
+                // An unsupported quoted key must not hide a workflow-level queue.
+                return null;
+            }
+
+            $value = trim($entry[5]);
+            if (preg_match('/^([\'"])(.*?)\1(?:[ \t]+#.*)?$/D', $value, $scalar) === 1) {
+                // Comments inside a quoted scalar are data. Only group strings need decoding;
+                // a quoted "false" must not become the boolean required by this contract.
+                $value = $scalar[1] . $scalar[2] . $scalar[1];
+                if ($key === 'group') {
+                    $decoded = $scalar[1] === '"'
+                        ? json_decode($value, true)
+                        : str_replace("''", "'", $scalar[2]);
+                    if (is_string($decoded)) {
+                        $value = $decoded;
+                    }
+                }
+            } else {
+                $value = rtrim((string) preg_replace('/(?:^|[ \t]+)#.*$/', '', $value));
+            }
+
+            $normalized[] = $entry[1] . $key . ':' . ($value === '' ? '' : ' ' . $value);
+        }
+
+        return implode("\n", $normalized);
+    }
+
+    /** Inspect a normalized scaffold block without matching another job or step. */
+    private function workflowJobHasConcurrency(string $workflow, string $job, string $group): bool
+    {
+        $inJobs = false;
+        $inJob = false;
+        $body = [];
+
+        foreach (preg_split('/\r\n|\n|\r/', $workflow) ?: [] as $line) {
+            if (trim($line) === '' || str_starts_with(ltrim($line), '#')) {
+                continue;
+            }
+            if ($line === 'jobs:') {
+                $inJobs = true;
+                continue;
+            }
+            if ($inJob) {
+                if (! str_starts_with($line, '    ')) {
+                    break;
+                }
+                $body[] = $line;
+            } elseif ($inJobs && $line === '  ' . $job . ':') {
+                $inJob = true;
+            } elseif (! str_starts_with($line, ' ')) {
+                $inJobs = false;
+            }
+        }
+
+        if (preg_match('/^    concurrency:\n((?:      [^\n]*\n?)*)/m', implode("\n", $body), $matches) !== 1) {
+            return false;
+        }
+
+        return in_array('      group: ' . $group, explode("\n", $matches[1]), true)
+            && in_array('      cancel-in-progress: false', explode("\n", $matches[1]), true);
     }
 
     private function readWorkflow(string $path): ?string

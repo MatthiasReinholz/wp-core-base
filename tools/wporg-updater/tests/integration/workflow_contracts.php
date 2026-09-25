@@ -43,6 +43,42 @@ function run_workflow_contract_tests(
                 || str_contains($entry['message'], 'Reconcile workflow should run managed-pr-cleanup')));
             $assert(count($cleanupMessages) === 1 && $cleanupMessages[0]['level'] === ($accepted ? 'ok' : 'error'), 'Automation doctor must evaluate cleanup command, PR binding and checkout together: ' . $case);
         }
+
+        $cleanupConcurrency = "    concurrency:\n      group: wp-core-base-managed-pr-cleanup-\${{ github.event.pull_request.number }}\n      cancel-in-progress: false\n";
+        $syncConcurrency = "    concurrency:\n      group: wp-core-base-dependency-sync\n      cancel-in-progress: false\n";
+        $globalConcurrency = "concurrency:\n  group: wp-core-base-dependency-sync\n  cancel-in-progress: false\n\n";
+        foreach ([
+            [$scaffoldedReconcileWorkflow, true, 'separate cleanup and sync jobs'],
+            [str_replace("\n", "\r\n", $scaffoldedReconcileWorkflow), true, 'CRLF workflow'],
+            [str_replace("\n", " \n", $scaffoldedReconcileWorkflow), true, 'trailing whitespace'],
+            [str_replace('  cleanup:', '  cleanup: # close-event housekeeping', $scaffoldedReconcileWorkflow), true, 'job header comment'],
+            [str_replace('wp-core-base-managed-pr-cleanup-${{ github.event.pull_request.number }}', 'wp-core-base-managed-pr-cleanup-${{ github.event.pull_request.number }} # one PR per group', $scaffoldedReconcileWorkflow), true, 'group inline comment'],
+            [str_replace('group: wp-core-base-dependency-sync', 'group: "wp-core-base-dependency-sync" # shared queue', $scaffoldedReconcileWorkflow), true, 'quoted group with comment'],
+            [str_replace(['jobs:', '  cleanup:', '    concurrency:'], ['"jobs":', "  'cleanup':", '    "concurrency":'], $scaffoldedReconcileWorkflow), true, 'quoted block mapping keys'],
+            [str_replace('    concurrency:', '    "concur\u0072ency":', $scaffoldedReconcileWorkflow), true, 'escaped quoted job concurrency key'],
+            [$globalConcurrency . $scaffoldedReconcileWorkflow, false, 'global queue still coalesces cleanup'],
+            [str_replace('concurrency:', '"concurrency":', $globalConcurrency) . $scaffoldedReconcileWorkflow, false, 'double-quoted global queue key'],
+            [str_replace('concurrency:', "'concurrency':", $globalConcurrency) . $scaffoldedReconcileWorkflow, false, 'single-quoted global queue key'],
+            [str_replace('concurrency:', '"concur\u0072ency":', $globalConcurrency) . $scaffoldedReconcileWorkflow, false, 'escaped quoted global queue key'],
+            [str_replace('concurrency:', '"\U00000063oncurrency":', $globalConcurrency) . $scaffoldedReconcileWorkflow, false, 'unsupported quoted escape cannot hide a global queue'],
+            [str_replace('concurrency:', '"concur\x72ency":', $globalConcurrency) . $scaffoldedReconcileWorkflow, false, 'YAML hex escape cannot hide a global queue'],
+            [$globalConcurrency . str_replace([$cleanupConcurrency, $syncConcurrency], '', $scaffoldedReconcileWorkflow), false, 'historical shared workflow queue'],
+            [str_replace('wp-core-base-managed-pr-cleanup-${{ github.event.pull_request.number }}', 'wp-core-base-managed-pr-cleanup', $scaffoldedReconcileWorkflow), false, 'unrelated PR cleanup shares one queue'],
+            [str_replace('wp-core-base-dependency-sync', 'another-sync-group', $scaffoldedReconcileWorkflow), false, 'sync no longer serialized with updater'],
+            [str_replace($cleanupConcurrency, str_replace('false', 'true', $cleanupConcurrency), $scaffoldedReconcileWorkflow), false, 'cleanup interrupts an active deletion'],
+            [str_replace($syncConcurrency, str_replace('false', 'true', $syncConcurrency), $scaffoldedReconcileWorkflow), false, 'sync interrupts an active mutation'],
+            [str_replace('cancel-in-progress: false', 'cancel-in-progress: "false"', $scaffoldedReconcileWorkflow), false, 'quoted boolean is not a boolean contract'],
+            [strtr($scaffoldedReconcileWorkflow, [$cleanupConcurrency => $syncConcurrency, $syncConcurrency => $cleanupConcurrency]), false, 'groups attached to the wrong jobs'],
+            [str_replace($cleanupConcurrency, '', $scaffoldedReconcileWorkflow) . "\n  unrelated:\n" . $cleanupConcurrency, false, 'matching group belongs to another job'],
+        ] as [$workflow, $accepted, $case]) {
+            file_put_contents($reconcilePath, $workflow);
+            $doctor = new EnvironmentDoctor($tempScaffoldRoot, false);
+            $doctor->run(true, 'github');
+            $concurrencyMessages = array_values(array_filter($doctor->report()['messages'], static fn (array $entry): bool =>
+                str_contains($entry['message'], 'Reconcile workflow isolates per-PR cleanup')
+                || str_contains($entry['message'], 'Reconcile workflow should use per-PR cleanup concurrency')));
+            $assert(count($concurrencyMessages) === 1 && $concurrencyMessages[0]['level'] === ($accepted ? 'ok' : 'error'), 'Automation doctor must reject concurrency that can discard a closed PR cleanup or race sync: ' . $case);
+        }
     } finally {
         file_put_contents($reconcilePath, $scaffoldedReconcileWorkflow);
     }

@@ -69,6 +69,13 @@ The scaffolded automation now separates:
 
 That keeps queued follow-up updates moving after a merge without mixing `pull_request_target` behavior into the scheduled/manual update workflow.
 
+The reconciliation workflow also runs a separate branch-cleanup job for each
+closed automation PR. Its concurrency group includes the PR number so unrelated
+close events cannot cancel each other's pending cleanup. The reconciliation
+`sync` job retains the same repository-wide concurrency group as scheduled
+updates; it may coalesce pending runs because it recomputes the complete current
+state. Do not move that shared group to the reconciliation workflow level.
+
 To keep reconciliation safe, downstreams should enforce `wp-core-base Runtime Validation` (or an equivalent runtime-contract workflow) as a required merge check on automation PRs.
 
 ## Dependency Update Sources

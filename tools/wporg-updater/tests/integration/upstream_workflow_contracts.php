@@ -34,6 +34,9 @@ function run_upstream_workflow_contract_tests(
     $assert(str_contains($upstreamReconcileWorkflow, "github.event_name == 'workflow_dispatch'"), 'Expected upstream reconciliation workflow to run sync during manual recovery dispatch.');
     $assert(str_contains($upstreamReconcileWorkflow, "github.event_name == 'schedule'"), 'Expected upstream reconciliation workflow to run sync during scheduled recovery runs.');
     $assert(str_contains($upstreamReconcileWorkflow, "sync:\n    timeout-minutes: 30"), 'Expected upstream reconciliation sync to have a bounded runtime.');
+    $assert(preg_match('/^concurrency:/m', $upstreamReconcileWorkflow) !== 1, 'Expected upstream reconciliation to retain each PR cleanup instead of coalescing entire workflow runs.');
+    $assert(str_contains($upstreamReconcileWorkflow, "    concurrency:\n      group: wp-core-base-managed-pr-cleanup-\${{ github.event.pull_request.number }}\n      cancel-in-progress: false"), 'Expected upstream cleanup concurrency to distinguish closed PRs and preserve active cleanup.');
+    $assert(str_contains($upstreamReconcileWorkflow, "sync:\n    timeout-minutes: 30\n    concurrency:\n      group: wp-core-base-dependency-sync\n      cancel-in-progress: false"), 'Expected upstream sync alone to share the updater mutation queue.');
     $assert(
         str_contains($upstreamPrepareReleaseWorkflow, 'peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0'),
         'Expected prepare release workflow to pin peter-evans/create-pull-request by full commit SHA.'
