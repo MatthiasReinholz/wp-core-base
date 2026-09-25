@@ -98,9 +98,10 @@ PHP;
         WordpressSmokeRunner::run($fixture, $phase, $runtimeRoot, $environment);
     }
     $log = is_file($runtimeRoot . '/smoke-debug.log') ? file_get_contents($runtimeRoot . '/smoke-debug.log') : '';
-    if (is_string($log) && preg_match('/PHP (Fatal error|Parse error|Recoverable fatal error)/', $log) === 1) {
-        throw new RuntimeException('WordPress runtime smoke recorded a fatal error.');
+    if ($log === false) {
+        throw new RuntimeException('Unable to read WordPress validation diagnostics.');
     }
+    WordpressSmokeRunner::assertHealthyLog($log);
 } catch (Throwable $failure) {
     $operationFailure = $failure;
     if (is_file($runtimeRoot . '/smoke-debug.log')) {

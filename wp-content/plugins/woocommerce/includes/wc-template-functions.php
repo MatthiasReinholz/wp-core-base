@@ -1457,6 +1457,17 @@ if ( ! function_exists( 'woocommerce_template_loop_add_to_cart' ) ) {
 			return;
 		}
 
+		$attributes = array(
+			'data-product_id'  => $product->get_id(),
+			'data-product_sku' => $product->get_sku(),
+			'aria-label'       => $product->add_to_cart_description(),
+			'rel'              => '',
+		);
+
+		if ( $product->get_permalink() !== $product->add_to_cart_url() ) {
+			$attributes['rel'] = 'nofollow';
+		}
+
 		$defaults = array(
 			'quantity'              => 1,
 			'class'                 => implode(
@@ -1472,12 +1483,7 @@ if ( ! function_exists( 'woocommerce_template_loop_add_to_cart' ) ) {
 				)
 			),
 			'aria-describedby_text' => $product->add_to_cart_aria_describedby(),
-			'attributes'            => array(
-				'data-product_id'  => $product->get_id(),
-				'data-product_sku' => $product->get_sku(),
-				'aria-label'       => $product->add_to_cart_description(),
-				'rel'              => 'nofollow',
-			),
+			'attributes'            => $attributes,
 		);
 
 		if ( is_a( $product, 'WC_Product_Simple' ) ) {
@@ -1946,19 +1952,29 @@ function wc_render_product_image_template_for( WC_Product $product ): string {
  *
  * @param WC_Product $product   Product being rendered.
  * @param mixed      $image_ids Image IDs to substitute. Will be normalized.
- * @return string
+ * @return string Rendered gallery HTML, or an empty string for a re-entrant render of the same product.
  */
 function wc_render_product_image_template_for_image_ids( WC_Product $product, $image_ids ): string {
+	static $rendering_product_galleries = array();
+
+	$product_id = $product->get_id();
+	if ( isset( $rendering_product_galleries[ $product_id ] ) ) {
+		return '';
+	}
+
 	$normalized  = array_values( array_unique( array_map( 'intval', array_filter( (array) $image_ids ) ) ) );
 	$featured_id = $normalized[0] ?? 0;
 	$gallery_ids = array_slice( $normalized, 1 );
 
 	$remove_overrides = wc_apply_product_image_overrides( $product, $featured_id, $gallery_ids );
 
+	$rendering_product_galleries[ $product_id ] = true;
+
 	try {
 		return wc_render_product_image_template_for( $product );
 	} finally {
 		$remove_overrides();
+		unset( $rendering_product_galleries[ $product_id ] );
 	}
 }
 
@@ -2205,11 +2221,8 @@ if ( ! function_exists( 'woocommerce_variable_add_to_cart' ) ) {
 		// Enqueue variation scripts.
 		wp_enqueue_script( 'wc-add-to-cart-variation' );
 
-		// Attach a reset snapshot only when variation-gallery swaps are enabled.
-		if (
-			\Automattic\WooCommerce\Internal\VariationGallery\Package::is_enabled() &&
-			! isset( $attached_gallery_defaults[ $product->get_id() ] )
-		) {
+		// Attach the reset snapshot once per product.
+		if ( ! isset( $attached_gallery_defaults[ $product->get_id() ] ) ) {
 			wp_add_inline_script(
 				'wc-add-to-cart-variation',
 				sprintf(
@@ -3115,20 +3128,27 @@ if ( ! function_exists( 'woocommerce_get_product_subcategories' ) ) {
 
 		if ( false === $product_categories ) {
 			// NOTE: using child_of instead of parent - this is not ideal but due to a WP bug ( https://core.trac.wordpress.org/ticket/15626 ) pad_counts won't work.
-			$product_categories = get_categories(
-				apply_filters(
-					'woocommerce_product_subcategories_args',
-					array(
-						'parent'       => $parent_id,
-						'hide_empty'   => 0,
-						'hierarchical' => 1,
-						'taxonomy'     => 'product_cat',
-						'pad_counts'   => 1,
-					)
+			/**
+			 * Filters the arguments used to retrieve product subcategories.
+			 *
+			 * @since 11.1.0
+			 *
+			 * @param array $args Array of arguments for get_categories().
+			 */
+			$args = apply_filters(
+				'woocommerce_product_subcategories_args',
+				array(
+					'parent'       => $parent_id,
+					'hide_empty'   => 0,
+					'hierarchical' => 1,
+					'taxonomy'     => 'product_cat',
+					'pad_counts'   => 1,
 				)
 			);
 
-			if ( $cache_key ) {
+			$product_categories = get_categories( $args );
+
+			if ( $cache_key && is_array( $args ) && ! empty( $args['taxonomy'] ) ) {
 				wp_cache_set( $cache_key, $product_categories, 'product_cat' );
 			}
 		}

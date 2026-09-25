@@ -93,6 +93,8 @@ For `full-core` repositories with managed core, `stage-runtime` and `doctor` rej
 
 For `content-only`, external, or disabled core, the framework cannot determine the deployment's WordPress version. Staging remains available; `doctor` reports the compatibility check as unverified in its normal text and JSON messages. Validate the installed plugins against the externally supplied core in deployment testing. Missing minimum-version headers, themes, PHP requirements, and behavioral compatibility remain outside this minimum-version check; the real WordPress smoke test and project integration tests remain necessary.
 
+Use [baseline upgrades and rollback](baseline-upgrades.md) when a plugin update requires a core migration or introduces database changes. Deploy the reviewed compatible set and rehearse restoring its matching database and runtime before upgrading an existing store.
+
 ## Automation Health and Response Targets
 
 A green scheduled updater does not establish that its generated PRs can pass required checks. In the framework source repository, the read-only GitHub health script inspects dependency/core and framework update PRs, effective required checks, workflow approval requirements, and the scheduled updater/reconciliation runs:

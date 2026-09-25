@@ -77,6 +77,11 @@ final class ExtractedPayloadLocator
 
         foreach (self::candidateBases($extractPath) as $candidateBase) {
             $candidatePath = self::candidatePath($candidateBase, $archiveSubdir);
+            // archive_subdir may exist only inside a release wrapper. Validate
+            // its ancestors first, then skip bases without that directory.
+            if (! is_dir($candidatePath)) {
+                continue;
+            }
             ConfigPathRules::assertNoSymlinkDescendants($candidatePath, $expectedEntry);
 
             if ($isFile) {
