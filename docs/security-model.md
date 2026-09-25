@@ -17,6 +17,7 @@ It does not trust:
 - live Git working trees as managed dependency inputs
 - symlinked runtime trees
 - unsigned framework checksum sidecars
+- release descriptions or support-topic text as automation instructions or metadata
 
 ## Managed Download Model
 
@@ -117,6 +118,14 @@ Important examples:
 
 Local release keys should not live in tracked repository paths. The ignored `tools/wporg-updater/.tmp/` path is for local scratch material only and must never be treated as release input.
 
+Diagnostic redaction applies before CLI option parsing errors are emitted, as well as during command execution. It masks known environment secrets, sensitive HTTP(S) query fields and URL user information, including username-only credentials. Redacting an HTTP URL does not permit insecure transport; managed downloads still require HTTPS.
+
+## Automation Metadata And Branch Refresh
+
+Rendered update PRs append their authoritative metadata after upstream release notes and support text. The reader selects the final metadata marker, never an earlier marker embedded in upstream content. A malformed final marker fails validation rather than falling back to an earlier block. Serialized metadata escapes HTML delimiters while retaining the same decoded values.
+
+Dependency, core and framework refreshes require the selected branch to match the hosting API's current PR head exactly. They also reject default/base branches and cross-repository heads before changing a checkout or pushing. Missing legacy branch metadata may use the actual head; conflicting metadata is an error and requires review or recreation of the PR. A metadata field cannot authorize rewriting a different branch.
+
 ## Managed Pull Request Branch Cleanup
 
 Automation branch deletion is allowed only after a pull request close decision.
@@ -126,6 +135,8 @@ same-repository head, exact metadata/head branch agreement, the expected managed
 branch prefix, and a head that is neither the base nor default branch. The host
 must supply a PR head SHA, which must match the remote branch; deletion uses a
 Git force-with-lease so a concurrent force-push is rejected atomically.
+
+Before deletion, cleanup reads the complete unfiltered open-PR inventory. It preserves a head used by another same-repository PR or by the original PR after reopening, regardless of labels or target branch. Missing or ambiguous inventory data prevents deletion. The inventory read and Git deletion are separate operations, so this is not an atomic guarantee against a PR opening immediately after the check.
 
 The GitHub `pull_request_target` cleanup job checks out the trusted repository
 default branch explicitly and never executes code from the pull request head.

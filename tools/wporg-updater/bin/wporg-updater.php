@@ -42,10 +42,11 @@ $frameworkRoot = dirname(__DIR__, 3);
 try {
     $options = CommandOptions::parse($mode, $arguments);
 } catch (RuntimeException $exception) {
+    $error = OutputRedactor::redact($exception->getMessage());
     if (in_array('--json', $cliArguments, true)) {
-        fwrite(STDOUT, json_encode(['status' => 'failure', 'error' => $exception->getMessage()], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT) . "\n");
+        fwrite(STDOUT, json_encode(['status' => 'failure', 'error' => $error], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT) . "\n");
     } else {
-        fwrite(STDERR, $exception->getMessage() . "\nRun with `help` to see the available modes.\n");
+        fwrite(STDERR, $error . "\nRun with `help` to see the available modes.\n");
     }
     exit(2);
 }

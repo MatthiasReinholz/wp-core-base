@@ -116,9 +116,10 @@ final class GitHubClient implements GitHubAutomationClient
             }
 
             foreach ($chunk as $pullRequest) {
-                if (is_array($pullRequest)) {
-                    $pullRequests[] = $pullRequest;
+                if (! is_array($pullRequest)) {
+                    throw new RuntimeException('GitHub returned an invalid entry in the open pull request inventory.');
                 }
+                $pullRequests[] = $pullRequest;
             }
 
             $page++;

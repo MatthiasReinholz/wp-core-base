@@ -154,6 +154,9 @@ function run_cli_json_contract_tests(
     $assert(str_contains($unknownFlagPlain['stderr'], '--typoed-flag'), 'Expected plain unknown-flag errors to include the offending flag name.');
     $assert(str_contains($unknownFlagPlain['stderr'], 'help'), 'Expected plain unknown-flag errors to point users to grouped help.');
 
+    run_cli_parse_redaction_contract_tests($assert, $repoRoot);
+    run_cli_url_redaction_contract_tests($assert, $repoRoot, $runtimeInspector);
+
     $helpWithOptionBeforeTopic = run_command_allow_failure($repoRoot, [
         'php',
         'tools/wporg-updater/bin/wporg-updater.php',
@@ -365,6 +368,110 @@ function run_cli_json_contract_tests(
     file_put_contents($tempCoreRoot . '/wp-includes/version.php', "<?php\n\$wp_version = '6.9.4';\n");
     $coreScan = (new CoreScanner())->inspect($tempCoreRoot);
     $assert($coreScan['version'] === '6.9.4', 'Expected CoreScanner to parse $wp_version correctly.');
+}
+
+/** @param callable(bool,string):void $assert */
+function run_cli_url_redaction_contract_tests(callable $assert, string $repoRoot, RuntimeInspector $runtimeInspector): void
+{
+    $urlCases = [
+        'https://user:password@example.invalid/file.zip?sig=signature&version=1#view' => 'https://[REDACTED]:[REDACTED]@example.invalid/file.zip?sig=[REDACTED]&version=1#view',
+        'https://token@example.invalid/file.zip?version=1' => 'https://[REDACTED]@example.invalid/file.zip?version=1',
+        'https://token:@example.invalid/file.zip' => 'https://[REDACTED]:[REDACTED]@example.invalid/file.zip',
+        'https://:password@example.invalid/file.zip' => 'https://[REDACTED]:[REDACTED]@example.invalid/file.zip',
+        'HTTPS://encoded%40user:encoded%3Apassword@example.invalid/file.zip?%74oken=secret' => 'HTTPS://[REDACTED]:[REDACTED]@example.invalid/file.zip?%74oken=[REDACTED]',
+        'http://token@example.invalid/file.zip?sig=signature' => 'http://[REDACTED]@example.invalid/file.zip?sig=[REDACTED]',
+        'http://example.invalid/file.zip?version=1#view' => 'http://example.invalid/file.zip?version=1#view',
+        'https://user:password@example.invalid:999999/file.zip?token=secret' => '[REDACTED]',
+    ];
+    foreach ($urlCases as $input => $expected) {
+        $assert(WpOrgPluginUpdater\OutputRedactor::redact($input) === $expected, 'Expected URL diagnostics to redact complete user information and credential query values while preserving other URL bytes.');
+    }
+
+    // An empty root skips runtime staging while exercising the real doctor
+    // entrypoint and its environment diagnostics without any network access.
+    $emptyRoot = sys_get_temp_dir() . '/wporg-doctor-url-redaction-' . bin2hex(random_bytes(4));
+    mkdir($emptyRoot, 0700);
+    $environment = [];
+    foreach (['GITHUB_REPOSITORY', 'GITHUB_TOKEN', 'GITHUB_API_URL'] as $name) {
+        $environment[$name] = getenv($name);
+    }
+    $userinfoSecret = 'synthetic-doctor-userinfo-secret';
+    $querySecret = 'synthetic-doctor-query-secret';
+    putenv('GITHUB_REPOSITORY=example/repo');
+    putenv('GITHUB_TOKEN=synthetic-doctor-env-token');
+    try {
+        $diagnosticUrls = [
+            'https://' . $userinfoSecret . '@example.invalid/api?token=' . $querySecret => 'https://[REDACTED]@example.invalid/api?token=[REDACTED]',
+            'http://' . $userinfoSecret . '@example.invalid/api?token=' . $querySecret => 'http://[REDACTED]@example.invalid/api?token=[REDACTED]',
+            'https://' . $userinfoSecret . '@example.invalid:999999/api?token=' . $querySecret => '[REDACTED]',
+        ];
+        foreach ($diagnosticUrls as $apiUrl => $expectedUrl) {
+            putenv('GITHUB_API_URL=' . $apiUrl);
+            foreach ([false, true] as $json) {
+                $command = ['php', 'tools/wporg-updater/bin/wporg-updater.php', 'doctor', '--repo-root=' . $emptyRoot];
+                if ($json) {
+                    $command[] = '--json';
+                }
+                $result = run_command_allow_failure($repoRoot, $command);
+                $assert($result['exit_code'] === 1, 'Expected doctor to report missing configuration for the empty fixture root.');
+                $output = $result['stdout'] . $result['stderr'];
+                $assert(! str_contains($output, $userinfoSecret) && ! str_contains($output, $querySecret), 'Expected doctor output to hide user information and query credentials even for rejected URL configuration.');
+                if ($json) {
+                    $payload = json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR);
+                    $assert(is_array($payload) && is_array($payload['messages'] ?? null), 'Expected redacted doctor output to preserve structured diagnostic messages.');
+                    $messages = array_column($payload['messages'], 'message');
+                    $output = implode("\n", $messages);
+                    $assert($result['stderr'] === '', 'Expected doctor JSON output to keep stderr empty.');
+                }
+                $assert(str_contains($output, 'using API ' . $expectedUrl), 'Expected doctor diagnostics to preserve URL context when parseable and mask malformed URLs completely.');
+            }
+        }
+    } finally {
+        foreach ($environment as $name => $value) {
+            putenv($value === false ? $name : $name . '=' . $value);
+        }
+        $runtimeInspector->clearPath($emptyRoot);
+    }
+}
+
+/** @param callable(bool,string):void $assert */
+function run_cli_parse_redaction_contract_tests(callable $assert, string $repoRoot): void
+{
+    $secret = 'synthetic-cli-parse-secret';
+    $signature = 'synthetic-cli-download-signature';
+    $oldSecret = getenv('WP_CORE_BASE_CLI_TEST_SECRET');
+    putenv('WP_CORE_BASE_CLI_TEST_SECRET=' . $secret);
+
+    try {
+        $cases = [
+            ['arguments' => ['doctor', 'https://example.invalid/download.zip?X-Amz-Signature=' . $signature], 'secret' => $signature, 'prefix' => 'Unexpected positional argument:'],
+            ['arguments' => [$secret], 'secret' => $secret, 'prefix' => 'Unknown mode:'],
+        ];
+        foreach ($cases as $case) {
+            foreach ([false, true] as $json) {
+                $command = ['php', 'tools/wporg-updater/bin/wporg-updater.php', ...$case['arguments']];
+                if ($json) {
+                    $command[] = '--json';
+                }
+                $result = run_command_allow_failure($repoRoot, $command);
+                $assert($result['exit_code'] === 2, 'Expected redacted CLI parse errors to retain exit code 2.');
+                $assert(! str_contains($result['stdout'] . $result['stderr'], $case['secret']), 'Expected CLI parse errors to remove credentials from both output streams.');
+                if ($json) {
+                    $payload = json_decode($result['stdout'], true, 512, JSON_THROW_ON_ERROR);
+                    $assert(is_array($payload) && ($payload['status'] ?? null) === 'failure', 'Expected redacted CLI parse errors to retain the JSON failure contract.');
+                    $message = (string) ($payload['error'] ?? '');
+                    $assert($result['stderr'] === '', 'Expected JSON parse errors to keep stderr empty.');
+                } else {
+                    $message = $result['stderr'];
+                    $assert($result['stdout'] === '', 'Expected plain CLI parse errors to keep stdout empty.');
+                    $assert(str_contains($message, 'Run with `help`'), 'Expected redacted plain parse errors to retain help guidance.');
+                }
+                $assert(str_contains($message, $case['prefix']) && str_contains($message, '[REDACTED]'), 'Expected CLI parse errors to preserve useful diagnostics with a redaction marker.');
+            }
+        }
+    } finally {
+        putenv($oldSecret === false ? 'WP_CORE_BASE_CLI_TEST_SECRET' : 'WP_CORE_BASE_CLI_TEST_SECRET=' . $oldSecret);
+    }
 }
 
 /**

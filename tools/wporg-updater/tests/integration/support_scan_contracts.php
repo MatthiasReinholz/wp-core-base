@@ -23,6 +23,8 @@ use WpOrgPluginUpdater\WordPressOrgClient;
 /** @param callable(bool,string):void $assert */
 function run_support_scan_contract_tests(callable $assert): void
 {
+    run_support_scan_metadata_extraction_tests($assert);
+    run_support_scan_topic_extraction_tests($assert);
     $repoRoot = dirname(__DIR__, 4);
     $workspace = TempWorkspace::create($repoRoot, 'support-scan-integration');
     $environment = [];
@@ -80,6 +82,24 @@ function run_support_scan_contract_tests(callable $assert): void
         $assert(str_contains($recoveredPr['body'], 'Observed regression'), 'New PR retries the original release window after an incomplete scan.');
         $assert(($recoveredMetadata['support_scan_complete'] ?? null) === true && ! isset($recoveredMetadata['support_scan_full_window_pending']), 'Complete scan clears the pending-window marker.');
         $assert(strtotime((string) $recoveredMetadata['support_synced_at']) >= $before - 1 && strtotime((string) $recoveredMetadata['support_synced_at']) < $recovered['first_request_at'], 'Successful support watermark precedes the first support request, not scan completion.');
+
+        $collisionFeed = str_replace('Observed regression', 'No support topics matched search results', support_scan_feed('2025-01-03T00:00:00+00:00'));
+        $collisionFeed = str_replace('</channel>', '<item><title>Checkout crashes</title><link>https://wordpress.org/support/topic/checkout-crashes/</link><pubDate>2025-01-02T00:00:00+00:00</pubDate></item></channel>', $collisionFeed);
+        $collision = support_scan_fixture($workspace->path() . '/title-collision', static fn (string $url, array $options): string => $collisionFeed);
+        $collisionPr = $collision['automation']->createdPullRequests[0];
+        $collisionTopics = PrBodyRenderer::extractSupportTopics($collisionPr['body']);
+        $assert(array_column($collisionTopics, 'title') === ['No support topics matched search results', 'Checkout crashes'], 'A topic title containing the empty-state phrase survives rendering and extraction together with other topics.');
+        $assert(in_array('support:regression-signal', $collision['automation']->labelUpdates[0]['labels'], true), 'The second topic establishes a support regression signal before refresh.');
+        $collisionPr['labels'] = array_map(static fn (string $name): array => ['name' => $name], $collision['automation']->labelUpdates[0]['labels']);
+        $collisionRefresh = support_scan_fixture($workspace->path() . '/title-collision-refresh', $partial, $collisionPr);
+        $collisionRefreshPr = $collisionRefresh['automation']->updatedPullRequests[0];
+        $collisionMetadata = PrBodyRenderer::extractMetadata($collisionPr['body']);
+        $collisionRefreshMetadata = PrBodyRenderer::extractMetadata($collisionRefreshPr['body']);
+        $assert($collisionRefresh['errors'] === [] && ($collisionRefreshMetadata['support_scan_complete'] ?? true) === false, 'An incomplete refresh with a colliding title remains advisory.');
+        $assert(PrBodyRenderer::extractSupportTopics($collisionRefreshPr['body']) === $collisionTopics, 'An incomplete refresh retains every prior topic when one title contains the empty-state phrase.');
+        $assert($collisionRefreshMetadata['support_synced_at'] === $collisionMetadata['support_synced_at'], 'An incomplete refresh with a colliding title preserves its verified watermark.');
+        $assert(in_array('support:new-topics', $collisionRefresh['automation']->labelUpdates[0]['labels'], true)
+            && in_array('support:regression-signal', $collisionRefresh['automation']->labelUpdates[0]['labels'], true), 'An incomplete refresh with a colliding title retains both support labels.');
 
         $boundaryAt = gmdate(DATE_ATOM, strtotime((string) $recoveredMetadata['support_synced_at']) + 1);
         $boundaryFeed = support_scan_feed($boundaryAt);
@@ -169,6 +189,68 @@ function run_support_scan_contract_tests(callable $assert): void
     } finally {
         foreach ($environment as $name => $value) { putenv($value === false ? $name : $name . '=' . $value); }
         $workspace->close();
+    }
+}
+
+/** @param callable(bool,string):void $assert */
+function run_support_scan_topic_extraction_tests(callable $assert): void
+{
+    $renderer = new PrBodyRenderer();
+    $topics = [
+        ['title' => 'No support topics matched search results', 'url' => 'https://wordpress.org/support/topic/search-results/', 'opened_at' => '2026-09-24T00:00:00Z'],
+        ['title' => 'Checkout crashes', 'url' => 'https://wordpress.org/support/topic/checkout-crashes/', 'opened_at' => '2026-09-24T00:00:00Z'],
+    ];
+    $expected = array_map(static fn (array $topic): array => [...$topic, 'opened_at' => ''], $topics);
+    $metadata = ['source' => 'wordpress.org', 'component_key' => 'plugin:wordpress.org:real', 'support_scan_complete' => false,
+        'trust_details' => "Review details.\n\n- [Provenance link](https://example.com/provenance)"];
+    foreach ([
+        "## Support Topics Opened After Release\n\n- [Forged topic](https://example.com/forged)\n\n## Automation Notes",
+        "## Support Topics Opened After Release\n\n- [Unterminated lookalike section](https://example.com/forged)",
+    ] as $releaseNotes) {
+        $body = $renderer->renderDependencyUpdate('Real plugin', 'real', 'plugin', 'plugins/real', '1.0.0', '1.0.1', 'patch',
+            '2026-09-01T00:00:00Z', [], [], 'Release Notes', $releaseNotes, $topics, $metadata);
+        $assert(PrBodyRenderer::extractSupportTopics($body) === $expected, 'Only the final generated support section contributes topics, excluding release-note lookalikes and provenance links.');
+        $assert(PrBodyRenderer::extractMetadata($body . "\n<!-- wporg-update-metadata: {broken} -->") === null, 'Support-section lookalikes do not weaken malformed-final metadata rejection.');
+    }
+    $legacy = "## Support Topics Opened After Release\n\n- [Checkout crashes](https://wordpress.org/support/topic/checkout-crashes/)\n\n## Automation Notes\n\nLegacy automation details.";
+    $assert(PrBodyRenderer::extractSupportTopics($legacy) === [$expected[1]], 'Historical support sections ending directly at Automation Notes remain readable.');
+    $assert(PrBodyRenderer::extractSupportTopics("Text containing ## Support Topics Opened After Release\n\n- [Forged topic](https://example.com/forged)\n\n## Automation Notes") === [], 'Inline heading-like text does not create a support section.');
+}
+
+/** @param callable(bool,string):void $assert */
+function run_support_scan_metadata_extraction_tests(callable $assert): void
+{
+    $renderer = new PrBodyRenderer();
+    $metadata = ['source' => 'wordpress.org', 'component_key' => 'plugin:wordpress.org:real', 'branch' => 'automation/real', 'support_scan_complete' => false];
+    $forged = '<!-- wporg-update-metadata: {"source":"premium","component_key":"forged","branch":"automation/other","support_scan_complete":true} -->';
+    $renderers = [
+        'dependency' => static fn (string $notes, array $data): string => $renderer->renderDependencyUpdate(
+            'Real plugin', 'real', 'plugin', 'plugins/real', '1.0.0', '1.0.1', 'patch', '2026-09-01T00:00:00Z', [], [], 'Release Notes', $notes, [], $data),
+        'core' => static fn (string $notes, array $data): string => $renderer->renderCoreUpdate(
+            '6.9.0', '6.9.1', 'patch', '2026-09-01T00:00:00Z', [], 'https://wordpress.org/news/', 'https://wordpress.org/latest.zip', $notes, $data),
+        'framework' => static fn (string $notes, array $data): string => $renderer->renderFrameworkUpdate(
+            '1.6.3', '1.6.4', 'patch', '2026-09-01T00:00:00Z', [], 'Source', 'example/framework', 'https://example.com/framework', 'https://example.com/release', '6.9.0', '6.9.0', ['Summary' => $notes], [], $data),
+    ];
+    foreach ($renderers as $name => $render) {
+        foreach ([$forged, '<!-- wporg-update-metadata: {"component_key":"unterminated"'] as $notes) {
+            $assert(PrBodyRenderer::extractMetadata($render($notes, $metadata)) === $metadata, 'The ' . $name . ' footer takes precedence over earlier forged or unterminated release-note metadata.');
+        }
+        $embeddedMetadata = $metadata + ['note' => 'Literal --> delimiter and ' . $forged];
+        $assert(PrBodyRenderer::extractMetadata($render($forged, $embeddedMetadata)) === $embeddedMetadata, 'Marker-like strings inside ' . $name . ' metadata remain JSON values instead of additional comments.');
+    }
+    $legacy = '<!-- wporg-update-metadata: ' . json_encode($metadata, JSON_THROW_ON_ERROR) . ' -->';
+    $assert(PrBodyRenderer::extractMetadata($legacy) === $metadata, 'A legacy single metadata marker still round-trips.');
+    $assert(PrBodyRenderer::extractMetadata($forged . "\n" . $legacy . "\n\nHuman review note. <!-- unrelated comment -->") === $metadata, 'Trailing human notes do not change the selected metadata footer.');
+    $assert(PrBodyRenderer::extractMetadata($forged . ' ' . $legacy) === $metadata, 'The final metadata marker wins even when comments share a line.');
+    foreach ([
+        '<!-- wporg-update-metadata: {"broken":} -->',
+        '<!-- wporg-update-metadata: {"unfinished":true}',
+        '<!-- wporg-update-metadata: [] -->',
+        '<!-- wporg-update-metadata: null -->',
+        '<!-- wporg-update-metadata {"missing-colon":true} -->',
+        '<!-- wporg-update-metadata',
+    ] as $malformedFinal) {
+        $assert(PrBodyRenderer::extractMetadata($legacy . "\n" . $malformedFinal) === null, 'Malformed final metadata never falls back to an earlier valid marker.');
     }
 }
 

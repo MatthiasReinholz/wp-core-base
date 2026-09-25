@@ -248,10 +248,20 @@ MARKDOWN);
             return null;
         }
 
-        if (preg_match('/<!--\s*wporg-update-metadata:\s*(\{.*\})\s*-->/', $body, $matches) !== 1) {
+        // Release notes may contain arbitrary comments, including incomplete
+        // metadata lookalikes. Only the last opener can identify our footer;
+        // never fall back to an earlier block if that final marker is malformed.
+        $markerCount = preg_match_all('/<!--\s*wporg-update-metadata\b/', $body, $markers, PREG_OFFSET_CAPTURE);
+        if ($markerCount === false || $markerCount === 0) {
             return null;
         }
 
+        $lastMarker = $markers[0][$markerCount - 1];
+        $payloadStart = $lastMarker[1] + strlen($lastMarker[0]);
+        $commentEnd = strpos($body, '-->', $payloadStart);
+        if ($commentEnd === false || preg_match('/\A\s*:\s*(\{.*\})\s*\z/s', substr($body, $payloadStart, $commentEnd - $payloadStart), $matches) !== 1) {
+            return null;
+        }
         $decoded = json_decode($matches[1], true);
 
         return is_array($decoded) ? $decoded : null;
@@ -266,13 +276,20 @@ MARKDOWN);
             return [];
         }
 
-        if (preg_match('/## Support Topics Opened After Release\s+(.*?)\s+## Automation Notes/s', $body, $matches) !== 1) {
+        // The generated section follows release notes, which can contain the
+        // same heading. Select its final whole-line occurrence independently.
+        $headingCount = preg_match_all('/^## Support Topics Opened After Release[ \t]*\r?$/m', $body, $headings, PREG_OFFSET_CAPTURE);
+        if ($headingCount === false || $headingCount === 0) {
             return [];
         }
+        $lastHeading = $headings[0][$headingCount - 1];
+        $following = substr($body, $lastHeading[1] + strlen($lastHeading[0]));
+        if (preg_match('/^##[ \t]+/m', $following, $nextHeading, PREG_OFFSET_CAPTURE) !== 1) {
+            return [];
+        }
+        $section = trim(substr($following, 0, $nextHeading[0][1]));
 
-        $section = trim($matches[1]);
-
-        if ($section === '' || str_contains($section, 'No support topics matched')) {
+        if ($section === '') {
             return [];
         }
 
@@ -298,7 +315,9 @@ MARKDOWN);
      */
     private function encodeMetadata(array $metadata): string
     {
-        return json_encode($metadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        // Keep comment delimiters and marker-like values inside JSON strings
+        // from being interpreted as additional metadata comments.
+        return json_encode($metadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG);
     }
 
     /**

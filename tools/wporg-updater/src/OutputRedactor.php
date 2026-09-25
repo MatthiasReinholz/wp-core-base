@@ -111,19 +111,25 @@ final class OutputRedactor
     private static function redactUrls(string $message): string
     {
         $message = preg_replace_callback(
-            '#https://[^\s]+#i',
+            '#https?://[^\s]+#i',
             static function (array $matches): string {
                 $url = $matches[0];
                 $parts = parse_url($url);
 
                 if (! is_array($parts)) {
-                    return $url;
+                    // Invalid configuration URLs can still contain credentials.
+                    // Their structure is unsafe to preserve selectively.
+                    return '[REDACTED]';
                 }
 
                 $redacted = $url;
 
                 if (isset($parts['user']) || isset($parts['pass'])) {
-                    $redacted = preg_replace('#https://([^/\s:@]+):([^@\s/]+)@#i', 'https://[REDACTED]:[REDACTED]@', $redacted) ?? $redacted;
+                    // User information may contain a token without a password,
+                    // or either side may be empty. Remove the entire authority
+                    // prefix through its last @, preserving the original scheme.
+                    $userinfo = isset($parts['pass']) ? '[REDACTED]:[REDACTED]@' : '[REDACTED]@';
+                    $redacted = preg_replace('~^(https?://)[^/?#]*@~i', '$1' . $userinfo, $redacted) ?? $redacted;
                 }
 
                 if (isset($parts['query'])) {

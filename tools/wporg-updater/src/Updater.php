@@ -153,6 +153,12 @@ final class Updater
             }
         }
 
+        // Validate the complete queue before pruning or closing duplicates as well as refreshing.
+        foreach ($plannedPrs as $plannedPr) {
+            $branch = (string) ($plannedPr['metadata']['branch'] ?? $plannedPr['head']['ref'] ?? '');
+            $this->assertRefreshableAutomationPullRequest($plannedPr, $branch, $defaultBranch);
+        }
+
         $plannedPrs = $this->pruneHistoricalPullRequestsForLatestOnlySource($dependency, $plannedPrs, $latestVersion);
         [$plannedPrs, $duplicatePrs] = $this->partitionPullRequestsByTargetVersion($plannedPrs);
 
@@ -1345,22 +1351,7 @@ final class Updater
      */
     private function assertRefreshableAutomationPullRequest(array $pullRequest, string $branch, string $defaultBranch): void
     {
-        $baseRef = (string) ($pullRequest['base']['ref'] ?? '');
-
-        if ($branch === $defaultBranch || ($baseRef !== '' && $branch === $baseRef)) {
-            throw new RuntimeException(sprintf(
-                'Automation PR #%d resolved to protected branch %s and will not be refreshed.',
-                (int) ($pullRequest['number'] ?? 0),
-                $branch
-            ));
-        }
-
-        if (! $this->isManagedRepositoryPullRequest($pullRequest)) {
-            throw new RuntimeException(sprintf(
-                'Automation PR #%d does not use a same-repository automation branch and will not be refreshed.',
-                (int) ($pullRequest['number'] ?? 0)
-            ));
-        }
+        AutomationPullRequestGuard::assertRefreshable($pullRequest, $branch, $defaultBranch, 'Automation PR');
     }
 
     /**
@@ -1368,15 +1359,7 @@ final class Updater
      */
     private function isManagedRepositoryPullRequest(array $pullRequest): bool
     {
-        $head = is_array($pullRequest['head'] ?? null) ? $pullRequest['head'] : [];
-        $base = is_array($pullRequest['base'] ?? null) ? $pullRequest['base'] : [];
-        $headRef = (string) ($head['ref'] ?? '');
-        $headRepo = is_array($head['repo'] ?? null) ? $head['repo'] : [];
-        $baseRepo = is_array($base['repo'] ?? null) ? $base['repo'] : [];
-        $headFullName = strtolower((string) ($headRepo['full_name'] ?? ''));
-        $baseFullName = strtolower((string) ($baseRepo['full_name'] ?? ''));
-
-        return $headRef !== '' && $headFullName !== '' && $headFullName === $baseFullName;
+        return AutomationPullRequestGuard::isSameRepositoryAutomationPullRequest($pullRequest);
     }
 
     /**

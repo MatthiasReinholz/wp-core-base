@@ -151,6 +151,12 @@ final class SupportForumClient
      */
     public function parseSupportListing(string $html): array
     {
+        return array_values(iterator_to_array($this->iterateSupportListing($html)));
+    }
+
+    /** @return \Generator<string,array{title:string,url:string}> */
+    private function iterateSupportListing(string $html): \Generator
+    {
         if (trim($html) === '') {
             throw new RuntimeException('Support listing response is empty.');
         }
@@ -164,23 +170,19 @@ final class SupportForumClient
             throw new RuntimeException('Failed to parse support listing.');
         }
 
-        $topics = [];
-
         foreach ($links as $link) {
             $title = trim(html_entity_decode(strip_tags($link->textContent ?? ''), ENT_QUOTES | ENT_HTML5));
             $url = $this->canonicalSupportTopicUrl((string) $link->attributes?->getNamedItem('href')?->nodeValue);
 
             if ($title === '' || $url === '') {
-                continue;
+                throw new RuntimeException('Support listing contains a topic without a title or topic URL; coverage could not be established.');
             }
 
-            $topics[$url] = [
+            yield $url => [
                 'title' => $title,
                 'url' => $url,
             ];
         }
-
-        return array_values($topics);
     }
 
     public function extractTopicPublishedAt(string $html): DateTimeImmutable
@@ -237,13 +239,11 @@ final class SupportForumClient
         for ($page = 1; $page <= $pageCount; $page++) {
             $this->reportProgress(sprintf('Support scan %s: processing listing page %d/%d.', $slug, $page, $pageCount));
             $html = $page === 1 ? $firstPageHtml : $this->fetch($slug, $this->supportUrl($slug) . 'page/' . $page . '/', 'listing', $budget, $deadline, $maxPages);
-            $listings = $this->parseSupportListing($html);
-            if ($listings === []) {
-                // An HTML challenge or changed selector is not proof that the
-                // forum has no topics. Preserve the previous coverage window.
-                throw new RuntimeException('Support listing did not contain recognizable topics; coverage could not be established.');
-            }
-            foreach ($listings as $topic) {
+            $foundTopics = false;
+            // Process entries as they are validated so a malformed later link
+            // cannot discard topics already discovered on this page.
+            foreach ($this->iterateSupportListing($html) as $topic) {
+                $foundTopics = true;
                 $this->assertTimeRemaining($deadline);
                 if (isset($seen[$topic['url']])) {
                     continue;
@@ -254,6 +254,11 @@ final class SupportForumClient
                 if ($openedAt > $windowStart) {
                     $topics[$topic['url']] = ['title' => $topic['title'], 'url' => $topic['url'], 'opened_at' => $openedAt->format(DATE_ATOM)];
                 }
+            }
+            if (! $foundTopics) {
+                // An HTML challenge or changed selector is not proof that the
+                // forum has no topics. Preserve the previous coverage window.
+                throw new RuntimeException('Support listing did not contain recognizable topics; coverage could not be established.');
             }
         }
     }

@@ -11,6 +11,7 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\GitCommandRunner;
 use WpOrgPluginUpdater\HttpClient;
 use WpOrgPluginUpdater\ManagedPullRequestBranchCleaner;
+use WpOrgPluginUpdater\OutputRedactor;
 
 final class ManagedPullRequestCleanupModeHandler implements CliModeHandler
 {
@@ -58,17 +59,29 @@ final class ManagedPullRequestCleanupModeHandler implements CliModeHandler
                 'pull_request' => $number,
                 'branch' => $result['branch'],
                 'deleted' => $result['deleted'],
+                'reason' => $result['reason'],
+                'reused_by_pull_request' => $result['reused_by_pull_request'],
             ]);
 
             return 0;
         }
 
-        fwrite(STDOUT, sprintf(
+        if ($result['reason'] === 'reused-by-open-pr') {
+            fwrite(STDOUT, OutputRedactor::redact(sprintf(
+                "Preserved managed branch %s for pull request #%d because open pull request #%d uses it.\n",
+                $result['branch'],
+                $number,
+                $result['reused_by_pull_request']
+            )));
+            return 0;
+        }
+
+        fwrite(STDOUT, OutputRedactor::redact(sprintf(
             "%s managed branch %s for pull request #%d.\n",
             $result['deleted'] ? 'Deleted' : 'No cleanup needed for',
             $result['branch'],
             $number
-        ));
+        )));
 
         return 0;
     }

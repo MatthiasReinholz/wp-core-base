@@ -68,6 +68,18 @@ jobs:
           fi
           php tools/wporg-updater/tests/run.php
 
+      - name: Retain test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: framework-test-reports-php-${{ matrix.php-version }}-attempt-${{ github.run_attempt }}
+          path: |
+            .wp-core-base/build/test-report.json
+            .wp-core-base/build/coverage-observed.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Check documentation contracts
         run: php scripts/ci/check_documentation.php
 

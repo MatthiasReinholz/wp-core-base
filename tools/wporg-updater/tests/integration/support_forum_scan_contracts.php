@@ -133,6 +133,20 @@ function run_support_forum_scan_contract_tests(callable $assert, string $repoRoo
         $invalidListing = $client->scanTopicsOpenedAfter('example-plugin', $release);
         $assert(! $invalidListing->complete && $invalidListing->requests === 2, 'Unrecognized or empty HTML cannot masquerade as a complete empty forum.');
     }
+    foreach ([
+        '<a class="bbp-topic-permalink">Missing URL</a>',
+        '<a class="bbp-topic-permalink" href="">Empty URL</a>',
+        '<a class="bbp-topic-permalink" href="https://wordpress.org/support/topic/missing-title/"> </a>',
+    ] as $malformedLink) {
+        $mixedListing = str_replace('</body>', $malformedLink . '</body>', $listing(['valid-topic']));
+        [$client, $state] = $make([$feed(['feed-topic' => $newDate]), $mixedListing, $topic($newDate)]);
+        $mixed = $client->scanTopicsOpenedAfter('example-plugin', $release);
+        $assert(! $mixed->complete && $mixed->requests === 3 && str_contains((string) $mixed->warning, 'without a title or topic URL'), 'A malformed recognized listing link cannot establish complete coverage.');
+        $assert(array_column($mixed->topics, 'title') === ['feed-topic', 'valid-topic'], 'Malformed listing links preserve RSS discoveries and earlier validated topics from the same page.');
+        $rejected = false;
+        try { $client->parseSupportListing($mixedListing); } catch (RuntimeException) { $rejected = true; }
+        $assert($rejected, 'The public listing parser rejects malformed recognized topic links.');
+    }
     foreach (['not XML', '<html><body>Temporary challenge</body></html>'] as $invalidFeed) {
         [$client, $state] = $make([$invalidFeed]);
         $assert(! $client->scanTopicsOpenedAfter('example-plugin', $release)->complete && count($state->requests) === 1, 'Malformed or non-RSS feed data is a bounded nonfatal warning.');

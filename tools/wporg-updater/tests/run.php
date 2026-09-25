@@ -512,6 +512,13 @@ final class FakeGitHubAutomationClient implements GitHubAutomationClient
     public function closePullRequest(int $number, ?string $comment = null): void
     {
         $this->closedPullRequests[] = ['number' => $number, 'comment' => $comment];
+        $this->openPullRequests = array_values(array_filter(
+            $this->openPullRequests,
+            static fn (array $pullRequest): bool => (int) ($pullRequest['number'] ?? 0) !== $number
+        ));
+        if (isset($this->pullRequestsByNumber[$number])) {
+            $this->pullRequestsByNumber[$number]['state'] = 'closed';
+        }
     }
 
     public function setIssueLabels(int $number, array $labels): void
