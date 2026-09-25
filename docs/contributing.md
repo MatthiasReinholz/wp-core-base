@@ -90,7 +90,7 @@ Use [release-process.md](release-process.md) for the maintainer checklist.
 
 Set `WP_CORE_BASE_TEST_REPORT=/tmp/wp-core-base-tests.json` for a structured report. With PCOV or Xdebug coverage mode enabled, set `WP_CORE_BASE_COVERAGE_FILE=/tmp/wp-core-base-coverage.json` for actual observed framework lines. This report excludes subprocess execution and has no arbitrary pass-percentage threshold.
 
-Static analysis runs at level 5 for the framework and CI scripts, with a separate level 8 gate for the typed source records, update planning, ownership, HTTP policy, and framework payload identity boundaries. Run the same pinned PHPStan tool with `--configuration=phpstan-boundaries.neon.dist --memory-limit=1G` to check those stricter contracts locally.
+Static analysis runs at level 5 for the framework and CI scripts, with a separate level 8 gate for the typed source records, update planning, ownership, HTTP policy, framework payload identity, and support-scan budget/result boundaries. Run the same pinned PHPStan tool with `--configuration=phpstan-boundaries.neon.dist --memory-limit=1G` to check those stricter contracts locally.
 
 Install the pinned quality toolchain with `bash scripts/ci/install_quality_tools.sh`. Versions and verified archive digests have one source in `scripts/ci/quality-tools.json`. Run documentation contracts with `php scripts/ci/check_documentation.php`; it checks current links and CLI flags and executes safe onboarding/verification examples. Historical release notes are excluded from current command-contract checks.
 

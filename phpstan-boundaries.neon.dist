@@ -8,6 +8,8 @@ parameters:
         - tools/wporg-updater/src/CoreContentOwnership.php
         - tools/wporg-updater/src/HttpRequestPolicy.php
         - tools/wporg-updater/src/FrameworkPayloadIdentity.php
+        - tools/wporg-updater/src/SupportForumScanLimits.php
+        - tools/wporg-updater/src/SupportForumScanResult.php
     bootstrapFiles:
         - tools/wporg-updater/src/Autoload.php
     tmpDir: .phpstan/boundaries

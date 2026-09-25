@@ -54,6 +54,8 @@ Managed dependencies are explicit. Folder presence alone never makes something u
 
 Dependency-source failures are isolated per managed dependency. If one plugin or theme source fails, `sync` still continues processing the remaining managed dependencies and reports the failed sources as warnings at the end of the run.
 
+Support-forum coverage is a separate advisory channel. Budget exhaustion or unavailable forum data does not block dependency PR creation or refresh. Reports retain explicit advisory warnings, PR bodies mark incomplete coverage, and the updater preserves prior topics and uncompleted coverage windows. Default stderr progress makes dependency work and crawl activity visible. See [bounded support-forum scanning](operations.md#bounded-support-forum-scanning).
+
 The recommended workflow pattern is:
 
 - run `sync --report-json=... --fail-on-source-errors`
