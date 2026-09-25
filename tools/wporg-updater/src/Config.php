@@ -19,7 +19,7 @@ final class Config
      * @param array{stage_dir:string, manifest_mode:string, validation_mode:string, ownership_roots:list<string>, staged_kinds:list<string>, validated_kinds:list<string>, forbidden_paths:list<string>, forbidden_files:list<string>, allow_runtime_paths:list<string>, strip_paths:list<string>, strip_files:list<string>, managed_sanitize_paths:list<string>, managed_sanitize_files:list<string>} $runtime
      * @param array{api_base:string} $github
      * @param array{api_base:string} $gitlab
-     * @param array{provider:string, api_base:string, base_branch:?string, dry_run:bool, managed_kinds:list<string>} $automation
+     * @param array{provider:string, api_base:string, base_branch:?string, dry_run:bool, managed_kinds:list<string>, support_forum?:array<string,int>} $automation
      * @param array{managed_release_min_age_hours:int, github_release_verification:string, extensions?:array<string,mixed>} $security
      * @param array<string,mixed> $extensions
      */
@@ -149,6 +149,23 @@ final class Config
     public function dryRun(): bool
     {
         return $this->automation['dry_run'];
+    }
+
+    /** Resolve scan budgets without persisting environment overrides in the manifest. */
+    public function supportForumScanLimits(): SupportForumScanLimits
+    {
+        $values = $this->automation['support_forum'] ?? [];
+        foreach (['max_pages', 'max_requests', 'max_topics', 'max_seconds', 'request_timeout_seconds'] as $key) {
+            $environment = getenv('WP_CORE_BASE_SUPPORT_FORUM_' . strtoupper($key));
+            if ($environment !== false) {
+                if (! ctype_digit($environment) || strlen($environment) > 9 || (int) $environment < 1) {
+                    throw new RuntimeException('WP_CORE_BASE_SUPPORT_FORUM_' . strtoupper($key) . ' must be a positive integer.');
+                }
+                $values[$key] = (int) $environment;
+            }
+        }
+
+        return self::supportForumLimitsFromArray($values);
     }
 
     public function githubApiBase(): string
@@ -706,7 +723,7 @@ final class Config
      * @param array<string, mixed> $value
      * @param array{api_base:string} $github
      * @param array{api_base:string} $gitlab
-     * @return array{provider:string, api_base:string, base_branch:?string, dry_run:bool, managed_kinds:list<string>}
+     * @return array{provider:string, api_base:string, base_branch:?string, dry_run:bool, managed_kinds:list<string>, support_forum?:array<string,int>}
      */
     private static function normalizeAutomation(array $value, array $github, array $gitlab): array
     {
@@ -723,7 +740,38 @@ final class Config
             'base_branch' => self::nullableString($value['base_branch'] ?? null),
             'dry_run' => (bool) ($value['dry_run'] ?? (bool) getenv('WPORG_UPDATE_DRY_RUN')),
             'managed_kinds' => self::kindList($value['managed_kinds'] ?? self::MANAGED_KINDS, 'automation.managed_kinds'),
+            ...(array_key_exists('support_forum', $value) ? ['support_forum' => self::normalizeSupportForum(self::arraySection($value, 'support_forum'))] : []),
         ];
+    }
+
+    /** @param array<string,mixed> $value
+     *  @return array<string,int>
+     */
+    private static function normalizeSupportForum(array $value): array
+    {
+        self::assertKnownKeys($value, ['max_pages', 'max_requests', 'max_topics', 'max_seconds', 'request_timeout_seconds'], 'automation.support_forum');
+        $normalized = [];
+        foreach ($value as $key => $limit) {
+            if (! is_int($limit) || $limit < 1) {
+                throw new RuntimeException('automation.support_forum.' . $key . ' must be a positive integer.');
+            }
+            $normalized[$key] = $limit;
+        }
+        self::supportForumLimitsFromArray($normalized);
+        return $normalized;
+    }
+
+    /** @param array<string,int> $value */
+    private static function supportForumLimitsFromArray(array $value): SupportForumScanLimits
+    {
+        $defaults = new SupportForumScanLimits();
+        return new SupportForumScanLimits(
+            maxPages: $value['max_pages'] ?? $defaults->maxPages,
+            maxRequests: $value['max_requests'] ?? $defaults->maxRequests,
+            maxTopics: $value['max_topics'] ?? $defaults->maxTopics,
+            maxSeconds: $value['max_seconds'] ?? $defaults->maxSeconds,
+            requestTimeoutSeconds: $value['request_timeout_seconds'] ?? $defaults->requestTimeoutSeconds,
+        );
     }
 
     /**

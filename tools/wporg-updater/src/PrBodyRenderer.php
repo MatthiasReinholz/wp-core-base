@@ -42,6 +42,11 @@ final class PrBodyRenderer
             static fn (array $topic): string => sprintf('- [%s](%s)', $topic['title'], $topic['url']),
             $supportTopics
         ));
+        if (($metadata['support_scan_complete'] ?? true) === false) {
+            $supportHeading = "Support scan incomplete; coverage of the release window is not established. " .
+                "Previously observed topics and support labels are retained and may include earlier release observations.\n\n" .
+                ($supportTopics === [] ? 'No topics are available from this partial scan; this does not establish that no new issues exist.' : $supportHeading);
+        }
         $provenanceRows = $this->provenanceRows($metadata);
         $reviewerWarning = $this->reviewerWarning($metadata);
         $automationNote = match ($metadata['source'] ?? '') {

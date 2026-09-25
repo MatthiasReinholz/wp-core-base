@@ -19,14 +19,16 @@ final class SyncReport
 
     /**
      * @param list<string> $fatalErrors
+     * @param list<string> $advisoryWarnings
      * @param list<string> $dependencyWarnings
      * @param list<array{component_key:string,target_version:string,trust_state:string,trust_details:string}> $dependencyTrustStates
      * @return array<string, mixed>
      */
-    public static function build(array $fatalErrors, array $dependencyWarnings, array $dependencyTrustStates = []): array
+    public static function build(array $fatalErrors, array $dependencyWarnings, array $dependencyTrustStates = [], array $advisoryWarnings = []): array
     {
         $fatalErrors = OutputRedactor::redactAll($fatalErrors);
         $dependencyWarnings = OutputRedactor::redactAll($dependencyWarnings);
+        $advisoryWarnings = OutputRedactor::redactAll($advisoryWarnings);
         $status = self::STATUS_SUCCESS;
 
         if ($fatalErrors !== []) {
@@ -43,6 +45,8 @@ final class SyncReport
             'warning_count' => count($dependencyWarnings),
             'fatal_error_count' => count($fatalErrors),
             'dependency_trust_states' => $dependencyTrustStates,
+            'advisory_warnings' => $advisoryWarnings,
+            'advisory_warning_count' => count($advisoryWarnings),
         ];
     }
 
@@ -89,6 +93,7 @@ final class SyncReport
         $fatalErrors = self::stringList($report['fatal_errors'] ?? []);
         $dependencyWarnings = self::stringList($report['dependency_warnings'] ?? []);
         $dependencyTrustStates = is_array($report['dependency_trust_states'] ?? null) ? $report['dependency_trust_states'] : [];
+        $advisoryWarnings = self::stringList($report['advisory_warnings'] ?? []);
         $generatedAt = (string) ($report['generated_at'] ?? '');
 
         $lines = [
@@ -97,10 +102,22 @@ final class SyncReport
             sprintf('- Status: `%s`', $status),
             sprintf('- Generated at: `%s`', $generatedAt === '' ? 'unknown' : $generatedAt),
             sprintf('- Dependency source warnings: `%d`', count($dependencyWarnings)),
+            sprintf('- Advisory support warnings: `%d`', count($advisoryWarnings)),
             sprintf('- Fatal errors: `%d`', count($fatalErrors)),
             sprintf('- Trust records: `%d`', count($dependencyTrustStates)),
             '',
         ];
+
+        if ($advisoryWarnings !== []) {
+            $lines[] = '### Advisory Support Warnings';
+            $lines[] = '';
+            $lines[] = 'Dependency updates can succeed while support coverage remains incomplete.';
+            $lines[] = '';
+            foreach ($advisoryWarnings as $warning) {
+                $lines[] = '- ' . $warning;
+            }
+            $lines[] = '';
+        }
 
         if ($dependencyWarnings !== []) {
             $lines[] = '### Dependency Source Warnings';

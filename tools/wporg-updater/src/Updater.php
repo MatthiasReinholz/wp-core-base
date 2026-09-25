@@ -15,6 +15,8 @@ final class Updater
 
     /** @var array<string, DependencyTrustRecord> */
     private array $lastRunTrustStates = [];
+    /** @var list<string> */
+    private array $lastRunAdvisoryWarnings = [];
     private readonly ManagedPullRequestBranchCleaner $branchCleaner;
 
     public function __construct(
@@ -43,6 +45,7 @@ final class Updater
     public function sync(): array
     {
         $this->lastRunTrustStates = [];
+        $this->lastRunAdvisoryWarnings = [];
         $this->gitRunner->assertCleanWorktree();
         $defaultBranch = $this->config->baseBranch() ?? $this->automationClient->getDefaultBranch();
         $baseRevision = $this->gitRunner->remoteRevision($defaultBranch);
@@ -51,11 +54,19 @@ final class Updater
         $errors = [];
 
         foreach ($this->config->managedDependencies() as $dependency) {
+            $componentKey = (string) $dependency['component_key'];
+            $startedAt = microtime(true);
+            $failed = false;
+            StructuredLogger::progress('dependency-sync', sprintf('Starting dependency sync: %s.', $componentKey), $componentKey);
             try {
                 $this->syncDependency($dependency, $openPrs[$dependency['component_key']] ?? [], $defaultBranch, $baseRevision);
             } catch (\Throwable $throwable) {
+                $failed = true;
                 $errors[] = OutputRedactor::redact(sprintf('%s: %s', $dependency['component_key'], $throwable->getMessage()));
                 fwrite(STDERR, sprintf("[warn] %s\n", end($errors)));
+            } finally {
+                StructuredLogger::progress('dependency-sync', sprintf('Dependency sync %s: %s (%.1fs).',
+                    $failed ? 'failed' : 'completed', $componentKey, microtime(true) - $startedAt), $componentKey);
             }
         }
 
@@ -67,6 +78,12 @@ final class Updater
         }
 
         return $errors;
+    }
+
+    /** @return list<string> Advisory support coverage warnings; dependency updates can still succeed. */
+    public function lastRunAdvisoryWarnings(): array
+    {
+        return array_values(array_unique($this->lastRunAdvisoryWarnings));
     }
 
     /**
@@ -338,6 +355,7 @@ final class Updater
 
             $releaseData = $this->normalizedReleaseData($releaseData, $targetVersion);
             $labels = $this->deriveDependencyLabels($dependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
+            $labels = $this->preserveIncompleteSupportLabels($labels, $plannedPr, $metadata);
 
             $metadata['base_branch'] = $defaultBranch;
             $metadata['base_version'] = $dependencyState['version'];
@@ -350,7 +368,6 @@ final class Updater
             $metadata['provider'] = PremiumSourceResolver::providerForDependency($dependency);
             $metadata['component_key'] = $dependency['component_key'];
             $metadata['blocked_by'] = $blockedBy;
-            $metadata['support_synced_at'] = gmdate(DATE_ATOM);
             $metadata['updated_at'] = gmdate(DATE_ATOM);
             $metadata['trust_state'] = (string) ($releaseData['trust_state'] ?? DependencyTrustState::METADATA_ONLY);
             $metadata['trust_details'] = (string) ($releaseData['trust_details'] ?? 'Archive authenticity was not independently verified.');
@@ -442,7 +459,8 @@ final class Updater
                 return;
             }
 
-            $supportTopics = $this->supportTopicsForNewPullRequest($updatedDependency, new DateTimeImmutable($latestReleaseAt));
+            $supportMetadata = [];
+            $supportTopics = $this->supportTopicsForNewPullRequest($updatedDependency, new DateTimeImmutable($latestReleaseAt), $supportMetadata);
             $labels = $this->deriveDependencyLabels($updatedDependency, $scope, (string) $releaseData['notes_text'], $supportTopics, $blockedBy);
             $metadata = [
                 'kind' => $updatedDependency['kind'],
@@ -459,7 +477,7 @@ final class Updater
                 'scope' => $scope,
                 'release_at' => $latestReleaseAt,
                 'blocked_by' => $blockedBy,
-                'support_synced_at' => gmdate(DATE_ATOM),
+                ...$supportMetadata,
                 'updated_at' => gmdate(DATE_ATOM),
                 'trust_state' => (string) ($releaseData['trust_state'] ?? DependencyTrustState::METADATA_ONLY),
                 'trust_details' => (string) ($releaseData['trust_details'] ?? 'Archive authenticity was not independently verified.'),
@@ -902,7 +920,7 @@ final class Updater
         array $dependency,
         DateTimeImmutable $releaseAt,
         array $pullRequest,
-        array $metadata,
+        array &$metadata,
         bool $forceFullWindow = false,
     ): array {
         if (! $this->supportsForumSync($dependency)) {
@@ -910,36 +928,98 @@ final class Updater
         }
 
         $existingTopics = PrBodyRenderer::extractSupportTopics((string) ($pullRequest['body'] ?? ''));
-        $lastSyncAt = $forceFullWindow
+        // New, retargeted, or unverified incomplete scans must retry the release
+        // window. Verified incremental scans keep their last successful boundary.
+        $lastSyncAt = $forceFullWindow || ($metadata['support_scan_full_window_pending'] ?? false) === true
             ? null
-            : ($metadata['support_synced_at'] ?? $metadata['updated_at'] ?? $metadata['release_at'] ?? null);
-        $incrementalWindow = is_string($lastSyncAt) && $lastSyncAt !== '' ? new DateTimeImmutable($lastSyncAt) : null;
-        $newTopics = $this->supportForumClient->fetchTopicsOpenedAfter(
-            (string) $dependency['slug'],
-            $releaseAt,
-            $incrementalWindow,
-            null,
-        );
+            : ($metadata['support_synced_at'] ?? null);
+        $incrementalWindow = null;
+        if (is_string($lastSyncAt) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/D', $lastSyncAt) === 1) {
+            $candidate = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:sP', $lastSyncAt);
+            $dateErrors = DateTimeImmutable::getLastErrors();
+            if ($candidate instanceof DateTimeImmutable && ($dateErrors === false || ($dateErrors['warning_count'] === 0 && $dateErrors['error_count'] === 0))
+                && $candidate <= new DateTimeImmutable('now')) {
+                $incrementalWindow = $candidate;
+            }
+        }
+        $newTopics = $this->scanSupportTopics($dependency, $releaseAt, $incrementalWindow, $metadata);
 
         return $this->mergeSupportTopics($existingTopics, $newTopics);
     }
 
     /**
      * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $metadata
      * @return list<array{title:string, url:string, opened_at:string}>
      */
-    private function supportTopicsForNewPullRequest(array $dependency, DateTimeImmutable $releaseAt): array
+    private function supportTopicsForNewPullRequest(array $dependency, DateTimeImmutable $releaseAt, array &$metadata): array
     {
-        if (! $this->supportsForumSync($dependency)) {
-            return [];
+        return $this->supportsForumSync($dependency)
+            ? $this->scanSupportTopics($dependency, $releaseAt, null, $metadata)
+            : [];
+    }
+
+    /**
+     * @param array<string, mixed> $dependency
+     * @param array<string, mixed> $metadata
+     * @return list<array{title:string, url:string, opened_at:string}>
+     */
+    private function scanSupportTopics(array $dependency, DateTimeImmutable $releaseAt, ?DateTimeImmutable $windowStart, array &$metadata): array
+    {
+        // Forum timestamps have second precision. Overlap one second and dedupe
+        // by topic URL so arrivals during the starting second are not skipped.
+        $startedAt = gmdate(DATE_ATOM, time() - 1);
+        $topics = [];
+        $complete = false;
+        try {
+            $scan = $this->supportForumClient->scanTopicsOpenedAfter((string) $dependency['slug'], $releaseAt, $windowStart);
+            $topics = $scan->topics;
+            $complete = $scan->complete;
+            $warning = $scan->warning ?? 'Support coverage could not be completed within the configured scan budget.';
+        } catch (\Throwable $throwable) {
+            $warning = $throwable->getMessage();
+        }
+        $metadata['support_scan_complete'] = $complete;
+        if ($complete) {
+            // Topics created while scanning remain eligible at the next sync.
+            $metadata['support_synced_at'] = $startedAt;
+            unset($metadata['support_scan_full_window_pending'], $metadata['support_scan_warning']);
+        } else {
+            $warning = OutputRedactor::redact((string) $dependency['component_key'] . ': Advisory support scan incomplete: ' . $warning);
+            if ($windowStart === null || ! is_string($metadata['support_synced_at'] ?? null) || $metadata['support_synced_at'] === '') {
+                $metadata['support_scan_full_window_pending'] = true;
+            } else {
+                // Retry the same verified incremental boundary after a transient
+                // failure; older release history may exceed the bounded budget.
+                unset($metadata['support_scan_full_window_pending']);
+            }
+            $metadata['support_scan_warning'] = $warning;
+            $this->lastRunAdvisoryWarnings[] = $warning;
+            fwrite(STDERR, '[warn] ' . $warning . "\n");
         }
 
-        return $this->supportForumClient->fetchTopicsOpenedAfter(
-            (string) $dependency['slug'],
-            $releaseAt,
-            null,
-            null,
-        );
+        return $topics;
+    }
+
+    /** @param list<string> $labels
+     *  @param array<string,mixed> $pullRequest
+     *  @param array<string,mixed> $metadata
+     *  @return list<string>
+     */
+    private function preserveIncompleteSupportLabels(array $labels, array $pullRequest, array $metadata): array
+    {
+        if (($metadata['support_scan_complete'] ?? true) !== false) {
+            return $labels;
+        }
+        foreach ((array) ($pullRequest['labels'] ?? []) as $label) {
+            $name = is_array($label) ? (string) ($label['name'] ?? '') : (string) $label;
+            if (in_array($name, ['support:new-topics', 'support:regression-signal'], true)) {
+                $labels[] = $name;
+            }
+        }
+        $labels = LabelHelper::normalizeList($labels);
+        sort($labels);
+        return $labels;
     }
 
     /**

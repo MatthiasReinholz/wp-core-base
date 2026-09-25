@@ -137,6 +137,7 @@ Keys:
 - `base_branch`
 - `dry_run`
 - `managed_kinds`
+- `support_forum` (optional advisory scan limits)
 
 `provider` may be:
 
@@ -151,6 +152,22 @@ Examples:
 - GitLab.com: `getenv('CI_API_V4_URL') ?: 'https://gitlab.com/api/v4'`
 
 `managed_kinds` limits what `sync` may update. A dependency must be both `management: managed` and listed in `automation.managed_kinds` before the updater will touch it.
+
+### Support-forum limits
+
+`automation.support_forum` optionally configures advisory WordPress.org plugin support scans. Omitted values use bounded defaults:
+
+| Key | Default | Allowed range | Environment override |
+| --- | --- | --- | --- |
+| `max_pages` | 10 | 1–100 | `WP_CORE_BASE_SUPPORT_FORUM_MAX_PAGES` |
+| `max_requests` | 100 | 1–1000 | `WP_CORE_BASE_SUPPORT_FORUM_MAX_REQUESTS` |
+| `max_topics` | 75 | 1–1000 | `WP_CORE_BASE_SUPPORT_FORUM_MAX_TOPICS` |
+| `max_seconds` | 30 | 1–300 | `WP_CORE_BASE_SUPPORT_FORUM_MAX_SECONDS` |
+| `request_timeout_seconds` | 10 | 1–30 | `WP_CORE_BASE_SUPPORT_FORUM_REQUEST_TIMEOUT_SECONDS` |
+
+All values must be positive integers. Environment overrides affect the current process and are not written into the manifest. Limits are shared per plugin slug across that client's sync run, including multiple queued PR versions. The elapsed allowance counts active scanning, not unrelated dependency download time; it is not a deadline for the entire update run.
+
+RSS is checked first. Fallback listing pages and topic-detail requests consume the shared budget; duplicate topic URLs are skipped within each scan. Requests do not follow redirects or sleep for retries, and their timeout is bounded by the remaining scan allowance. Exhaustion or unavailable forum data produces an explicit advisory, preserving prior topics and coverage metadata while dependency updates continue. See [support-forum operations](operations.md#bounded-support-forum-scanning) for incomplete coverage and report semantics.
 
 ## `security`
 

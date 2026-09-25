@@ -59,13 +59,19 @@ final class SyncModeHandler implements CliModeHandler
 
         $automationClient = AutomationClientFactory::fromEnvironment($this->config, $this->httpClient);
         $runtimeInspector = new RuntimeInspector($this->config->runtime);
+        $supportLimits = $this->config->supportForumScanLimits();
         $dependencyUpdater = new Updater(
             config: $this->config,
             dependencyScanner: new DependencyScanner(),
             wordPressOrgClient: new WordPressOrgClient($this->httpClient),
             gitHubReleaseClient: new GitHubReleaseClient($this->httpClient, $this->config->githubApiBase()),
             managedSourceRegistry: $this->managedSourceRegistry,
-            supportForumClient: new SupportForumClient($this->httpClient, 100),
+            supportForumClient: new SupportForumClient(
+                $this->httpClient,
+                $supportLimits->maxPages,
+                $supportLimits,
+                static fn (string $message) => StructuredLogger::progress('support-scan', $message),
+            ),
             releaseClassifier: new ReleaseClassifier(),
             prBodyRenderer: new PrBodyRenderer(),
             automationClient: $automationClient,
@@ -124,6 +130,7 @@ final class SyncModeHandler implements CliModeHandler
             fatalErrors: $errors,
             dependencyWarnings: $dependencyWarnings,
             dependencyTrustStates: $dependencyUpdater->lastRunTrustStates(),
+            advisoryWarnings: $dependencyUpdater->lastRunAdvisoryWarnings(),
         );
 
         if ($reportPath !== null && trim($reportPath) !== '') {
@@ -149,7 +156,7 @@ final class SyncModeHandler implements CliModeHandler
 
             if ($failOnSourceErrors) {
                 StructuredLogger::log('error', 'sync', 'Failing sync due to --fail-on-source-errors.', startedAt: $operationStartedAt);
-                return SyncReport::EXIT_SOURCE_WARNINGS;
+                return $syncResult->exitCode($failOnSourceErrors);
             }
         }
 
@@ -164,7 +171,7 @@ final class SyncModeHandler implements CliModeHandler
             ]
         );
 
-        return 0;
+        return $syncResult->exitCode($failOnSourceErrors);
     }
 
     private function cleanupStaleTemporaryDirectories(): void

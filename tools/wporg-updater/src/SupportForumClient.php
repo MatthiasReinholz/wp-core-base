@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace WpOrgPluginUpdater;
 
+use Closure;
 use DateTimeImmutable;
 use DOMDocument;
 use DOMXPath;
+use Exception;
 use RuntimeException;
 use SimpleXMLElement;
 
@@ -15,10 +17,35 @@ final class SupportForumClient
     private const MAX_FEED_BYTES = 2 * 1024 * 1024;
     private const MAX_PAGE_BYTES = 3 * 1024 * 1024;
 
+    private readonly SupportForumScanLimits $limits;
+    private readonly int $maxPages;
+    /** @var Closure(string,array<string,mixed>):string */
+    private readonly Closure $request;
+    /** @var Closure():float */
+    private readonly Closure $clock;
+    /** @var array<string,array{requests:int,pages:int,topics:int,elapsed:float}> */
+    private array $spentBySlug = [];
+
+    /**
+     * @param Closure(string):void|null $progress
+     * @param Closure(string,array<string,mixed>):string|null $request Optional transport seam; production uses HttpClient.
+     * @param Closure():float|null $clock Optional monotonic clock seam, in seconds.
+     */
     public function __construct(
-        private readonly HttpClient $httpClient,
-        private readonly int $maxPages,
+        HttpClient $httpClient,
+        int $maxPages,
+        ?SupportForumScanLimits $limits = null,
+        private readonly ?Closure $progress = null,
+        ?Closure $request = null,
+        ?Closure $clock = null,
     ) {
+        $this->limits = $limits ?? new SupportForumScanLimits(maxPages: $maxPages);
+        if ($maxPages < 1 || $maxPages > 100) {
+            throw new RuntimeException('Support forum max_pages must be between 1 and 100.');
+        }
+        $this->maxPages = min($maxPages, $this->limits->maxPages);
+        $this->request = $request ?? static fn (string $url, array $options): string => $httpClient->getWithOptions($url, [], $options);
+        $this->clock = $clock ?? static fn (): float => hrtime(true) / 1_000_000_000;
     }
 
     /**
@@ -31,46 +58,60 @@ final class SupportForumClient
         ?int $maxPages = null,
     ): array
     {
+        $result = $this->scanTopicsOpenedAfter($slug, $releaseAt, $windowStart, $maxPages);
+        if (! $result->complete) {
+            throw new RuntimeException($result->warning ?? 'Support forum scan is incomplete.');
+        }
+        return $result->topics;
+    }
+
+    public function scanTopicsOpenedAfter(
+        string $slug,
+        DateTimeImmutable $releaseAt,
+        ?DateTimeImmutable $windowStart = null,
+        ?int $maxPages = null,
+    ): SupportForumScanResult {
+        WordPressOrgSlugValidator::assertValid($slug);
+        if ($maxPages !== null && ($maxPages < 1 || $maxPages > 100)) {
+            throw new RuntimeException('Support forum max_pages must be between 1 and 100.');
+        }
+        $pageLimit = min($this->maxPages, $maxPages ?? $this->maxPages);
+        $this->spentBySlug[$slug] ??= ['requests' => 0, 'pages' => 0, 'topics' => 0, 'elapsed' => 0.0];
+        $budget = &$this->spentBySlug[$slug];
+        $before = $budget;
+        $started = ($this->clock)();
+        $scanStartedAt = (new DateTimeImmutable())->format(DATE_ATOM);
+        $deadline = $started + max(0, $this->limits->maxSeconds - $budget['elapsed']);
         $windowStart = $windowStart === null || $windowStart < $releaseAt ? $releaseAt : $windowStart;
         $topics = [];
-        $feedItems = $this->parseFeed($this->httpClient->getWithOptions($this->feedUrl($slug), [], [
-            'max_body_bytes' => self::MAX_FEED_BYTES,
-            'allowed_redirect_hosts' => ['wordpress.org'],
-        ]));
-
-        foreach ($feedItems as $item) {
-            $openedAt = new DateTimeImmutable($item['opened_at']);
-
-            if ($openedAt > $windowStart) {
-                $topics[$item['url']] = $item;
+        $complete = false;
+        $warning = null;
+        try {
+            $feedItems = $this->parseFeed($this->fetch($slug, $this->feedUrl($slug), 'feed', $budget, $deadline, $pageLimit));
+            foreach ($feedItems as $item) {
+                $this->assertTimeRemaining($deadline);
+                if (new DateTimeImmutable($item['opened_at']) > $windowStart) {
+                    $topics[$item['url']] = $item;
+                }
             }
-        }
-
-        if ($this->feedCoversReleaseWindow($feedItems, $windowStart)) {
-            return $this->sortTopics($topics);
-        }
-
-        foreach ($this->crawlSupportPages($slug, $maxPages ?? $this->maxPages) as $listing) {
-            if (isset($topics[$listing['url']])) {
-                continue;
+            if (! $this->feedCoversReleaseWindow($feedItems, $windowStart)) {
+                $this->crawlSupportPages($slug, $windowStart, $topics, $budget, $deadline, $pageLimit);
             }
-
-            $topicHtml = $this->httpClient->getWithOptions($listing['url'], [], [
-                'max_body_bytes' => self::MAX_PAGE_BYTES,
-                'allowed_redirect_hosts' => ['wordpress.org'],
-            ]);
-            $openedAt = $this->extractTopicPublishedAt($topicHtml);
-
-            if ($openedAt > $windowStart) {
-                $topics[$listing['url']] = [
-                    'title' => $listing['title'],
-                    'url' => $listing['url'],
-                    'opened_at' => $openedAt->format(DATE_ATOM),
-                ];
-            }
+            $this->assertTimeRemaining($deadline);
+            $complete = true;
+        } catch (Exception $exception) {
+            $warning = OutputRedactor::redact(sprintf('Support scan for %s is incomplete: %s', $slug, $exception->getMessage()));
+        } finally {
+            $elapsed = max(0.0, ($this->clock)() - $started);
+            $budget['elapsed'] += $elapsed;
         }
-
-        return $this->sortTopics($topics);
+        $result = new SupportForumScanResult($this->sortTopics($topics), $complete, $warning,
+            $budget['requests'] - $before['requests'], $budget['pages'] - $before['pages'], $budget['topics'] - $before['topics'],
+            $elapsed, $scanStartedAt);
+        $this->reportProgress(sprintf('Support scan %s: %s; %d requests, %d listing pages, %d topic pages, %.1fs active time (%.1fs/%ds per-plugin budget).',
+            $slug, $complete ? 'complete' : 'incomplete', $result->requests, $result->pages, $result->topicsChecked,
+            $elapsed, $budget['elapsed'], $this->limits->maxSeconds));
+        return $result;
     }
 
     /**
@@ -78,9 +119,9 @@ final class SupportForumClient
      */
     public function parseFeed(string $xml): array
     {
-        $feed = simplexml_load_string($xml, SimpleXMLElement::class, LIBXML_NONET);
+        $feed = @simplexml_load_string($xml, SimpleXMLElement::class, LIBXML_NONET);
 
-        if (! $feed instanceof SimpleXMLElement) {
+        if (! $feed instanceof SimpleXMLElement || $feed->getName() !== 'rss' || ! isset($feed->channel)) {
             throw new RuntimeException('Failed to parse support feed XML.');
         }
 
@@ -92,7 +133,7 @@ final class SupportForumClient
             $pubDate = trim((string) $item->pubDate);
 
             if ($title === '' || $url === '' || $pubDate === '') {
-                continue;
+                throw new RuntimeException('Support feed contains an item without a title, topic URL or published timestamp.');
             }
 
             $items[] = [
@@ -110,8 +151,11 @@ final class SupportForumClient
      */
     public function parseSupportListing(string $html): array
     {
+        if (trim($html) === '') {
+            throw new RuntimeException('Support listing response is empty.');
+        }
         $document = new DOMDocument('1.0', 'UTF-8');
-        @$document->loadHTML($html);
+        @$document->loadHTML($html, LIBXML_NONET);
 
         $xpath = new DOMXPath($document);
         $links = $xpath->query('//a[contains(@class, "bbp-topic-permalink")]');
@@ -141,69 +185,141 @@ final class SupportForumClient
 
     public function extractTopicPublishedAt(string $html): DateTimeImmutable
     {
+        if (trim($html) === '') {
+            throw new RuntimeException('Support topic response is empty.');
+        }
         $document = new DOMDocument('1.0', 'UTF-8');
-        @$document->loadHTML($html);
+        @$document->loadHTML($html, LIBXML_NONET);
 
         $xpath = new DOMXPath($document);
         $published = $xpath->query('//meta[@property="article:published_time"]/@content');
 
         if ($published !== false && $published->length > 0) {
-            return new DateTimeImmutable(trim((string) $published->item(0)?->nodeValue));
+            $value = trim((string) $published->item(0)?->nodeValue);
+            if ($value !== '') {
+                return new DateTimeImmutable($value);
+            }
         }
 
         $fallback = $xpath->query('//p[contains(@class, "bbp-topic-post-date")]/a/@title');
 
         if ($fallback !== false && $fallback->length > 0) {
-            return new DateTimeImmutable(trim((string) $fallback->item(0)?->nodeValue));
+            $value = trim((string) $fallback->item(0)?->nodeValue);
+            if ($value !== '') {
+                return new DateTimeImmutable($value);
+            }
         }
 
         throw new RuntimeException('Could not determine topic published time.');
     }
 
     /**
-     * @return list<array{title:string, url:string}>
+     * @param array<string,array{title:string,url:string,opened_at:string}> $topics
+     * @param array{requests:int,pages:int,topics:int,elapsed:float} $budget
      */
-    private function crawlSupportPages(string $slug, int $maxPages): array
+    private function crawlSupportPages(string $slug, DateTimeImmutable $windowStart, array &$topics, array &$budget, float $deadline, int $maxPages): void
     {
-        $firstPageHtml = $this->httpClient->getWithOptions($this->supportUrl($slug), [], [
-            'max_body_bytes' => self::MAX_PAGE_BYTES,
-            'allowed_redirect_hosts' => ['wordpress.org'],
-        ]);
+        $remainingPages = $maxPages - $budget['pages'];
+        $firstPageHtml = $this->fetch($slug, $this->supportUrl($slug), 'listing', $budget, $deadline, $maxPages);
         $pageCount = $this->extractPageCount($firstPageHtml);
 
-        if ($pageCount > $maxPages) {
+        if ($pageCount > $remainingPages) {
             throw new RuntimeException(sprintf(
-                'Support forum for %s spans %d pages, which exceeds the configured limit of %d.',
+                'Support forum for %s spans %d pages, which exceeds the remaining page budget of %d (configured limit %d).',
                 $slug,
                 $pageCount,
+                $remainingPages,
                 $maxPages
             ));
         }
 
-        $topics = [];
-
-        foreach ($this->parseSupportListing($firstPageHtml) as $topic) {
-            $topics[$topic['url']] = $topic;
-        }
-
-        for ($page = 2; $page <= $pageCount; $page++) {
-            $html = $this->httpClient->getWithOptions($this->supportUrl($slug) . 'page/' . $page . '/', [], [
-                'max_body_bytes' => self::MAX_PAGE_BYTES,
-                'allowed_redirect_hosts' => ['wordpress.org'],
-            ]);
-
-            foreach ($this->parseSupportListing($html) as $topic) {
-                $topics[$topic['url']] = $topic;
+        $seen = array_fill_keys(array_keys($topics), true);
+        for ($page = 1; $page <= $pageCount; $page++) {
+            $this->reportProgress(sprintf('Support scan %s: processing listing page %d/%d.', $slug, $page, $pageCount));
+            $html = $page === 1 ? $firstPageHtml : $this->fetch($slug, $this->supportUrl($slug) . 'page/' . $page . '/', 'listing', $budget, $deadline, $maxPages);
+            $listings = $this->parseSupportListing($html);
+            if ($listings === []) {
+                // An HTML challenge or changed selector is not proof that the
+                // forum has no topics. Preserve the previous coverage window.
+                throw new RuntimeException('Support listing did not contain recognizable topics; coverage could not be established.');
+            }
+            foreach ($listings as $topic) {
+                $this->assertTimeRemaining($deadline);
+                if (isset($seen[$topic['url']])) {
+                    continue;
+                }
+                $seen[$topic['url']] = true;
+                $topicHtml = $this->fetch($slug, $topic['url'], 'topic', $budget, $deadline, $maxPages);
+                $openedAt = $this->extractTopicPublishedAt($topicHtml);
+                if ($openedAt > $windowStart) {
+                    $topics[$topic['url']] = ['title' => $topic['title'], 'url' => $topic['url'], 'opened_at' => $openedAt->format(DATE_ATOM)];
+                }
             }
         }
+    }
 
-        return array_values($topics);
+    /** @param array{requests:int,pages:int,topics:int,elapsed:float} $budget */
+    private function fetch(string $slug, string $url, string $kind, array &$budget, float $deadline, int $maxPages): string
+    {
+        $this->assertTimeRemaining($deadline);
+        if ($budget['requests'] >= $this->limits->maxRequests) {
+            throw new RuntimeException(sprintf('Request budget of %d is exhausted.', $this->limits->maxRequests));
+        }
+        if ($kind === 'listing' && $budget['pages'] >= $maxPages) {
+            throw new RuntimeException(sprintf('Listing page budget of %d is exhausted.', $maxPages));
+        }
+        if ($kind === 'topic' && $budget['topics'] >= $this->limits->maxTopics) {
+            throw new RuntimeException(sprintf('Topic page budget of %d is exhausted.', $this->limits->maxTopics));
+        }
+        $this->reportProgress(sprintf('Support scan %s: requesting %s (%d/%d requests used).', $slug, $kind, $budget['requests'], $this->limits->maxRequests));
+        // One attempt and no redirects ensure cURL's timeout bounds the entire
+        // request; Retry-After and per-hop timeouts cannot multiply the budget.
+        $timeout = min($this->limits->requestTimeoutSeconds, (int) floor($deadline - ($this->clock)()));
+        if ($timeout < 1) {
+            throw new RuntimeException(sprintf('Active scan time budget of %d seconds is exhausted.', $this->limits->maxSeconds));
+        }
+        ++$budget['requests'];
+        if ($kind === 'listing') {
+            ++$budget['pages'];
+        } elseif ($kind === 'topic') {
+            ++$budget['topics'];
+        }
+        $body = ($this->request)($url, [
+            'max_body_bytes' => $kind === 'feed' ? self::MAX_FEED_BYTES : self::MAX_PAGE_BYTES,
+            'allowed_redirect_hosts' => ['wordpress.org'],
+            'retry_attempts' => 1,
+            'retry_initial_delay_milliseconds' => 0,
+            'follow_redirects' => false,
+            'max_redirects' => 0,
+            'timeout_seconds' => $timeout,
+            'connect_timeout_seconds' => min(5, $timeout),
+        ]);
+        $this->assertTimeRemaining($deadline);
+        $this->reportProgress(sprintf('Support scan %s: received %s (%d/%d requests used).', $slug, $kind, $budget['requests'], $this->limits->maxRequests));
+        return $body;
+    }
+
+    private function assertTimeRemaining(float $deadline): void
+    {
+        if (($this->clock)() >= $deadline) {
+            throw new RuntimeException(sprintf('Active scan time budget of %d seconds is exhausted.', $this->limits->maxSeconds));
+        }
+    }
+
+    private function reportProgress(string $message): void
+    {
+        if ($this->progress !== null) {
+            ($this->progress)($message);
+        }
     }
 
     private function extractPageCount(string $html): int
     {
+        if (trim($html) === '') {
+            throw new RuntimeException('Support listing response is empty.');
+        }
         $document = new DOMDocument('1.0', 'UTF-8');
-        @$document->loadHTML($html);
+        @$document->loadHTML($html, LIBXML_NONET);
 
         $xpath = new DOMXPath($document);
         $nodes = $xpath->query('//div[contains(@class, "bbp-pagination-links")]//a[contains(@class, "page-numbers")]');

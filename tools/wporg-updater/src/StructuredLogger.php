@@ -48,6 +48,18 @@ final class StructuredLogger
         fwrite(STDERR, json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n");
     }
 
+    /** Progress remains visible with the default logging settings and never uses stdout. */
+    public static function progress(string $operation, string $message, ?string $componentKey = null): void
+    {
+        $message = OutputRedactor::redact($message);
+        $componentKey = $componentKey === null ? null : OutputRedactor::redact($componentKey);
+        if (self::jsonLogsEnabled()) {
+            self::log('info', $operation, $message, $componentKey);
+            return;
+        }
+        fwrite(STDERR, '[info] ' . $message . "\n");
+    }
+
     private static function jsonLogsEnabled(): bool
     {
         $value = getenv('WP_CORE_BASE_JSON_LOGS');

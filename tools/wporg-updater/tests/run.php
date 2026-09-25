@@ -75,6 +75,8 @@ $suites = new SuiteRunner(__DIR__ . '/integration', [
     'config_runtime_contracts.php' => 'run_config_runtime_contract_tests',
     'configuration_planning_contracts.php' => 'run_configuration_planning_contract_tests',
     'test_runner_contracts.php' => 'run_test_runner_contract_tests',
+    'support_forum_scan_contracts.php' => 'run_support_forum_scan_contract_tests',
+    'support_scan_contracts.php' => 'run_support_scan_contract_tests',
     'security_framework_contracts.php' => 'run_security_framework_contract_tests',
     'security_policy_contracts.php' => 'run_security_policy_contract_tests',
     'dependency_authoring_contracts.php' => 'run_dependency_authoring_contract_tests',
@@ -3001,5 +3003,7 @@ $suites->run('dependency_recovery_contracts.php', static fn () => run_dependency
 $suites->run('http_security_contracts.php', static fn () => run_http_security_contract_tests($assert, $repoRoot));
 $suites->run('configuration_planning_contracts.php', static fn () => run_configuration_planning_contract_tests($assert, $repoRoot));
 $suites->run('test_runner_contracts.php', static fn () => run_test_runner_contract_tests($assert, $repoRoot));
+$suites->run('support_forum_scan_contracts.php', static fn () => run_support_forum_scan_contract_tests($assert, $repoRoot));
+$suites->run('support_scan_contracts.php', static fn () => run_support_scan_contract_tests($assert));
 $suites->complete();
 fwrite(STDOUT, "All updater tests passed.\n");

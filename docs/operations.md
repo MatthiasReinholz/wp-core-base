@@ -159,6 +159,18 @@ For framework update PRs, pay attention to:
 
 Framework update PRs are separate from dependency and core PRs. They update the vendored framework snapshot and `.wp-core-base/framework.php`, not your runtime dependency manifest.
 
+## Bounded Support-Forum Scanning
+
+WordPress.org plugin support topics are advisory context for update reviews. They do not determine archive trust or whether a dependency update may proceed. Sync prints dependency and forum progress to stderr by default; `WP_CORE_BASE_JSON_LOGS=1` selects structured progress records. Machine-readable report output remains separate.
+
+The RSS fast path avoids historical crawling when it covers the requested release window. Fallback scanning has shared per-plugin limits across queued PR versions: 10 listing pages, 100 HTTP requests, 75 topic-detail requests (deduplicated within each scan) and 30 seconds of active scanning by default. Each request is limited to 10 seconds or the remaining scan allowance, whichever is smaller, with no redirect following or retry sleeping. Configure `automation.support_forum` or its [environment overrides](manifest-reference.md#support-forum-limits) only when the extra coverage justifies the runner cost.
+
+If the budget ends or a forum response is unavailable, the updater still creates or refreshes the dependency PR. Its body explicitly says forum coverage is incomplete, retaining previously observed topics and support labels. It does not advance the support watermark past unfinished coverage; a completed scan records its start time with a one-second overlap so topics arriving during scanning, including in the same timestamp-second, remain eligible next time. A changed target release is reviewed from that release's own window.
+
+The sync report adds `advisory_warnings` and `advisory_warning_count`, shown in a dedicated summary section. Advisory-only runs retain `status: success` and do not trigger `--fail-on-source-errors` or a dependency-source failure issue. Genuine source failures retain their existing warning status and exit code 3 under that flag; fatal failures remain fatal. A successful update run with an advisory does not mean forum coverage is complete.
+
+Completed incremental coverage resumes from its previous successful watermark after a transient failure. Initial scans, changed releases, or missing coverage metadata retain the full pending release window. Incomplete historical windows are retried on later runs; this is bounded scanning, not resumable cross-run history storage. A large forum can therefore remain advisory until RSS coverage or an explicitly increased budget is sufficient. Inspect the forum manually if that evidence matters to a particular release, without delaying unrelated healthy dependency updates.
+
 ## Framework Upgrade Preflight
 
 Before merging or auto-merging a framework update:
@@ -306,4 +318,6 @@ Trigger conditions for implementation:
 
 1. routine sync workload exceeds 100 managed dependencies, or
 2. repeated 429/timeout incidents persist after existing `Retry-After` handling, or
-3. support-topic crawling becomes a material share of end-to-end sync time.
+3. support-topic coverage remains materially insufficient after the bounded per-plugin scan policy, and measured repeat work justifies a versioned cross-run cache.
+
+The incident tracked in issue #76 is addressed by bounded scans and visible progress. These limits do not require a persistent cache or proactive pacing.
