@@ -119,6 +119,8 @@ Required keys:
 - `latest_version` as a non-empty string
 - `latest_release_at` as an ISO-8601 timestamp string
 
+Timestamps must include an explicit timezone (`Z`, `+02:30` or compact `+0230`). Extended date/time forms accept minute or second precision, with optional fractional seconds when seconds are present; basic forms such as `20260925T101500Z` are also accepted. PHP `DateTime::ISO8601` output remains compatible. Invalid dates, time or offset fields, timezone-free values and natural-language expressions are rejected. The same rules apply to `release_at` below.
+
 Optional keys:
 
 - any provider-specific payload you want to carry forward into `releaseDataForVersion()`

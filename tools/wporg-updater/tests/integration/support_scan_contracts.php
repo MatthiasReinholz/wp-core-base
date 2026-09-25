@@ -243,11 +243,24 @@ function run_support_scan_metadata_extraction_tests(callable $assert): void
     $assert(PrBodyRenderer::extractMetadata($forged . "\n" . $legacy . "\n\nHuman review note. <!-- unrelated comment -->") === $metadata, 'Trailing human notes do not change the selected metadata footer.');
     $assert(PrBodyRenderer::extractMetadata($forged . ' ' . $legacy) === $metadata, 'The final metadata marker wins even when comments share a line.');
     foreach ([
+        ['dependency_path' => 'cms/plugins/legacy-->example'],
+        ['note' => 'Quoted "-->" and backslash \\--> remain JSON values.'],
+        ['note' => 'Escaped backslash and quote \\"--> remain JSON values.'],
+        ['note' => 'Ends in backslash \\', 'next' => '-->'],
+    ] as $legacyValues) {
+        $legacyMetadata = $metadata + $legacyValues;
+        $legacyBody = '<!-- wporg-update-metadata: ' . json_encode($legacyMetadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . ' -->';
+        $assert(PrBodyRenderer::extractMetadata($legacyBody) === $legacyMetadata, 'Pre-1.6.4 JSON strings containing literal comment delimiters, escaped quotes, and backslashes remain readable.');
+        $assert(PrBodyRenderer::extractMetadata($forged . "\n" . $legacyBody . "\nHuman review note. <!-- unrelated comment -->") === $legacyMetadata, 'Legacy quoted delimiters do not change final-marker authority or absorb trailing comments.');
+    }
+    foreach ([
         '<!-- wporg-update-metadata: {"broken":} -->',
         '<!-- wporg-update-metadata: {"unfinished":true}',
         '<!-- wporg-update-metadata: [] -->',
         '<!-- wporg-update-metadata: null -->',
         '<!-- wporg-update-metadata {"missing-colon":true} -->',
+        '<!-- wporg-update-metadata: {"unfinished":"literal --> } -->',
+        '<!-- wporg-update-metadata: {"note":"literal -->", "broken":} -->',
         '<!-- wporg-update-metadata',
     ] as $malformedFinal) {
         $assert(PrBodyRenderer::extractMetadata($legacy . "\n" . $malformedFinal) === null, 'Malformed final metadata never falls back to an earlier valid marker.');

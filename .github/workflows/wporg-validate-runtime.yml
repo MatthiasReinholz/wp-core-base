@@ -57,6 +57,11 @@ jobs:
           php scripts/ci/test_security_review_cli.php
           php scripts/ci/test_update_cleanup_health.php
 
+      - name: Verify published legacy installer fixture
+        if: matrix.php-version == '8.4'
+        timeout-minutes: 10
+        run: php scripts/ci/prepare_legacy_release.php
+
       - name: Run test suite
         env:
           TEST_PHP_VERSION: ${{ matrix.php-version }}
@@ -65,6 +70,8 @@ jobs:
           export WP_CORE_BASE_TEST_REPORT=.wp-core-base/build/test-report.json
           if [ "$TEST_PHP_VERSION" = '8.4' ]; then
             export WP_CORE_BASE_COVERAGE_FILE=.wp-core-base/build/coverage-observed.json
+            export WP_CORE_BASE_LEGACY_RELEASE_ARTIFACT="$GITHUB_WORKSPACE/.wp-core-base/build/legacy-release-v1.4.8/wp-core-base-vendor-snapshot.zip"
+            test -s "$WP_CORE_BASE_LEGACY_RELEASE_ARTIFACT"
           fi
           php tools/wporg-updater/tests/run.php
 
@@ -76,6 +83,7 @@ jobs:
           path: |
             .wp-core-base/build/test-report.json
             .wp-core-base/build/coverage-observed.json
+            .wp-core-base/build/legacy-release-verification.json
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

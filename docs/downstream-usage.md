@@ -66,6 +66,8 @@ It:
 
 The scaffolded downstream setup includes a weekly `wp-core-base` self-update workflow. Current official ZIPs contain framework tooling rather than a second WordPress/plugin runtime. Updating them does not install the baseline versions listed in framework metadata into your site; core and dependency updates remain separate PRs.
 
+For version-specific migration requirements, including older installers and customized workflows, follow [upgrading an existing framework installation](migration-guide.md#upgrading-an-existing-framework-installation).
+
 Recommended preflight before merging a framework update:
 
 1. run `framework-sync --check-only --json`
