@@ -42,6 +42,18 @@ function run_test_runner_contract_tests(callable $assert, string $repoRoot): voi
         $report = json_decode((string) file_get_contents($root . '/report.json'), true, 512, JSON_THROW_ON_ERROR);
         $assert($result['status'] !== 0 && $report['status'] === 'failed' && $report['suites']['example.php']['status'] === 'failed', 'Expected assertion failures to retain the failed suite report.');
         $assert(str_contains($report['suites']['example.php']['error'], 'deliberate failure'), 'Expected actionable assertion failure context in the report.');
+        $result = $invoke('$runner = ' . $constructor . '; $runner->run("example.php", static function (): void { exit(0); }); $runner->complete();');
+        $report = json_decode((string) file_get_contents($root . '/report.json'), true, 512, JSON_THROW_ON_ERROR);
+        $assert($result['status'] !== 0 && $report['status'] === 'failed', 'Expected an early successful process exit to fail CI validation.');
+        $assert(in_array('example.php', $report['not_executed'], true), 'Expected an interrupted suite to remain incomplete.');
+        $result = $invoke('$runner = ' . $constructor . '; try { $runner->run("example.php", function () use ($runner): void { $runner->assertion(false, "caught failure"); }); } catch (Throwable) {} $runner->complete();');
+        $report = json_decode((string) file_get_contents($root . '/report.json'), true, 512, JSON_THROW_ON_ERROR);
+        $assert($result['status'] !== 0 && $report['status'] === 'failed', 'Expected a caught suite failure to prevent successful completion.');
+        unlink($root . '/report.json');
+        file_put_contents($root . '/integration/example.php', '<?php function example_suite(): void {} exit(0);');
+        $result = $invoke('$runner = ' . $constructor . '; $runner->complete();');
+        $report = json_decode((string) file_get_contents($root . '/report.json'), true, 512, JSON_THROW_ON_ERROR);
+        $assert($result['status'] !== 0 && $report['status'] === 'failed', 'Expected a suite exiting while being loaded to fail CI and retain its report.');
     } finally {
         $workspace->close();
     }

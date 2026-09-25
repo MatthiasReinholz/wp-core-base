@@ -24,6 +24,17 @@ final class SuiteRunner
         if ($actual !== $expected) {
             throw new RuntimeException(sprintf('Integration suite inventory mismatch. Unregistered: %s; missing files: %s.', implode(', ', array_diff($actual, $expected)), implode(', ', array_diff($expected, $actual))));
         }
+        register_shutdown_function(function (): void {
+            if (! $this->reported) {
+                try {
+                    $this->report(false);
+                } finally {
+                    // An exit(0) inside a fixture must not make incomplete
+                    // validation look successful to the CI process runner.
+                    exit(1);
+                }
+            }
+        });
         $this->startCoverage();
         foreach ($inventory as $file => $function) {
             require_once $directory . '/' . $file;
@@ -31,11 +42,6 @@ final class SuiteRunner
                 throw new RuntimeException(sprintf('Suite %s does not define registered entry point %s.', $file, $function));
             }
         }
-        register_shutdown_function(function (): void {
-            if (! $this->reported) {
-                $this->report(false);
-            }
-        });
     }
 
     public function assertion(bool $condition, string $message): void
@@ -74,6 +80,11 @@ final class SuiteRunner
         $missing = array_diff(array_keys($this->inventory), array_keys($this->results));
         if ($missing !== []) {
             throw new RuntimeException('Registered integration suites did not execute: ' . implode(', ', $missing));
+        }
+        foreach ($this->results as $file => $result) {
+            if ($result['status'] !== 'passed') {
+                throw new RuntimeException('Cannot complete validation with a failed suite: ' . $file);
+            }
         }
         $this->report(true);
     }
