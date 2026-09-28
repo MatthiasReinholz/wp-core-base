@@ -21,7 +21,7 @@ When crossing these versions, include the corresponding migration actions:
 | Starting point | Required review or action |
 | --- | --- |
 | v1.4.8 installer or a manual ZIP extraction that loses file modes | After installation, run `chmod +x vendor/wp-core-base/bin/wp-core-base` and commit the executable-bit change before using the direct launcher. The PHP-prefixed maintenance command remains usable. Newer installers restore this mode automatically. |
-| Before v1.5.0 | Fix duplicate dependency identities and unknown security/source configuration keys. Keep provider-specific configuration in `extensions`. Pass boolean flags without values and remove options belonging to other commands. Review the tooling-only artifact change and workflow quoting changes in [v1.5.0](releases/1.5.0.md). |
+| Before v1.5.0 | Fix duplicate dependency identities and unknown security/source configuration keys. Keep provider-specific configuration in `extensions`. Pass boolean flags without values and remove options belonging to other commands. Review the [tooling-only fixture migration](#removing-dependencies-on-the-old-bundled-runtime) and workflow quoting changes in [v1.5.0](releases/1.5.0.md). |
 | Before v1.6.1, using GitHub automation | Review the job-level cleanup/sync concurrency change in [v1.6.1](releases/1.6.1.md), including customized reconciliation workflows skipped by the installer. Upgrading does not replay cancelled historical cleanup jobs; use the [individual recovery procedure](operations.md#blocked-prs) where needed. |
 | Before v1.6.4, with existing automation PRs | Review PRs whose recorded branch differs from the actual head or whose final metadata is malformed. Correct the metadata or recreate the PR through the updater; the new guard intentionally refuses a conflicting branch. See [v1.6.4](releases/1.6.4.md). |
 | Custom premium providers | Rehearse catalog and release resolution with the installed adapter and its real API format. Return a non-empty version and an explicit timezone-bearing timestamp; malformed dates still fail validation. See the [provider contract](adding-premium-provider.md#method-contracts). |
@@ -34,6 +34,50 @@ php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php stage-runtime 
 ```
 
 Use `doctor --json` without `--automation` for a repository that does not configure PR automation. Review the update diff, require your normal downstream checks, and merge before deploying. For `content-only` or external core, test the separately supplied core against the selected plugins; filesystem checks cannot verify that external layer. A real core/plugin/database migration requires its own backup, deployment rehearsal and rollback plan, as described in [baseline upgrades](baseline-upgrades.md).
+
+### Removing Dependencies On The Old Bundled Runtime
+
+Before adopting the v1.5+ tooling-only snapshot, review downstream uses of the
+entire framework distribution path, not just references to `wp-includes`.
+For the standard path, this read-only search lists matching tracked files:
+
+```bash
+git grep -l -F 'vendor/wp-core-base' -- . ':!vendor/wp-core-base/**'
+```
+
+Substitute the configured distribution path, and inspect relevant untracked
+local scripts separately. No matches is exit status 1. Ordinary CLI invocations
+are expected matches; inspect what each caller actually consumes. Include:
+
+- PHP includes of core classes such as `wp-includes/class-wp-error.php`, browser
+  fixtures loading bundled jQuery, and default core paths in test helpers;
+- Docker bind mounts, recursive copies or archive commands that use the whole
+  vendor directory as a WordPress installation or historical upgrade baseline;
+- variables and wrappers that construct those paths indirectly, including
+  release-only workflows that normal pull-request checks do not execute.
+
+The search is a review aid, not a complete dependency scanner. A successful
+`doctor` or `stage-runtime` does not prove that downstream tests and release
+scripts no longer depend on removed vendor files.
+
+Move full-core tests to a separately pinned WordPress source or image, with an
+explicit core path. Small offline fixtures may be copied unmodified from that
+verified source with their version, checksums, provenance and licenses recorded.
+Keep them outside staged runtime roots, update CI path filters, and verify them
+when the deployment core changes. Do not reintroduce the removed runtime inside
+the framework snapshot or disable failing tests to accept the update.
+
+Preserve the historical starting version of database-upgrade tests: replacing
+both sides with the current core silently removes migration coverage. Use a
+separate pinned historical source, assert the old and target versions, and run
+the real upgrade on disposable data, including its existing rollback checks.
+
+Before merging, reconcile skipped customized workflows with the new templates,
+including the per-PR cleanup concurrency change above, and restore the launcher
+executable bit when the old installer requires it. Run the downstream test and
+image-build checks that consume the migrated fixtures, including release-only
+checks without publishing or deploying. Signed artifact verification establishes
+the framework payload's identity; it does not replace these downstream checks.
 
 ## From `.github/wporg-updates.php`
 
