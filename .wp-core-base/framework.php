@@ -20,7 +20,7 @@ return array (
   ),
   'baseline' =>
   array (
-    'wordpress_core' => '7.1.2',
+    'wordpress_core' => '7.1.3',
     'managed_components' =>
     array (
       0 =>
