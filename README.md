@@ -141,13 +141,13 @@ That surfaces any framework-managed files that would refresh, be removed, or be 
 
 ## Current Baseline
 
-This repository currently ships:
+The current repository source includes the following baseline. Previously published tags and signed release assets retain their original contents:
 
 - framework release `1.6.5`
 - WordPress core `7.1.3`
 - Akismet `5.6`
 - WooCommerce `11.1.2`
-- Jetpack `16.2`
+- Jetpack `16.3`
 - Contact Form 7 `6.1.7`
 - Redirection `5.10.1`
 - Twenty Twenty-Three `1.6`
@@ -155,6 +155,8 @@ This repository currently ships:
 - Twenty Twenty-Five `1.4`
 
 These versions describe the code committed in this repository, not a floating latest channel.
+
+Jetpack 16.3 adds protected connection-owner recovery and optional PayPal administration APIs. The PayPal API feature flag remains disabled by default. Adopting this source baseline does not connect an account, enable payments, or update an existing downstream runtime; rehearse activation and existing account integrations before deployment.
 
 ## Documentation Map
 
