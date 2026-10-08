@@ -128,4 +128,6 @@ If the answer to most of those is yes, the framework is usually a strong fit.
 | Seeded baseline upgrade fixture | Supported | Pinned prior baseline, existing synthetic store data, database migration and paired runtime/database restore; both profiles and HPOS/legacy order storage. |
 | Read-only update-health monitor | GitHub maintainer workflow | Required-check and scheduling visibility; does not approve or merge updates. |
 
+The optional bundled starter baseline requires PHP 8.3 or newer because Contact Form 7 6.2.1 requires WordPress 7.1 and PHP 8.3. Both runtime profiles run fresh-install and seeded-upgrade checks on PHP 8.3, 8.4 and 8.5; PHP 8.1 remains a framework CLI migration-compatibility lane only.
+
 Framework CLI compatibility does not override the support requirements of WordPress, individual plugins, the database, or the hosting platform. Runtime fixtures provide evidence for the tested baseline and environment, not a full site/browser regression suite. See [local prerequisites](local-prerequisites.md), [contributor verification](contributing.md#wordpress-runtime-smoke-test) and [baseline upgrades](baseline-upgrades.md).
