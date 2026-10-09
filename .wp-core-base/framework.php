@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 return array (
   'repository' => 'MatthiasReinholz/wp-core-base',
-  'version' => '1.6.6',
+  'version' => '1.6.7',
   'release_channel' => 'stable',
   'distribution' =>
   array (
@@ -26,7 +26,7 @@ return array (
       0 =>
       array (
         'name' => 'WooCommerce',
-        'version' => '11.2.0',
+        'version' => '11.2.1',
         'kind' => 'plugin',
       ),
       1 =>
@@ -38,7 +38,7 @@ return array (
       2 =>
       array (
         'name' => 'Contact Form 7',
-        'version' => '6.1.7',
+        'version' => '6.2.1',
         'kind' => 'plugin',
       ),
       3 =>

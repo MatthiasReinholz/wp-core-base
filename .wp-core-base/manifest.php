@@ -251,8 +251,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/woocommerce',
       'main_file' => 'woocommerce.php',
-      'version' => '11.2.0',
-      'checksum' => 'sha256:ed9a01b26e1a3ddc3e853fdd44a3f3693d639b00cbd28647470e9de086cfa4e7',
+      'version' => '11.2.1',
+      'checksum' => 'sha256:166bf999a6ec35100b20648212a695ece9e228dd9048257c051481b6af1b1d93',
       'archive_subdir' => '',
       'extra_labels' =>
       array (
@@ -357,8 +357,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/contact-form-7',
       'main_file' => 'wp-contact-form-7.php',
-      'version' => '6.1.7',
-      'checksum' => 'sha256:a18796140c1b9fae1fa1d5fb383ad7433aa64a7deaf99adcb57d0cfff7773936',
+      'version' => '6.2.1',
+      'checksum' => 'sha256:c3f1a925ed17ce28112c666347fe661bbc4a3a29abd3ee6760ed9479a5c6a056',
       'archive_subdir' => '',
       'extra_labels' =>
       array (

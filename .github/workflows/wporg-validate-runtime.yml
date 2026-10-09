@@ -180,7 +180,7 @@ jobs:
     strategy:
       matrix:
         profile: [full-core, content-only]
-        php-version: ['8.1', '8.4', '8.5']
+        php-version: ['8.3', '8.4', '8.5']
     services:
       database:
         image: mariadb:11.4@sha256:70cc072b29b4a89ae07abb2d4da2c64678a7f2dfe092751bb51c87d67dc1338b
