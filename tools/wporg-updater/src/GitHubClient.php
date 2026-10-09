@@ -51,31 +51,10 @@ final class GitHubClient implements GitHubAutomationClient
      */
     public function ensureLabels(array $definitions): void
     {
-        $definitions = LabelHelper::normalizeDefinitions($definitions);
-
-        if ($this->dryRun) {
-            fwrite(STDOUT, "[dry-run] Ensuring GitHub labels\n");
-            return;
-        }
-
-        foreach ($definitions as $name => $definition) {
-            $encodedName = rawurlencode($name);
-
-            try {
-                $this->requestJson('GET', '/repos/' . $this->repository . '/labels/' . $encodedName);
-                $this->requestJson('PATCH', '/repos/' . $this->repository . '/labels/' . $encodedName, [
-                    'new_name' => $name,
-                    'color' => $definition['color'],
-                    'description' => $definition['description'],
-                ]);
-            } catch (RuntimeException) {
-                $this->requestJson('POST', '/repos/' . $this->repository . '/labels', [
-                    'name' => $name,
-                    'color' => $definition['color'],
-                    'description' => $definition['description'],
-                ]);
-            }
-        }
+        (new GitHubLabelSynchronizer($this->repository, $this->dryRun))->ensureLabels(
+            $definitions,
+            fn (string $method, string $path, ?array $payload = null): array => $this->requestJson($method, $path, $payload),
+        );
     }
 
     /**
@@ -443,13 +422,24 @@ final class GitHubClient implements GitHubAutomationClient
         );
 
         if ($response['status'] < 200 || $response['status'] >= 300) {
-            throw new RuntimeException(sprintf(
+            $decodedError = json_decode($response['body'], true);
+            $errors = [];
+            foreach (is_array($decodedError) && is_array($decodedError['errors'] ?? null) && array_is_list($decodedError['errors']) ? $decodedError['errors'] : [] as $error) {
+                if (is_array($error) && is_string($error['resource'] ?? null) && is_string($error['field'] ?? null) && is_string($error['code'] ?? null)) {
+                    $errors[] = ['resource' => $error['resource'], 'field' => $error['field'], 'code' => $error['code']];
+                } else {
+                    // Preserve an unrecognized error as non-recoverable without
+                    // retaining arbitrary provider text or diagnostic fields.
+                    $errors[] = ['resource' => '', 'field' => '', 'code' => ''];
+                }
+            }
+            throw new HttpStatusRuntimeException($response['status'], sprintf(
                 'GitHub API %s %s failed with status %d: %s',
                 $method,
                 $path,
                 $response['status'],
                 OutputRedactor::redactHttpBody($response['body'])
-            ));
+            ), errors: $errors);
         }
 
         $decoded = json_decode($response['body'], true);

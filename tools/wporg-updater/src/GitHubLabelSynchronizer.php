@@ -28,24 +28,42 @@ final class GitHubLabelSynchronizer
         foreach ($definitions as $name => $definition) {
             $encodedName = rawurlencode($name);
 
+            $path = '/repos/' . $this->repository . '/labels/' . $encodedName;
             try {
-                $requestJson('GET', '/repos/' . $this->repository . '/labels/' . $encodedName);
-                $requestJson('PATCH', '/repos/' . $this->repository . '/labels/' . $encodedName, [
-                    'new_name' => $name,
-                    'color' => $definition['color'],
-                    'description' => $definition['description'],
-                ]);
+                $requestJson('GET', $path);
             } catch (HttpStatusRuntimeException $exception) {
                 if ($exception->status() !== 404) {
                     throw $exception;
                 }
 
-                $requestJson('POST', '/repos/' . $this->repository . '/labels', [
-                    'name' => $name,
-                    'color' => $definition['color'],
-                    'description' => $definition['description'],
-                ]);
+                try {
+                    $requestJson('POST', '/repos/' . $this->repository . '/labels', [
+                        'name' => $name,
+                        'color' => $definition['color'],
+                        'description' => $definition['description'],
+                    ]);
+                    continue;
+                } catch (HttpStatusRuntimeException $creationFailure) {
+                    if ($creationFailure->status() !== 422 || $creationFailure->errors() !== [
+                        ['resource' => 'Label', 'field' => 'name', 'code' => 'already_exists'],
+                    ]) {
+                        throw $creationFailure;
+                    }
+                    // GitHub label names are case-insensitive; require the requested
+                    // label to exist before applying the normal metadata policy.
+                    $existing = $requestJson('GET', $path);
+                    if (! is_string($existing['name'] ?? null) || strcasecmp($existing['name'], $name) !== 0) {
+                        throw $creationFailure;
+                    }
+                }
             }
+
+            // A failed metadata update is not evidence that the label is missing.
+            $requestJson('PATCH', $path, [
+                'new_name' => $name,
+                'color' => $definition['color'],
+                'description' => $definition['description'],
+            ]);
         }
     }
 }

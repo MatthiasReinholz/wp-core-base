@@ -164,6 +164,7 @@ function run_http_security_contract_tests(callable $assert, string $repoRoot): v
         $expectFailure(fn () => $client->downloadToFileWithOptions($origin . '/direct', $root . '/oversized.bin', [], ['max_download_bytes' => 16]), 'Download transport enforces its byte ceiling.', 'configured byte limit');
         $assert(! file_exists($root . '/oversized.bin.part'), 'A rejected download leaves no partial artifact.');
 
+        assert_github_label_client_contracts($assert, $client, $origin, $root, $readLog);
         assert_framework_payload_identity_contracts($assert, $repoRoot, $root);
     } finally {
         if (is_resource($process)) {
@@ -250,4 +251,59 @@ function assert_framework_payload_identity_contracts(callable $assert, string $r
         }
         $assert($failure !== null, 'Framework payload identity rejects ' . $case . ' changes.');
     }
+}
+
+/** @param callable(bool,string):void $assert @param callable():array $readLog */
+function assert_github_label_client_contracts(callable $assert, HttpClient $http, string $origin, string $root, callable $readLog): void
+{
+    $path = '/repos/label-fixture/project/labels/needs%3Areview';
+    $collection = '/repos/label-fixture/project/labels';
+    $step = static fn (string $method, int $status, array $body): array => [
+        'method' => $method, 'path' => $method === 'POST' ? $collection : $path,
+        'status' => $status, 'body' => $body,
+    ];
+    $found = ['name' => 'needs:review'];
+    $missing = ['message' => 'Not Found'];
+    $duplicate = ['errors' => [['resource' => 'Label', 'field' => 'name', 'code' => 'already_exists']]];
+    $cases = [
+        'existing metadata' => [[$step('GET', 200, $found), $step('PATCH', 200, $found)], null],
+        'confirmed missing' => [[$step('GET', 404, $missing), $step('POST', 201, $found)], null],
+        'concurrent create case-insensitive' => [[$step('GET', 404, $missing), $step('POST', 422, $duplicate), $step('GET', 200, ['name' => 'Needs:Review']), $step('PATCH', 200, $found)], null],
+        'read forbidden' => [[$step('GET', 403, ['message' => 'Forbidden'])], 403],
+        'patch forbidden' => [[$step('GET', 200, $found), $step('PATCH', 403, ['message' => 'Forbidden'])], 403],
+        'patch disappeared' => [[$step('GET', 200, $found), $step('PATCH', 404, $missing)], 404],
+        'unrelated validation' => [[$step('GET', 404, $missing), $step('POST', 422, ['errors' => [['resource' => 'Label', 'field' => 'color', 'code' => 'invalid']]])], 422],
+        'duplicate plus validation' => [[$step('GET', 404, $missing), $step('POST', 422, ['errors' => [...$duplicate['errors'], ['resource' => 'Label', 'field' => 'color', 'code' => 'invalid']]])], 422],
+        'duplicate plus malformed error' => [[$step('GET', 404, $missing), $step('POST', 422, ['errors' => [...$duplicate['errors'], 'unrecognized']])], 422],
+        'object-shaped error collection' => [[$step('GET', 404, $missing), $step('POST', 422, ['errors' => ['only' => $duplicate['errors'][0]]])], 422],
+        'unstructured duplicate text' => [[$step('GET', 404, $missing), $step('POST', 422, ['message' => 'already_exists'])], 422],
+        'race missing on verification' => [[$step('GET', 404, $missing), $step('POST', 422, $duplicate), $step('GET', 404, $missing)], 404],
+        'race wrong label' => [[$step('GET', 404, $missing), $step('POST', 422, $duplicate), $step('GET', 200, ['name' => 'different'])], 422],
+        'race malformed identity' => [[$step('GET', 404, $missing), $step('POST', 422, $duplicate), $step('GET', 200, [])], 422],
+        'race update forbidden' => [[$step('GET', 404, $missing), $step('POST', 422, $duplicate), $step('GET', 200, $found), $step('PATCH', 403, ['message' => 'Forbidden'])], 403],
+    ];
+    foreach ($cases as $name => [$steps, $expectedStatus]) {
+        file_put_contents($root . '/label-steps.json', json_encode($steps, JSON_THROW_ON_ERROR));
+        $before = count($readLog());
+        $failure = null;
+        try {
+            (new GitHubClient($http, 'label-fixture/project', 'fixture-token', $origin))->ensureLabels([
+                'needs:review' => ['color' => 'abcdef', 'description' => 'Reviewed metadata'],
+            ]);
+        } catch (WpOrgPluginUpdater\HttpStatusRuntimeException $exception) {
+            $failure = $exception->status();
+        }
+        $assert($failure === $expectedStatus, 'Actual GitHub client label outcome: ' . $name);
+        $requests = array_slice($readLog(), $before);
+        $assert(count($requests) === count($steps), 'Label recovery has exact bounded requests: ' . $name);
+        $assert(json_decode((string) file_get_contents($root . '/label-steps.json'), true) === [], 'Every expected label request executed: ' . $name);
+        foreach ($requests as $request) {
+            if ($request['method'] === 'PATCH') {
+                $assert(json_decode($request['body'], true) === ['new_name' => 'needs:review', 'color' => 'abcdef', 'description' => 'Reviewed metadata'], 'Label metadata policy is preserved: ' . $name);
+            }
+        }
+    }
+    $before = count($readLog());
+    (new GitHubClient($http, 'label-fixture/project', 'fixture-token', $origin, true))->ensureLabels(['dry' => ['color' => 'abcdef', 'description' => 'Dry run']]);
+    $assert(count($readLog()) === $before, 'Actual GitHub client dry run performs no label requests.');
 }
