@@ -45,10 +45,21 @@ while (true) {
                 $headers[strtolower(trim($parts[0]))] = trim($parts[1]);
             }
         }
+        $method = explode(' ', (string) $request)[0] ?? '';
+        $requestBody = '';
+        $remaining = (int) ($headers['content-length'] ?? 0);
+        while ($remaining > 0) {
+            $chunk = fread($connection, $remaining);
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            $requestBody .= $chunk;
+            $remaining -= strlen($chunk);
+        }
         $target = explode(' ', (string) $request)[1] ?? '/';
         $path = (string) parse_url($target, PHP_URL_PATH);
         $port = $ports[array_search($server, $servers, true)];
-        file_put_contents($directory . '/requests.jsonl', json_encode(['path' => $target, 'port' => $port, 'headers' => $headers], JSON_THROW_ON_ERROR) . "\n", FILE_APPEND);
+        file_put_contents($directory . '/requests.jsonl', json_encode(['path' => $target, 'port' => $port, 'headers' => $headers, 'method' => $method, 'body' => $requestBody], JSON_THROW_ON_ERROR) . "\n", FILE_APPEND);
         $status = 200;
         $responseHeaders = [];
         $body = str_repeat('a', 64) . "  package.zip\n";
@@ -112,6 +123,19 @@ while (true) {
             case '/large':
                 $body = str_repeat('x', 1024 * 1024 + 1);
                 break;
+        }
+        if (str_starts_with($path, '/repos/label-fixture/')) {
+            $steps = json_decode((string) file_get_contents($directory . '/label-steps.json'), true, flags: JSON_THROW_ON_ERROR);
+            $step = array_shift($steps);
+            file_put_contents($directory . '/label-steps.json', json_encode($steps, JSON_THROW_ON_ERROR));
+            if (! is_array($step) || $step['method'] !== $method || $step['path'] !== $path) {
+                $status = 409;
+                $body = '{"message":"Unexpected fixture request"}';
+            } else {
+                $status = $step['status'];
+                $body = json_encode($step['body'], JSON_THROW_ON_ERROR);
+            }
+            $responseHeaders['Content-Type'] = 'application/json';
         }
         $response = 'HTTP/1.1 ' . $status . " Test\r\nConnection: close\r\nContent-Length: " . strlen($body) . "\r\n";
         foreach ($responseHeaders as $name => $value) {

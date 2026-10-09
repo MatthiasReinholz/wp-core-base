@@ -246,3 +246,21 @@ That test suite covers:
 - archive/path validation, failed recovery preservation, and release inventory
 
 See [contributing.md](contributing.md) for the full quality gates and a separate real WordPress/database smoke fixture.
+
+## Idempotent GitHub label synchronization
+
+The production GitHub client uses the shared label synchronizer. Only a confirmed
+label GET `404` permits creation; read authorization, transport and metadata
+PATCH failures remain visible rather than being converted into a second create.
+A concurrent create is recovered only for the structured `422` error identifying
+`Label` / `name` / `already_exists`, followed by a fresh GET of that label. Its
+returned name must match case-insensitively before applying the normal canonical
+name, color and description PATCH. Additional or malformed errors are not
+ignored, and recovery is bounded to one verification and metadata update.
+
+The maintained HTTPS fixture exercises the actual client and transport, including
+case-insensitive race recovery, metadata preservation, unrelated/mixed validation
+errors, failed verification and authorization failures. This fixes the updater
+path implicated by WordPress reconciliation run `37933580463` and issue `790`;
+it does not waive release checks or the separate supported-runtime ruleset
+requirements for baseline upgrades.
