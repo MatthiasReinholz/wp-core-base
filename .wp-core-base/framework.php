@@ -38,7 +38,7 @@ return array (
       2 =>
       array (
         'name' => 'Contact Form 7',
-        'version' => '6.1.7',
+        'version' => '6.2.1',
         'kind' => 'plugin',
       ),
       3 =>
