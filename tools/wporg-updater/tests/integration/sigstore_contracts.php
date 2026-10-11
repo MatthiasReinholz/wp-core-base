@@ -52,6 +52,35 @@ function run_sigstore_contract_tests(callable $assert, string $repoRoot): void
         $unconfigured = Config::fromArray($root, [...$manifest, 'dependencies' => []]);
         $assert((new SigstoreToolInstaller())->install($unconfigured, new HttpClient()) === null, 'Tool installation is a network-free no-op when signatures are not configured.');
 
+        // Normal upgrades render new templates with the already installed renderer.
+        // v1.6.7 supplies only these two placeholders to the validation template.
+        $template = (string) file_get_contents($repoRoot . '/tools/wporg-updater/templates/downstream-validate-runtime-workflow.yml.tpl');
+        foreach (['vendor/wp-core-base', 'vendor/custom-framework', '.'] as $toolRoot) {
+            $relativeScript = ($toolRoot === '.' ? '' : $toolRoot . '/') . 'tools/wporg-updater/bin/wporg-updater.php';
+            $rendered = strtr($template, [
+                '__WPORG_DOCTOR_COMMAND__' => 'php ' . $relativeScript . ' doctor --repo-root=. --automation',
+                '__WPORG_STAGE_RUNTIME_COMMAND__' => 'php ' . $relativeScript . ' stage-runtime --repo-root=.',
+            ]);
+            $assert(! str_contains($rendered, '__WPORG_'), 'Older renderers resolve every validation placeholder for default and custom tool roots.');
+            if (preg_match('/name: Install required release verification tools\n        run: \|\n(.*?)\n      - name:/s', $rendered, $match) !== 1) {
+                throw new RuntimeException('The rendered verification setup step is missing.');
+            }
+            $scriptRoot = $root . '/workflow-' . str_replace('/', '-', $toolRoot);
+            $scriptPath = $scriptRoot . '/' . $relativeScript;
+            mkdir(dirname($scriptPath), 0700, true);
+            file_put_contents($scriptPath, '<?php file_put_contents("installer-argv.json", json_encode(array_slice($argv, 1), JSON_THROW_ON_ERROR));');
+            $step = (string) preg_replace('/^          /m', '', $match[1]);
+            $setupPipes = [];
+            $setupProcess = proc_open(['bash', '-c', $step], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $setupPipes, $scriptRoot, [
+                'PATH' => (string) getenv('PATH'), 'GITHUB_WORKSPACE' => $scriptRoot, 'GITHUB_PATH' => $scriptRoot . '/github-path',
+            ]);
+            if (! is_resource($setupProcess)) { throw new RuntimeException('Unable to execute the rendered validation setup step.'); }
+            foreach ($setupPipes as $pipe) { stream_get_contents($pipe); fclose($pipe); }
+            $assert(proc_close($setupProcess) === 0, 'The older-rendered setup step executes successfully.');
+            $argv = json_decode((string) file_get_contents($scriptRoot . '/installer-argv.json'), true, flags: JSON_THROW_ON_ERROR);
+            $assert($argv === ['install-verification-tools', '--repo-root=.'], 'The setup invokes the installer without leaking doctor flags.');
+        }
+
         $binary = $root . '/cosign fixture';
         file_put_contents($binary, <<<'PHP'
 #!/usr/bin/env php
