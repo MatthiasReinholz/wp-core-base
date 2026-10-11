@@ -13,6 +13,8 @@ use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\MutationLock;
 use WpOrgPluginUpdater\RuntimeInspector;
 use WpOrgPluginUpdater\RuntimeStager;
+use WpOrgPluginUpdater\SigstoreToolInstaller;
+use WpOrgPluginUpdater\HttpClient;
 
 final class RuntimeMaintenanceModeHandler implements CliModeHandler
 {
@@ -28,7 +30,7 @@ final class RuntimeMaintenanceModeHandler implements CliModeHandler
 
     public function supports(string $mode): bool
     {
-        return in_array($mode, ['stage-runtime', 'refresh-admin-governance', 'suggest-manifest', 'format-manifest'], true);
+        return in_array($mode, ['stage-runtime', 'refresh-admin-governance', 'suggest-manifest', 'format-manifest', 'install-verification-tools'], true);
     }
 
     /**
@@ -37,6 +39,15 @@ final class RuntimeMaintenanceModeHandler implements CliModeHandler
     public function handle(string $mode, array $options): int
     {
         $adminGovernanceExporter = new AdminGovernanceExporter();
+
+        if ($mode === 'install-verification-tools') {
+            $path = (new SigstoreToolInstaller())->install($this->config, new HttpClient());
+            if ($this->jsonOutput) {
+                ($this->emitJson)(['status' => 'success', 'cosign_path' => $path, 'required' => $path !== null]);
+            }
+            fwrite(STDOUT, $path !== null ? sprintf("Verified Cosign installed: %s\n", $path) : "No dependency requires Sigstore verification tools.\n");
+            return 0;
+        }
 
         if ($mode === 'stage-runtime') {
             $runtimeInspector = new RuntimeInspector($this->config->runtime);

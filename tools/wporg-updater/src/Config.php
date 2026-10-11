@@ -839,7 +839,7 @@ final class Config
                 'github_repository', 'github_release_asset_pattern', 'github_token_env',
                 'gitlab_project', 'gitlab_release_asset_pattern', 'gitlab_token_env', 'gitlab_api_base',
                 'generic_json_url', 'min_release_age_hours', 'verification_mode', 'checksum_asset_pattern',
-                'credential_key', 'provider', 'provider_product_id', 'extensions',
+                'credential_key', 'provider', 'provider_product_id', 'extensions', 'sigstore',
             ], sprintf('dependencies[%s].source_config', $slug));
             $sourceExtensions = self::normalizeExtensions(array_key_exists('extensions', $sourceConfig) ? $sourceConfig['extensions'] : [], sprintf('dependencies[%s].source_config.extensions', $slug));
             $policy = is_array($dependency['policy'] ?? null) ? $dependency['policy'] : [];
@@ -925,6 +925,7 @@ final class Config
                 : null;
             $verificationMode = self::nullableString($sourceConfig['verification_mode'] ?? null) ?? 'inherit';
             $checksumAssetPattern = self::nullableString($sourceConfig['checksum_asset_pattern'] ?? null);
+            $sigstorePolicy = SigstoreVerificationPolicy::forDependency(['source' => $source, 'source_config' => $sourceConfig]);
             $credentialKey = self::nullableString($sourceConfig['credential_key'] ?? null);
             $provider = self::nullableString($sourceConfig['provider'] ?? null);
             $providerProductId = isset($sourceConfig['provider_product_id']) && $sourceConfig['provider_product_id'] !== ''
@@ -1018,6 +1019,7 @@ final class Config
                 'extra_labels' => $extraLabels,
                 'source_config' => [
                     ...($sourceExtensions !== [] ? ['extensions' => $sourceExtensions] : []),
+                    ...($sigstorePolicy !== null ? ['sigstore' => $sigstorePolicy] : []),
                     'github_repository' => $githubRepository,
                     'github_release_asset_pattern' => $githubReleaseAssetPattern,
                     'github_token_env' => $githubTokenEnv,

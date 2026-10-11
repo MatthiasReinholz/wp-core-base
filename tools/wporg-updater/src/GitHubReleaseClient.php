@@ -12,6 +12,7 @@ final class GitHubReleaseClient implements GitHubReleaseSource
     public function __construct(
         private readonly HttpClient $httpClient,
         private readonly string $apiBase = 'https://api.github.com',
+        private readonly SigstoreBundleVerifier $sigstoreVerifier = new SigstoreBundleVerifier(),
     ) {
     }
 
@@ -139,6 +140,7 @@ final class GitHubReleaseClient implements GitHubReleaseSource
      */
     public function downloadReleaseToFile(array $release, array $dependency, string $destination): void
     {
+        $sigstorePolicy = SigstoreVerificationPolicy::forDependency($dependency);
         $selectedAsset = $this->selectReleaseAsset($release, $dependency);
 
         if ($selectedAsset !== null) {
@@ -152,7 +154,20 @@ final class GitHubReleaseClient implements GitHubReleaseSource
             }
 
             $this->downloadAssetFromApi($apiUrl, $dependency, $destination);
+            if ($sigstorePolicy !== null) {
+                $matches = array_values(array_filter((array) ($release['assets'] ?? []), static fn ($asset): bool =>
+                    is_array($asset) && is_string($asset['name'] ?? null) && fnmatch($sigstorePolicy['bundle_asset_pattern'], $asset['name'])
+                ));
+                if (count($matches) !== 1 || $matches[0]['name'] === ($selectedAsset['name'] ?? '')) {
+                    throw new RuntimeException('Required Sigstore bundle pattern must select exactly one distinct release asset.');
+                }
+                $this->sigstoreVerifier->verify($destination, $this->downloadAssetContents($matches[0], $dependency), $sigstorePolicy);
+            }
             return;
+        }
+
+        if ($sigstorePolicy !== null) {
+            throw new RuntimeException('Sigstore verification requires a packaged release asset; zipball fallback is prohibited.');
         }
 
         if (! $this->allowsZipballFallback($dependency)) {

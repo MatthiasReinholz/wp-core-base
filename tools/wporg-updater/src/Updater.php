@@ -1537,6 +1537,13 @@ final class Updater
         $hasChecksum = is_string($releaseData['expected_checksum_sha256'] ?? null)
             && trim((string) $releaseData['expected_checksum_sha256']) !== '';
 
+        if (SigstoreVerificationPolicy::forDependency($dependency) !== null) {
+            return [
+                DependencyTrustState::VERIFIED,
+                'Archive signature, exact certificate identity, OIDC issuer and transparency proof were verified with Sigstore before apply.',
+            ];
+        }
+
         if (($source === 'github-release' || $source === 'gitlab-release') && $hasChecksum) {
             return [
                 DependencyTrustState::VERIFIED,

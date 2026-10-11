@@ -19,6 +19,7 @@ final class CommandOptions
             ...$hosted,
             ...self::values(['source', 'kind', 'slug', 'path', 'main-file', 'name', 'version', 'archive-subdir',
                 'generic-json-url', 'credential-key', 'provider', 'provider-product-id']),
+            ...self::values(['sigstore-bundle-asset-pattern', 'sigstore-certificate-identity', 'sigstore-oidc-issuer']),
             ...self::flags(['private', 'plan', 'preview', 'dry-run', 'json']),
         ];
         $commands = [
@@ -28,6 +29,7 @@ final class CommandOptions
             'render-sync-report' => self::values(['report-json', 'summary-path']),
             'sync-report-issue' => self::values(['report-json']),
             'stage-runtime' => ['output' => 'value', 'json' => 'flag'],
+            'install-verification-tools' => ['json' => 'flag'],
             'refresh-admin-governance' => [],
             'suggest-manifest' => [],
             'format-manifest' => [],

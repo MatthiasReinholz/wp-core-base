@@ -342,6 +342,7 @@ final class DownstreamScaffolder
                 [
                     '__WPORG_DOCTOR_COMMAND__' => $doctorCommand,
                     '__WPORG_STAGE_RUNTIME_COMMAND__' => $stageCommand,
+                    '__WPORG_PHP_PATH__' => $phpPath,
                 ]
             ),
             '.github/workflows/wp-core-base-self-update.yml' => $this->renderTemplate(

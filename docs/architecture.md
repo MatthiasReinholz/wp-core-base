@@ -45,6 +45,9 @@ Core invariant:
 - `DependencyScanner` and `DependencyMetadataResolver` infer local runtime metadata
 - managed-source adapters resolve WordPress.org, GitHub/GitLab releases, generic JSON metadata, and premium-provider inputs
 - `SourceCatalog` and `SourceRelease` validate version/timestamp records without discarding provider fields; `HistoricalVersionSource` is an optional capability for latest-only adapters
+- `SigstoreVerificationPolicy` validates downstream-owned exact signer constraints;
+  `SigstoreBundleVerifier` enforces them at both hosted-release download boundaries;
+  `SigstoreToolInstaller` provisions a digest-pinned verifier only when configured
 
 Core invariant:
 - managed dependencies must resolve to a deterministic sanitized runtime tree with a stable checksum

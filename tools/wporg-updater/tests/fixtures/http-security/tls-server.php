@@ -64,6 +64,22 @@ while (true) {
         $responseHeaders = [];
         $body = str_repeat('a', 64) . "  package.zip\n";
         switch ($path) {
+            case '/repos/fixture/project/releases':
+                $assetOrigin = 'https://127.0.0.1:' . $ports[0];
+                $body = json_encode([['tag_name' => '1.0.0', 'published_at' => '2026-01-01T00:00:00Z', 'assets' => [
+                    ['name' => 'package.zip', 'url' => $assetOrigin . '/sigstore/archive'],
+                    ['name' => 'package.sigstore.json', 'url' => $assetOrigin . '/sigstore/bad-bundle'],
+                ]]], JSON_THROW_ON_ERROR);
+                break;
+            case '/sigstore/archive':
+                $body = 'signed package bytes';
+                break;
+            case '/sigstore/bundle':
+                $body = json_encode(['digest' => hash('sha256', 'signed package bytes'), 'identity' => 'https://publisher.example.test/release-workflow', 'issuer' => 'https://issuer.example.test'], JSON_THROW_ON_ERROR);
+                break;
+            case '/sigstore/bad-bundle':
+                $body = 'invalid bundle';
+                break;
             case '/repos/owner/project/pulls':
                 $responseHeaders['Content-Type'] = 'application/json';
                 $body = json_encode([['number' => 42, 'state' => 'open'], 'invalid-entry'], JSON_THROW_ON_ERROR);

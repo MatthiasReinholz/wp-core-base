@@ -118,6 +118,7 @@ Hosted release-backed dependencies may also opt into two download-time trust con
 
 - release cooldowns through `security.managed_release_min_age_hours` or `source_config.min_release_age_hours`
 - checksum-sidecar verification through `security.github_release_verification`, `source_config.verification_mode`, and `source_config.checksum_asset_pattern`
+- required Sigstore bundle verification through `source_config.sigstore`, with exact publisher identity and issuer; see [signed release assets](managing-dependencies.md#sigstore-signed-release-assets)
 
 Use those only after checking the real upstream release assets. The framework binds the checksum sidecar to the ZIP filename, so the checksum file must contain a line for the exact asset being downloaded.
 

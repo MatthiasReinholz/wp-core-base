@@ -39,6 +39,16 @@ Hosted release downloads can be hardened with:
 
 Rules:
 
+- an explicit `source_config.sigstore` policy requires exact certificate identity,
+  OIDC issuer, package signature, certificate trust and bundled transparency-proof
+  verification by Cosign before any archive extraction or runtime mutation
+- bundle selection must be unique, and its private transport has the same origin
+  and redirect boundaries as package downloads, with a one MiB response limit
+- the verifier receives no release-reader credentials, uses a shell-free argument
+  vector, and is bounded by a 60-second timeout and 64 KiB diagnostic budget
+- the explicit tool installer authenticates its pinned executable by a committed
+  digest; publisher-specific identities belong only in downstream manifests
+
 - do not require checksum-sidecar verification unless the upstream actually publishes a checksum sidecar asset
 - do not guess checksum asset patterns
 - do not treat redirected CDN URLs as trusted origins for auth forwarding

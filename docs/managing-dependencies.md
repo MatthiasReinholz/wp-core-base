@@ -224,6 +224,45 @@ For GitLab-hosted releases, use the same trust fields with `gitlab_project`, `gi
 
 If the checksum sidecar does not exist upstream, do not guess. Leave verification at `none` or a repo-level optional mode instead.
 
+### Sigstore-signed release assets
+
+For a hosted release publishing a Sigstore bundle, configure its exact asset and
+signer through the authoring command or `source_config.sigstore`. Inspect the
+published bundle and verify the publisher's identity before recording the policy.
+No repository or publisher identity is built into the framework.
+
+```bash
+vendor/wp-core-base/bin/wp-core-base add-dependency --repo-root=. \
+  --kind=plugin --slug=example-plugin --source=github-release \
+  --github-repository=owner/example-plugin \
+  --github-release-asset-pattern=example-plugin.zip \
+  --sigstore-bundle-asset-pattern=example-plugin.zip.sigstore.json \
+  --sigstore-certificate-identity=https://github.com/owner/example-plugin/.github/workflows/release.yml@refs/heads/main \
+  --sigstore-oidc-issuer=https://token.actions.githubusercontent.com --plan
+```
+
+For first-time authoring, install Cosign on `PATH` through your trusted toolchain
+before this command. Once a manifest policy exists, the framework can provision
+its pinned tool:
+
+```bash
+php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php install-verification-tools --repo-root=.
+export PATH="$PWD/.wp-core-base/build/verification-tools:$PATH"
+```
+
+The installer verifies a committed SHA-256 before publishing Cosign 3.1.3 on Linux
+or macOS (amd64/arm64). It performs no download when no managed dependency requires
+signatures. Customized CI workflows must run this setup before updater or release
+download commands. The same signer flags work with GitLab release dependencies.
+
+Re-add, adoption and preview commands inherit a required signer policy from the
+existing installed path. Omitting flags cannot downgrade it. An intentional
+policy removal or publisher migration requires an explicit manifest review.
+Verification uses Cosign's offline bundled transparency-proof checks with exact
+identity and issuer matching. Initial public Sigstore trust-root setup may require
+HTTPS access. Missing tools, invalid bundles and timeout are errors; verification
+never uses an insecure skip flag or a checksum-only fallback.
+
 ## Add A Premium Plugin
 
 Premium workflow updates use a downstream-registered provider adapter.
