@@ -25,7 +25,9 @@ jobs:
 
       - name: Install required release verification tools
         run: |
-          php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php install-verification-tools --repo-root=.
+          # Reuse an established placeholder for older framework-sync renderers.
+          updater_command=(php vendor/wp-core-base/tools/wporg-updater/bin/wporg-updater.php doctor --repo-root=. --automation)
+          "${updater_command[@]:0:2}" install-verification-tools --repo-root=.
           echo "${GITHUB_WORKSPACE}/.wp-core-base/build/verification-tools" >> "${GITHUB_PATH}"
 
       - name: Run doctor
