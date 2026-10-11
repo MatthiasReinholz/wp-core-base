@@ -428,7 +428,11 @@ final class DependencyAuthoringService
         $preparedSourcePath = null;
         // Re-adding/previewing an installed dependency must not discard its committed signer policy.
         foreach ($this->config->dependencies as $existing) {
-            if ($existing['path'] === $rawEntry['path'] && isset($existing['source_config']['sigstore'])) {
+            if (isset($existing['source_config']['sigstore']) && (
+                $this->dependencyMatchesIdentity($existing, $kind, $source, $slug, $provider)
+                || ConfigPathRules::filesystemPath($this->config->repoRoot, $existing['path'])
+                    === ConfigPathRules::filesystemPath($this->config->repoRoot, $rawEntry['path'])
+            )) {
                 $rawEntry['source_config']['sigstore'] = $existing['source_config']['sigstore'];
                 break;
             }

@@ -136,12 +136,26 @@ PHP
         $manifestBytes = file_get_contents($authoringConfig->manifestPath);
         $runtimeBytes = file_get_contents($runtimeFile);
         $service = new DependencyAuthoringService($authoringConfig, new DependencyMetadataResolver(), new RuntimeInspector($authoringConfig->runtime), new ManifestWriter(), new ManagedSourceRegistry(new GitHubReleaseManagedSource($github)), new AdminGovernanceExporter());
-        $reason = '';
-        try {
-            $service->addDependency(['source' => 'github-release', 'kind' => 'plugin', 'slug' => 'fixture', 'path' => $entry['path'], 'github-repository' => 'fixture/project', 'github-release-asset-pattern' => 'package.zip', 'version' => '1.0.0', 'force' => true, 'replace' => true, 'plan' => true]);
-        } catch (RuntimeException $e) { $reason = $e->getMessage(); }
-        $assert(str_contains($reason, 'Sigstore verification failed'), 'Forced release preview inherits the committed signer policy before ZIP extraction.');
-        $assert(file_get_contents($authoringConfig->manifestPath) === $manifestBytes && file_get_contents($runtimeFile) === $runtimeBytes, 'Rejected release preview preserves manifest and installed runtime bytes.');
+        $cases = [
+            ['slug' => 'fixture', 'path' => $entry['path'], 'plan' => true],
+            ['slug' => 'fixture', 'path' => 'wp-content/plugins/relocated-fixture', 'plan' => true],
+            ['slug' => 'fixture', 'path' => 'wp-content/plugins/relocated-fixture', 'plan' => false],
+            ['slug' => 'replacement-fixture', 'path' => $entry['path'], 'plan' => true],
+        ];
+        $alias = 'wp-content/plugins/FIXTURE';
+        if (is_dir($authoringRoot . '/' . $alias)) {
+            $cases[] = ['slug' => 'replacement-fixture', 'path' => $alias, 'plan' => true];
+        }
+        foreach ($cases as $case) {
+            $reason = '';
+            $options = ['source' => 'github-release', 'kind' => 'plugin', 'slug' => $case['slug'], 'path' => $case['path'], 'github-repository' => 'fixture/project', 'github-release-asset-pattern' => 'package.zip', 'version' => '1.0.0', 'force' => true, 'replace' => true];
+            try {
+                if ($case['plan']) { $service->planAddDependency($options); }
+                else { $service->addDependency($options); }
+            } catch (RuntimeException $e) { $reason = $e->getMessage(); }
+            $assert(str_contains($reason, 'Sigstore verification failed'), 'Replacement, relocation and filesystem aliases retain required verification before ZIP extraction.');
+            $assert(file_get_contents($authoringConfig->manifestPath) === $manifestBytes && file_get_contents($runtimeFile) === $runtimeBytes, 'Rejected authoring operations preserve manifest and installed runtime bytes.');
+        }
     } finally {
         putenv($secret === false ? 'WP_CORE_BASE_SIGSTORE_TEST_SECRET' : 'WP_CORE_BASE_SIGSTORE_TEST_SECRET=' . $secret);
         if (is_resource($process)) { proc_terminate($process); foreach ($pipes as $pipe) fclose($pipe); proc_close($process); }
