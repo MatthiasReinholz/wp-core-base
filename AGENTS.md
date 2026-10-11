@@ -102,6 +102,7 @@ Do not blur those contracts when reasoning about the system.
 - downstream-owned premium provider registrations live in `.wp-core-base/premium-providers.php`.
 - workflow-managed plugins may intentionally look non-updateable inside wp-admin because the governance MU plugin suppresses misleading in-dashboard update actions for them.
 - hosted release dependencies may opt into download-time trust checks through `security.github_release_verification`, `security.managed_release_min_age_hours`, `source_config.verification_mode`, `source_config.checksum_asset_pattern`, and `source_config.min_release_age_hours`.
+- hosted release dependencies may require Sigstore signatures through `source_config.sigstore`; inspect the real bundle and exact signer first, keep publisher identity in the downstream manifest, and run `install-verification-tools` before downloads.
 - `generic-json` is a built-in latest-version metadata source for public HTTPS plugin or theme feeds, not a historical release catalog.
 
 ## Unsafe Assumptions

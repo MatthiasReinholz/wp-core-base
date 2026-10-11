@@ -34,6 +34,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+      - name: Install required release verification tools
+        run: |
+          __WPORG_PHP_PATH__ install-verification-tools --repo-root=.
+          echo "${GITHUB_WORKSPACE}/.wp-core-base/build/verification-tools" >> "${GITHUB_PATH}"
+
       - name: Run updater
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

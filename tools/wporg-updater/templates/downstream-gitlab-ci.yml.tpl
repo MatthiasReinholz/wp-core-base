@@ -10,6 +10,8 @@ stages:
   before_script:
     - apt-get update
     - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git php-cli php-curl php-xml php-zip unzip
+    - __WPORG_PHP_PATH__ install-verification-tools --repo-root=.
+    - export PATH="$CI_PROJECT_DIR/.wp-core-base/build/verification-tools:$PATH"
     - git config user.name "wp-core-base bot"
     - git config user.email "wp-core-base-bot@users.noreply.gitlab.com"
     - |

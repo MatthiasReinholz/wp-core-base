@@ -325,6 +325,35 @@ Use `local` for project-owned runtime code such as:
 
 ## Private GitHub Dependencies
 
+### Required Sigstore signatures
+
+Hosted GitHub and GitLab release dependencies may define an independent required
+signer policy in `source_config.sigstore`. Omit this key for existing checksum-only
+behavior. Once configured, a missing, ambiguous, invalid or unverifiable bundle
+blocks download completion before extraction, adoption or update application.
+There is no optional-signature fallback. Checksum-sidecar policy remains separate.
+
+```php
+'sigstore' => [
+    'bundle_asset_pattern' => 'example-plugin.zip.sigstore.json',
+    'certificate_identity' => 'https://github.com/owner/example-plugin/.github/workflows/release.yml@refs/heads/main',
+    'oidc_issuer' => 'https://token.actions.githubusercontent.com',
+],
+```
+
+The bundle pattern must select exactly one asset distinct from the package. The
+certificate identity and issuer are exact strings, never regular expressions.
+All three fields are required; unknown keys, control characters, invalid issuer
+URLs and unsupported sources are rejected. Private bundle downloads retain the
+package's credential-origin, redirect and response-size restrictions.
+
+Run `install-verification-tools` explicitly before downloads and add
+`.wp-core-base/build/verification-tools` to `PATH`. It installs digest-pinned
+Cosign only when a managed dependency requires signatures. The generated CI
+workflows do this automatically. Custom workflows must add the same setup;
+runtime staging itself still validates committed tree checksums without fetching
+or executing verification tools. See [dependency authoring](managing-dependencies.md#sigstore-signed-release-assets).
+
 For a private GitHub release-backed dependency, use:
 
 - `source: 'github-release'`

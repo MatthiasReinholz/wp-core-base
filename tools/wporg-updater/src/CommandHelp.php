@@ -40,6 +40,7 @@ Usage:
   {$phpCommandPrefix} sync-report-issue --report-json=.wp-core-base/build/sync-report.json
   {$phpCommandPrefix} doctor [--repo-root=/path] [--automation] [--github] [--json]
   {$phpCommandPrefix} stage-runtime [--repo-root=/path] [--output=.wp-core-base/build/runtime] [--json]
+  {$phpCommandPrefix} install-verification-tools [--repo-root=/path] [--json]
   {$phpCommandPrefix} refresh-admin-governance [--repo-root=/path]
   {$phpCommandPrefix} scaffold-downstream [--repo-root=/path] [--tool-path=vendor/wp-core-base] [--profile=content-only-default] [--content-root=cms] [--automation-provider=github|gitlab] [--force] [--adopt-existing-managed-files]
   {$phpCommandPrefix} framework-sync [--repo-root=/path] [--check-only] [--fail-on-skipped-managed-files] [--json]

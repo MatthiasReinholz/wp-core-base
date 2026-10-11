@@ -12,6 +12,7 @@ final class GitLabReleaseClient
     public function __construct(
         private readonly HttpClient $httpClient,
         private readonly string $apiBase = 'https://gitlab.com/api/v4',
+        private readonly SigstoreBundleVerifier $sigstoreVerifier = new SigstoreBundleVerifier(),
     ) {
     }
 
@@ -149,6 +150,7 @@ final class GitLabReleaseClient
      */
     public function downloadReleaseToFile(array $release, array $dependency, string $destination): void
     {
+        $sigstorePolicy = SigstoreVerificationPolicy::forDependency($dependency);
         $asset = $this->selectReleaseAsset($release, $dependency);
         $assetUrl = $this->assetDownloadUrl($asset);
 
@@ -165,6 +167,23 @@ final class GitLabReleaseClient
             'strip_auth_on_cross_origin_redirect' => true,
             'max_download_bytes' => 512 * 1024 * 1024,
         ]);
+        if ($sigstorePolicy !== null) {
+            $matches = array_values(array_filter((array) ($release['assets']['links'] ?? []), static fn ($link): bool =>
+                is_array($link) && is_string($link['name'] ?? null) && fnmatch($sigstorePolicy['bundle_asset_pattern'], $link['name'])
+            ));
+            $bundleUrl = count($matches) === 1 ? $this->assetDownloadUrl($matches[0]) : null;
+            if ($bundleUrl === null || $matches[0]['name'] === ($asset['name'] ?? '')) {
+                throw new RuntimeException('Required Sigstore bundle pattern must select exactly one distinct downloadable release asset.');
+            }
+            $bundle = $this->httpClient->getWithOptions($bundleUrl, $this->headers($dependency), [
+                'allowed_redirect_hosts' => $this->allowedDownloadHosts($dependency),
+                'credential_origin' => $this->apiBase($dependency),
+                'strip_auth_on_cross_origin_redirect' => true,
+                'max_body_bytes' => 1024 * 1024,
+                'follow_redirects' => true,
+            ]);
+            $this->sigstoreVerifier->verify($destination, $bundle, $sigstorePolicy);
+        }
     }
 
     /**

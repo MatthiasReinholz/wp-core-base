@@ -20,6 +20,11 @@ jobs:
           php-version: '8.3'
           coverage: none
 
+      - name: Install required release verification tools
+        run: |
+          __WPORG_PHP_PATH__ install-verification-tools --repo-root=.
+          echo "${GITHUB_WORKSPACE}/.wp-core-base/build/verification-tools" >> "${GITHUB_PATH}"
+
       - name: Run doctor
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

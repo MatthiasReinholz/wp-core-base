@@ -426,6 +426,29 @@ final class DependencyAuthoringService
         ];
 
         $preparedSourcePath = null;
+        // Re-adding/previewing an installed dependency must not discard its committed signer policy.
+        foreach ($this->config->dependencies as $existing) {
+            if ($existing['path'] === $rawEntry['path'] && isset($existing['source_config']['sigstore'])) {
+                $rawEntry['source_config']['sigstore'] = $existing['source_config']['sigstore'];
+                break;
+            }
+        }
+        $sigstoreOptions = [
+            'bundle_asset_pattern' => 'sigstore-bundle-asset-pattern',
+            'certificate_identity' => 'sigstore-certificate-identity',
+            'oidc_issuer' => 'sigstore-oidc-issuer',
+        ];
+        if (array_intersect(array_values($sigstoreOptions), array_keys($options)) !== []) {
+            $policy = [];
+            foreach ($sigstoreOptions as $key => $option) {
+                $policy[$key] = $options[$option] ?? null;
+            }
+            $rawEntry['source_config']['sigstore'] = SigstoreVerificationPolicy::forDependency([
+                'source' => $source,
+                'source_config' => ['sigstore' => $policy],
+            ]);
+        }
+        SigstoreVerificationPolicy::forDependency($rawEntry);
         $workspace = null;
         $sanitizePaths = [];
         $sanitizeFiles = [];
