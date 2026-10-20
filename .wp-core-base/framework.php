@@ -32,13 +32,13 @@ return array (
       1 =>
       array (
         'name' => 'Jetpack',
-        'version' => '16.3',
+        'version' => '16.3.1',
         'kind' => 'plugin',
       ),
       2 =>
       array (
         'name' => 'Contact Form 7',
-        'version' => '6.2.1',
+        'version' => '6.2.2',
         'kind' => 'plugin',
       ),
       3 =>
