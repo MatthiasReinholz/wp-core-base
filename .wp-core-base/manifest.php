@@ -357,8 +357,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/contact-form-7',
       'main_file' => 'wp-contact-form-7.php',
-      'version' => '6.2.1',
-      'checksum' => 'sha256:c3f1a925ed17ce28112c666347fe661bbc4a3a29abd3ee6760ed9479a5c6a056',
+      'version' => '6.2.2',
+      'checksum' => 'sha256:a7120bd1f265d9c63addaa8474d0954c15b899e9e350124bc603adb0fa3796fc',
       'archive_subdir' => '',
       'extra_labels' =>
       array (
