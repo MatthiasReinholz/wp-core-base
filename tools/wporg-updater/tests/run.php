@@ -778,7 +778,7 @@ $runtimeDefaults = [
     'managed_sanitize_files' => RuntimeHygieneDefaults::MANAGED_SANITIZE_FILES,
 ];
 $checkoutActionSha = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
-$setupPhpActionSha = 'shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240';
+$setupPhpActionSha = 'shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962';
 $legacyRuntimeDefaults = $runtimeDefaults;
 unset(
     $legacyRuntimeDefaults['manifest_mode'],
