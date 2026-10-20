@@ -143,7 +143,7 @@ That surfaces any framework-managed files that would refresh, be removed, or be 
 
 The current repository source includes the following baseline. Previously published tags and signed release assets retain their original contents:
 
-- framework release `1.7.0`
+- framework release `1.7.1`
 - WordPress core `7.1.3`
 - Akismet `5.6`
 - WooCommerce `11.2.1`
