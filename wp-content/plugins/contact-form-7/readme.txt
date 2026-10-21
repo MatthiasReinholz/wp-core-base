@@ -5,7 +5,7 @@ Tags: contact form, schema-woven validation
 Tested up to: 7.1
 Requires at least: 7.1
 Requires PHP: 8.3
-Stable tag: 6.2.2
+Stable tag: 6.2.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -25,21 +25,7 @@ It is hard to continue to maintain this plugin without support from users like y
 
 = Privacy notices =
 
-With the default configuration, this plugin, in itself, does not:
-
-* track users by stealth;
-* write any user personal data to the database;
-* send any data to external servers;
-* use cookies.
-
-If you activate certain features in this plugin, the contact form submitter's personal data, including their IP address, may be sent to the service provider. Thus, confirming the provider's privacy policy is recommended. These features include:
-
-* reCAPTCHA ([Google](https://policies.google.com/?hl=en))
-* Akismet ([Automattic](https://automattic.com/privacy/))
-* [Constant Contact](https://www.constantcontact.com/legal/privacy-center)
-* [Brevo](https://www.brevo.com/legal/privacypolicy/)
-* [Stripe](https://stripe.com/privacy)
-* Turnstile ([Cloudflare](https://www.cloudflare.com/turnstile-privacy-policy/))
+See [Plugin privacy notices](https://contactform7.com/plugin-privacy-notices/).
 
 == Installation ==
 
@@ -65,6 +51,10 @@ Do you have questions or issues with Contact Form 7? Use these support channels 
 1. screenshot-1.png
 
 == Changelog ==
+
+= 6.2.3 =
+
+* [Release announcement](https://contactform7.com/2026/10/21/contact-form-7-623/)
 
 = 6.2.2 =
 
