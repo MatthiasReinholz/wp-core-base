@@ -17,7 +17,7 @@ final class SigstoreToolInstaller
         'darwin-arm64' => '5cf948c2f4dfe59687bdd0b8523709067383e03982cc543475c8a7dc70e92a76',
     ];
 
-    public function install(Config $config, HttpClient $httpClient): ?string
+    public function install(Config $config, JsonHttpTransport $httpClient): ?string
     {
         $required = false;
         foreach ($config->managedDependencies() as $dependency) {
@@ -52,7 +52,12 @@ final class SigstoreToolInstaller
                 sprintf('https://github.com/sigstore/cosign/releases/download/v%s/cosign-%s', self::VERSION, $platform),
                 $temporary,
                 [],
-                ['allowed_redirect_hosts' => ['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'], 'max_download_bytes' => 256 * 1024 * 1024]
+                [
+                    'allowed_redirect_hosts' => ['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'],
+                    'max_download_bytes' => 256 * 1024 * 1024,
+                    // Executable artifacts need a larger bounded transfer budget than metadata.
+                    'timeout_seconds' => 180,
+                ]
             );
             FileChecksum::assertSha256Matches($temporary, $digest, 'Pinned Cosign executable');
             if (! chmod($temporary, 0755) || ! rename($temporary, $destination)) {

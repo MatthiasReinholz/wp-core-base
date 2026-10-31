@@ -6,6 +6,7 @@ use WpOrgPluginUpdater\Config;
 use WpOrgPluginUpdater\GitHubReleaseClient;
 use WpOrgPluginUpdater\GitLabReleaseClient;
 use WpOrgPluginUpdater\HttpClient;
+use WpOrgPluginUpdater\JsonHttpTransport;
 use WpOrgPluginUpdater\ManifestWriter;
 use WpOrgPluginUpdater\AdminGovernanceExporter;
 use WpOrgPluginUpdater\DependencyAuthoringService;
@@ -51,6 +52,28 @@ function run_sigstore_contract_tests(callable $assert, string $repoRoot): void
         $fails(static fn () => SigstoreVerificationPolicy::forDependency(['source' => 'local', 'source_config' => ['sigstore' => $policy]]), 'Signature policy cannot silently apply to an unsupported source.');
         $unconfigured = Config::fromArray($root, [...$manifest, 'dependencies' => []]);
         $assert((new SigstoreToolInstaller())->install($unconfigured, new HttpClient()) === null, 'Tool installation is a network-free no-op when signatures are not configured.');
+
+        $toolTransport = new class implements JsonHttpTransport {
+            /** @var list<array<string, mixed>> */
+            public array $downloads = [];
+
+            public function getJsonWithOptions(string $url, array $headers = [], array $options = []): array
+            {
+                throw new RuntimeException('Executable installation must not request metadata.');
+            }
+
+            public function downloadToFileWithOptions(string $url, string $destination, array $headers = [], array $options = []): void
+            {
+                $this->downloads[] = $options;
+                throw new RuntimeException('Fixture stops before any executable download.');
+            }
+        };
+        $fails(static fn () => (new SigstoreToolInstaller())->install($config, $toolTransport), 'A failed verifier transfer remains a visible installation failure.');
+        $assert(count($toolTransport->downloads) === 1, 'Configured signature verification attempts exactly the pinned executable transfer.');
+        $toolOptions = $toolTransport->downloads[0];
+        $assert(($toolOptions['timeout_seconds'] ?? 0) >= 120 && $toolOptions['timeout_seconds'] <= 300, 'Large verifier artifacts have a bounded transfer budget independent of the short metadata deadline.');
+        $assert($toolOptions['max_download_bytes'] === 256 * 1024 * 1024, 'The longer transfer budget retains the executable byte ceiling.');
+        $assert($toolOptions['allowed_redirect_hosts'] === ['github.com', 'release-assets.githubusercontent.com', 'objects.githubusercontent.com'], 'The transfer budget does not widen trusted executable hosts.');
 
         // Normal upgrades render new templates with the already installed renderer.
         // v1.6.7 supplies only these two placeholders to the validation template.

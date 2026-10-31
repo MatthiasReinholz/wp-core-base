@@ -48,6 +48,11 @@ Rules:
   vector, and is bounded by a 60-second timeout and 64 KiB diagnostic budget
 - the explicit tool installer authenticates its pinned executable by a committed
   digest; publisher-specific identities belong only in downstream manifests
+- executable downloads use a bounded 180-second transfer timeout because the
+  pinned verifier is substantially larger than metadata responses. The normal
+  ten-second connection limit, 256 MiB byte ceiling, host allowlist, checksum
+  verification and atomic installation remain in force; metadata retains its
+  existing shorter timeout.
 
 - do not require checksum-sidecar verification unless the upstream actually publishes a checksum sidecar asset
 - do not guess checksum asset patterns
