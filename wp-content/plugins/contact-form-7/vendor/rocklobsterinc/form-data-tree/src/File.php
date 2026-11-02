@@ -46,7 +46,7 @@ class File implements FileInterface
             $tmp_name = strip_whitespaces((string) $array["tmp_name"]);
             $error = (int) $array["error"];
 
-            if ("" !== $name and 0 !== $size) {
+            if (0 !== $size) {
                 return new self([
                     "name" => $name,
                     "size" => $size,
@@ -59,7 +59,7 @@ class File implements FileInterface
         }
 
         if (is_array($array)) {
-            return array_map("self::walkToFindSelf", $array);
+            return array_map(File::walkToFindSelf(...), $array);
         }
     }
 
