@@ -276,6 +276,7 @@ function run_security_framework_contract_tests(
             copy($this->artifactPath, $destination);
         }
     };
+    run_framework_refresh_native_noop_contract_tests($assert, $repoRoot, $strictArtifactPath, $strictReleaseSource, $strictTargetVersion);
     $strictFrameworkSyncer = new FrameworkSyncer(
         framework: FrameworkConfig::load($strictCheckRoot),
         repoRoot: $strictCheckRoot,
@@ -372,4 +373,82 @@ function run_security_framework_contract_tests(
         ],
     ));
     $assert(is_array($frameworkMetadata) && $frameworkMetadata['slug'] === 'wp-core-base', 'Expected framework PR metadata to include a slug for blocker compatibility.');
+}
+
+/** @param callable(bool,string):void $assert */
+function run_framework_refresh_native_noop_contract_tests(callable $assert, string $repoRoot, string $archive, \WpOrgPluginUpdater\FrameworkReleaseSource $innerSource, string $targetVersion): void
+{
+    $root = sys_get_temp_dir() . '/framework-refresh-base-noop-' . bin2hex(random_bytes(6));
+    mkdir($root, 0700, true);
+    $run = static function (string $cwd, array $args): string {
+        $process = proc_open($args, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $cwd);
+        if (! is_resource($process)) { throw new RuntimeException('Unable to start framework Git fixture.'); }
+        $out = stream_get_contents($pipes[1]); $err = stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
+        if (proc_close($process) !== 0) { throw new RuntimeException('Framework Git fixture failed: ' . substr((string) $err, 0, 2048)); }
+        return trim((string) $out);
+    };
+    try {
+        // Reuse the maintained detached-signature fixture and release-source seam.
+        $checksum = $root . '/target.sha256'; $signature = $checksum . '.sig';
+        file_put_contents($checksum, hash_file('sha256', $archive) . '  ' . basename($archive) . "\n");
+        \WpOrgPluginUpdater\FrameworkReleaseSignature::signChecksumFile($checksum, $signature,
+            (string) file_get_contents($repoRoot . '/tools/wporg-updater/tests/fixtures/release-signing/private.pem'));
+        $source = new class($innerSource, $archive, $checksum, $signature, $repoRoot) implements \WpOrgPluginUpdater\FrameworkReleaseSource {
+            public int $verifiedDownloads = 0;
+            public function __construct(private readonly \WpOrgPluginUpdater\FrameworkReleaseSource $inner, private readonly string $archive, private readonly string $checksum, private readonly string $signature, private readonly string $repoRoot) {}
+            public function fetchStableReleases(\WpOrgPluginUpdater\FrameworkConfig $framework): array { return $this->inner->fetchStableReleases($framework); }
+            public function releaseData(\WpOrgPluginUpdater\FrameworkConfig $framework, array $release): array { return $this->inner->releaseData($framework, $release); }
+            public function downloadVerifiedReleaseAsset(\WpOrgPluginUpdater\FrameworkConfig $framework, array $release, string $destination): void {
+                \WpOrgPluginUpdater\FrameworkReleaseSignature::verifyChecksumFile($this->checksum, $this->signature, $this->repoRoot . '/tools/wporg-updater/tests/fixtures/release-signing/public.pem');
+                \WpOrgPluginUpdater\FileChecksum::assertSha256Matches($this->archive,
+                    \WpOrgPluginUpdater\FileChecksum::extractSha256ForAsset((string) file_get_contents($this->checksum), basename($this->archive)), 'Signed framework refresh fixture');
+                $this->verifiedDownloads++;
+                $this->inner->downloadVerifiedReleaseAsset($framework, $release, $destination);
+            }
+        };
+        foreach ([false, true] as $baseSatisfied) {
+            $case = $root . ($baseSatisfied ? '/satisfied' : '/pending'); mkdir($case);
+            $work = $case . '/work'; mkdir($work);
+            (new \WpOrgPluginUpdater\DownstreamScaffolder($repoRoot, $work))->scaffold('vendor/wp-core-base', 'content-only', 'cms', true);
+            (new \WpOrgPluginUpdater\FrameworkReleaseArtifactBuilder($repoRoot))->copySnapshotTo($work . '/vendor/wp-core-base');
+            $inspector = new \WpOrgPluginUpdater\RuntimeInspector(\WpOrgPluginUpdater\Config::load($work)->runtime);
+            $payload = $case . '/target'; mkdir($payload);
+            $zip = new ZipArchive();
+            if ($zip->open($archive) !== true) { throw new RuntimeException('Unable to open existing target fixture.'); }
+            \WpOrgPluginUpdater\ZipExtractor::extractValidated($zip, $payload); $zip->close();
+            $installer = new \WpOrgPluginUpdater\FrameworkInstaller($work, $inspector);
+            if ($baseSatisfied) { $installer->apply($payload . '/wp-core-base', 'vendor/wp-core-base'); }
+            $run($case, ['git', 'init', '--bare', $case . '/remote.git']); $run($work, ['git', 'init', '-b', 'main']);
+            $run($work, ['git', 'config', 'user.name', 'Framework refresh fixture']); $run($work, ['git', 'config', 'user.email', 'fixture@example.test']);
+            $run($work, ['git', 'config', 'commit.gpgsign', 'false']);
+            file_put_contents($work . '/.gitignore', "\n/.wp-core-base/build/\n", FILE_APPEND);
+            $run($work, ['git', 'add', '.']); $run($work, ['git', 'commit', '--no-gpg-sign', '-m', 'Current framework base']);
+            $run($work, ['git', 'remote', 'add', 'origin', $case . '/remote.git']); $run($work, ['git', 'push', '-u', 'origin', 'main']);
+            $base = $run($work, ['git', 'rev-parse', 'HEAD']); $baseFramework = \WpOrgPluginUpdater\FrameworkConfig::load($work);
+            $branch = 'codex/framework-native-refresh-fixture'; $run($work, ['git', 'checkout', '-b', $branch]);
+            if (! $baseSatisfied) { $installer->apply($payload . '/wp-core-base', 'vendor/wp-core-base'); $run($work, ['git', 'add', '.']); $run($work, ['git', 'commit', '--no-gpg-sign', '-m', 'Existing verified framework target']); }
+            $head = $run($work, ['git', 'rev-parse', 'HEAD']); $run($work, ['git', 'push', 'origin', $branch]); $run($work, ['git', 'checkout', 'main']);
+            $client = new FakeGitHubAutomationClient(); $git = new \WpOrgPluginUpdater\GitCommandRunner($work);
+            $config = \WpOrgPluginUpdater\Config::load($work);
+            $syncer = new \WpOrgPluginUpdater\FrameworkSyncer($baseFramework, $work, $config, $source,
+                new \WpOrgPluginUpdater\ReleaseClassifier(), new \WpOrgPluginUpdater\PrBodyRenderer(), $client, $git, $inspector);
+            $pr = ['number' => 42, 'state' => 'open', 'draft' => false, 'labels' => [['name' => 'automation:framework-update']],
+                'metadata' => ['component_key' => 'framework:wp-core-base', 'branch' => $branch, 'base_version' => $baseFramework->version],
+                'head' => ['ref' => $branch, 'sha' => $head, 'repo' => ['full_name' => 'example/site']], 'base' => ['ref' => 'main', 'repo' => ['full_name' => 'example/site']],
+                'planned_target_version' => $targetVersion, 'planned_release_at' => '2026-04-19T12:00:00Z', 'planned_scope' => 'patch', 'requires_code_update' => true];
+            $pr['body'] = '<!-- wporg-update-metadata: ' . json_encode($pr['metadata'], JSON_THROW_ON_ERROR) . ' -->';
+            $beforeDownloads = $source->verifiedDownloads;
+            $result = (new ReflectionMethod(\WpOrgPluginUpdater\FrameworkSyncer::class, 'refreshPullRequest'))->invoke($syncer, $pr, [], [], 'main', $base, true, $baseFramework);
+            $remote = $run($work, ['git', 'ls-remote', '--refs', 'origin', 'refs/heads/' . $branch]);
+            if ($baseSatisfied) {
+                $assert(! $result && count($client->closedPullRequests) === 1 && $remote === '', 'A framework target actually satisfied by base must close with exact owned-ref cleanup.');
+                $assert($source->verifiedDownloads === $beforeDownloads, 'A satisfied framework base must not download or reinstall the release.');
+            } else {
+                $assert($result && $client->closedPullRequests === [] && count($client->updatedPullRequests) === 1, 'A signed already-current framework branch must remain open against an older base.');
+                $assert(str_starts_with($remote, $head) && $git->successfulPushRevision($branch) === null, 'An identical framework refresh must preserve its exact remote head without a phantom push.');
+                $assert($source->verifiedDownloads === $beforeDownloads + 2, 'Metadata and install refresh must both retain real detached-signature and checksum verification.');
+            }
+            $assert($run($work, ['git', 'rev-parse', 'origin/main']) === $base && $run($work, ['git', 'status', '--porcelain']) === '', 'Framework refresh must preserve current base and return a clean checkout.');
+        }
+    } finally { (new \WpOrgPluginUpdater\RuntimeInspector([]))->clearPath($root); }
 }
