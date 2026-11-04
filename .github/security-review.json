@@ -1,7 +1,7 @@
 {
     "schema_version": 1,
     "repository": "MatthiasReinholz/wp-core-base",
-    "wordpress_version": "7.1.3",
+    "wordpress_version": "7.1.4",
     "analysis_key": "dynamic/github-code-scanning/codeql:analyze",
     "workflow_path": "dynamic/github-code-scanning/codeql",
     "sources": {
@@ -17,8 +17,8 @@
         "wp-includes/js/dist/format-library.min.js": "ffcd1bbb5f2e679df21875f60d364a10e16b12b13109f758923655ce8ce2ae88",
         "wp-includes/js/dist/rich-text.js": "c177d32871d6c4950ea3b20c5341739cb060ca48e87c1837d15a6d4ca959eb6d",
         "wp-includes/js/dist/rich-text.min.js": "78bea1675ada804957a8f24c31a80592b05424afab953655b91e9094c7299ffb",
-        "wp-includes/js/dist/script-modules/interactivity-router/index.js": "4ae36182ac85892655412ddd2e5d02d1369b4c1f69b8b27a771ba8e11857d279",
-        "wp-includes/js/dist/script-modules/interactivity-router/index.min.js": "fd2d205414f8786aa43273fc6a7e9bdf7a8373750269bc3e54f0f22849ddc55c"
+        "wp-includes/js/dist/script-modules/interactivity-router/index.js": "1b22e4f3961855decf09ec2ad5232d4b72ba7aa61075e8fc25e83e248d5b919b",
+        "wp-includes/js/dist/script-modules/interactivity-router/index.min.js": "3014220b246b04cebdc3cb457cacf8788eee3837d9c2b15d67a170c2792ed31d"
     },
     "analysis_categories": [
         "/language:javascript-typescript",
@@ -41,7 +41,7 @@
                 "wp-includes/js/dist/block-library.js",
                 "wp-includes/js/dist/block-library.min.js"
             ],
-            "review_document": "docs/security-reviews/2026-10-08-core-7.1.3.md"
+            "review_document": "docs/security-reviews/2026-11-04-core-7.1.4.md"
         },
         {
             "number": 231,
@@ -59,7 +59,7 @@
                 "wp-includes/js/dist/script-modules/interactivity-router/index.js",
                 "wp-includes/js/dist/script-modules/interactivity-router/index.min.js"
             ],
-            "review_document": "docs/security-reviews/2026-10-08-core-7.1.3.md"
+            "review_document": "docs/security-reviews/2026-11-04-core-7.1.4.md"
         },
         {
             "number": 242,
@@ -77,7 +77,7 @@
                 "wp-includes/js/dist/script-modules/interactivity-router/index.js",
                 "wp-includes/js/dist/script-modules/interactivity-router/index.min.js"
             ],
-            "review_document": "docs/security-reviews/2026-10-08-core-7.1.3.md"
+            "review_document": "docs/security-reviews/2026-11-04-core-7.1.4.md"
         }
     ],
     "manual_findings": [
@@ -95,7 +95,7 @@
                 "wp-includes/js/dist/format-library.min.js",
                 "wp-includes/js/dist/rich-text.min.js"
             ],
-            "review_document": "docs/security-reviews/2026-10-08-core-7.1.3.md"
+            "review_document": "docs/security-reviews/2026-11-04-core-7.1.4.md"
         }
     ]
 }
