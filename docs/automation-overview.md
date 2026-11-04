@@ -264,3 +264,12 @@ errors, failed verification and authorization failures. This fixes the updater
 path implicated by WordPress reconciliation run `37933580463` and issue `790`;
 it does not waive release checks or the separate supported-runtime ruleset
 requirements for baseline upgrades.
+
+## Unchanged WordPress core refreshes
+
+Refreshing an existing core update branch may produce no staged changes because
+that branch already contains the verified target archive. The PR remains open
+while the current default-base core version is older than its target. A core PR
+is satisfied only when the inspected default base already contains that version
+or a newer version; normal exact-head branch cleanup still applies. Reapplying
+an identical archive does not reset, force-push, merge, or waive source review.
