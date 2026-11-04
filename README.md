@@ -148,7 +148,7 @@ The current repository source includes the following baseline. Previously publis
 - Akismet `5.6`
 - WooCommerce `11.2.1`
 - Jetpack `16.3.1`
-- Contact Form 7 `6.2.2`
+- Contact Form 7 `6.2.4.1`
 - Redirection `5.10.1`
 - Twenty Twenty-Three `1.6`
 - Twenty Twenty-Four `1.4`
