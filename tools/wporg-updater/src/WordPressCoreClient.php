@@ -24,7 +24,10 @@ final class WordPressCoreClient
         'downloads.w.org',
     ];
 
-    public function __construct(private readonly HttpClient $httpClient)
+    public function __construct(
+        private readonly HttpClient $httpClient,
+        private readonly ?JsonHttpTransport $checksumTransport = null,
+    )
     {
     }
 
@@ -269,7 +272,7 @@ final class WordPressCoreClient
             rawurlencode($version),
             rawurlencode(self::DEFAULT_LOCALE)
         );
-        $payload = $this->httpClient->getJsonWithOptions($url, [], [
+        $payload = ($this->checksumTransport ?? $this->httpClient)->getJsonWithOptions($url, [], [
             'allowed_redirect_hosts' => self::ALLOWED_REDIRECT_HOSTS,
             'max_redirects' => 3,
         ]);

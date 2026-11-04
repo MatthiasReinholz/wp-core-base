@@ -259,7 +259,9 @@ final class FrameworkSyncer
                 $result = [];
                 $result = $this->checkoutAndApplyFrameworkVersion($defaultBranch, $branch, $releaseData, $failOnSkippedManagedFiles, $branchGuard);
 
-                $changed = $branchGuard->commitAndPush(
+                // An unchanged existing target branch can still differ from base.
+                // The actual base-version satisfaction guard above owns closure.
+                $branchGuard->commitAndPush(
                     $branch,
                     sprintf('Update wp-core-base from %s to %s', (string) $metadata['base_version'], $targetVersion),
                     $result['changed_paths']
@@ -267,21 +269,6 @@ final class FrameworkSyncer
                 $this->framework = FrameworkConfig::load($this->repoRoot);
                 $skippedFiles = $result['skipped_files'];
 
-                if (! $changed) {
-                    $this->closeSupersededPullRequest(
-                        $plannedPr,
-                        sprintf(
-                            'Refreshing this `wp-core-base` PR from the latest base branch produced no remaining file changes for `%s`. The PR has been closed as a no-op.',
-                            $targetVersion
-                        )
-                    );
-
-                    if ($branchGuard !== null) {
-                        $branchGuard->complete();
-                    }
-
-                    return false;
-                }
             }
 
             if ($failOnSkippedManagedFiles && $skippedFiles !== []) {

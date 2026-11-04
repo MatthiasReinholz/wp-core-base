@@ -199,23 +199,10 @@ final class CoreUpdater
                     $targetVersion,
                     $branchGuard
                 );
-                $changed = $branchGuard->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
-
-                if (! $changed) {
-                    $this->closeSupersededPullRequest(
-                        $plannedPr,
-                        sprintf(
-                            'Refreshing this WordPress core PR from the latest base branch produced no remaining file changes for `%s`. The PR has been closed as a no-op.',
-                            $targetVersion
-                        )
-                    );
-
-                    if ($branchGuard !== null) {
-                        $branchGuard->complete();
-                    }
-
-                    return false;
-                }
+                // Reapplying the target can leave an existing update branch unchanged.
+                // Only the current base version checked above establishes satisfaction;
+                // an empty staged diff does not mean the PR has no delta against base.
+                $branchGuard->commitAndPush($branch, sprintf('Update WordPress core to %s', $targetVersion), $paths);
             }
 
             $releaseForTarget = $this->coreClient->releaseForVersion($targetVersion, $release);
