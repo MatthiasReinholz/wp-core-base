@@ -251,8 +251,8 @@ return array (
       'source' => 'wordpress.org',
       'path' => 'wp-content/plugins/woocommerce',
       'main_file' => 'woocommerce.php',
-      'version' => '11.2.1',
-      'checksum' => 'sha256:166bf999a6ec35100b20648212a695ece9e228dd9048257c051481b6af1b1d93',
+      'version' => '11.3.0',
+      'checksum' => 'sha256:7d30d423fe5839ac2cdf9ae14c5d46a96cdb707ffc6f002009074bc4ce93abfa',
       'archive_subdir' => '',
       'extra_labels' =>
       array (

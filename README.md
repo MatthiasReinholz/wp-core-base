@@ -146,7 +146,7 @@ The current repository source includes the following baseline. Previously publis
 - framework release `1.7.3`
 - WordPress core `7.1.3`
 - Akismet `5.6`
-- WooCommerce `11.2.1`
+- WooCommerce `11.3.0`
 - Jetpack `16.3.1`
 - Contact Form 7 `6.2.4.1`
 - Redirection `5.10.1`
