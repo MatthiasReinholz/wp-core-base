@@ -120,6 +120,11 @@ class OrdersTableDataStore extends \Abstract_WC_Order_Data_Store_CPT implements 
 	 */
 	protected $ephemeral_meta_keys = array(
 		EditLock::META_KEY_NAME,
+		'_wp_trash_meta_status',
+		'_wp_trash_meta_time',
+		'_wp_trash_meta_comments_status',
+		'_debug_log_source',
+		'_debug_log_source_pending_deletion',
 	);
 
 	/**
@@ -862,6 +867,53 @@ class OrdersTableDataStore extends \Abstract_WC_Order_Data_Store_CPT implements 
 	}
 
 	/**
+	 * Throws before any order table is written when a value will not fit its column.
+	 *
+	 * Rows saved with $wpdb->insert() or $wpdb->update() (the ones with a `where` clause) are refused by wpdb when a
+	 * value is too long, which would otherwise happen after the order row was already written. The other rows use a
+	 * raw query, where MySQL truncates instead of failing, so they are not checked.
+	 *
+	 * @param array $db_updates Rows to persist, as returned by get_db_rows_for_order().
+	 * @return void
+	 * @throws \Exception When a value is longer than its column allows.
+	 */
+	private function validate_db_row_lengths( array $db_updates ): void {
+		global $wpdb;
+
+		foreach ( $db_updates as $update ) {
+			if ( ! isset( $update['where'] ) ) {
+				continue;
+			}
+
+			foreach ( $update['data'] as $column => $value ) {
+				if ( ! is_string( $value ) || in_array( $update['format'][ $column ] ?? '%s', array( '%d', '%f' ), true ) ) {
+					continue;
+				}
+
+				$column_length = $wpdb->get_col_length( $update['table'], $column );
+				if ( ! is_array( $column_length ) || empty( $column_length['length'] ) ) {
+					continue;
+				}
+
+				// Same measure wpdb uses: bytes for binary and text columns, characters for char and varchar.
+				$value_length = 'byte' === $column_length['type'] ? strlen( $value ) : mb_strlen( $value, 'UTF-8' );
+				if ( $value_length > $column_length['length'] ) {
+					throw new \Exception(
+						esc_html(
+							sprintf(
+								/* translators: 1: database table name, 2: column name. */
+								__( 'Could not persist order to database table "%1$s": the value for "%2$s" is too long.', 'woocommerce' ),
+								$update['table'],
+								$column
+							)
+						)
+					);
+				}
+			}
+		}
+	}
+
+	/**
 	 * Get information about whether permissions are granted yet.
 	 *
 	 * @param \WC_Order $order Order object.
@@ -940,6 +992,74 @@ class OrdersTableDataStore extends \Abstract_WC_Order_Data_Store_CPT implements 
 		}
 		$order->set_recorded_coupon_usage_counts( $set );
 		$order->save();
+	}
+
+	/**
+	 * Clears the "coupon usage counted" flag, if it is still set and the stored order status still matches the order object.
+	 *
+	 * The check and the write are one database update, so the flag is cleared by at most one call.
+	 *
+	 * @since 11.3.1
+	 *
+	 * @internal For use by wc_update_coupon_usage_counts() only.
+	 *
+	 * @param \WC_Order $order Order object.
+	 * @return bool True if this call cleared the flag.
+	 */
+	public function clear_recorded_coupon_usage_counts( $order ): bool {
+		global $wpdb;
+
+		$order_id = $order->get_id();
+		$status   = $order->get_status( 'edit' );
+		if ( ! $order_id || ! $status ) {
+			return false;
+		}
+
+		$operational_data_table = self::get_operational_data_table_name();
+		$orders_table           = self::get_orders_table_name();
+
+		// Whether a status is stored with the "wc-" prefix depends on the post statuses registered when the order was saved.
+		// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- trusted table names.
+		$cleared = $wpdb->query(
+			$wpdb->prepare(
+				"UPDATE {$operational_data_table} SET coupon_usages_are_counted = 0
+				WHERE order_id = %d AND coupon_usages_are_counted = 1
+				AND EXISTS ( SELECT 1 FROM {$orders_table} WHERE id = %d AND status IN ( %s, %s ) )",
+				$order_id,
+				$order_id,
+				$status,
+				'wc-' . $status
+			)
+		);
+		// phpcs:enable
+
+		if ( (int) $cleared < 1 ) {
+			return false;
+		}
+
+		$this->set_recorded_coupon_usage_counts( $order, false );
+		return true;
+	}
+
+	/**
+	 * Reads the "coupon usage counted" flag straight from the database, skipping the order cache.
+	 *
+	 * @since 11.3.1
+	 *
+	 * @internal For use by WC_Abstract_Order::remove_coupon() only.
+	 *
+	 * @param \WC_Order $order Order object.
+	 * @return bool
+	 */
+	public function get_stored_recorded_coupon_usage_counts( $order ): bool {
+		global $wpdb;
+
+		$operational_data_table = self::get_operational_data_table_name();
+
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- trusted table name.
+		$value = $wpdb->get_var( $wpdb->prepare( "SELECT coupon_usages_are_counted FROM {$operational_data_table} WHERE order_id = %d", $order->get_id() ) );
+
+		return (bool) $value;
 	}
 
 	/**
@@ -2266,6 +2386,8 @@ FROM $order_meta_table
 		// Figure out what needs to be updated in the database.
 		$db_updates = $this->get_db_rows_for_order( $order, $context, $only_changes );
 
+		$this->validate_db_row_lengths( $db_updates );
+
 		// Persist changes.
 		foreach ( $db_updates as $update ) {
 			// Make sure 'data' and 'format' entries match before passing to $wpdb.
@@ -2890,7 +3012,7 @@ FROM $order_meta_table
 				)
 			);
 
-			$previous_status = 'pending';
+			$previous_status = OrderInternalStatus::PENDING;
 		} elseif ( $previous_state_is_invalid ) {
 			// If we cannot restore to pending, we should probably stand back and let the merchant intervene some other way.
 			wc_get_logger()->warning(
