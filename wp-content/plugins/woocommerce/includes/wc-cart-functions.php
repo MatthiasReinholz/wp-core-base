@@ -13,6 +13,7 @@ use Automattic\WooCommerce\Blocks\Utils\CartCheckoutUtils;
 use Automattic\WooCommerce\Enums\OrderStatus;
 use Automattic\WooCommerce\Enums\ProductType;
 use Automattic\WooCommerce\StoreApi\Utilities\LocalPickupUtils;
+use Automattic\WooCommerce\Utilities\ShippingUtil;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -24,6 +25,13 @@ defined( 'ABSPATH' ) || exit;
  * @return bool
  */
 function wc_protected_product_add_to_cart( $passed, $product_id ) {
+	if ( 'product_variation' === get_post_type( $product_id ) ) {
+		$parent_id = wp_get_post_parent_id( $product_id );
+		if ( $parent_id ) {
+			$product_id = $parent_id;
+		}
+	}
+
 	if ( post_password_required( $product_id ) ) {
 		$passed = false;
 		wc_add_notice( __( 'This product is protected and cannot be purchased.', 'woocommerce' ), 'error' );
@@ -316,7 +324,7 @@ function wc_cart_totals_coupon_html( $coupon ) {
 	}
 
 	$amount               = WC()->cart->get_coupon_discount_amount( $coupon->get_code(), WC()->cart->display_cart_ex_tax );
-	$discount_amount_html = '-' . wc_price( $amount );
+	$discount_amount_html = wc_price( -$amount );
 
 	if ( $coupon->get_free_shipping() && empty( $amount ) ) {
 		$discount_amount_html = __( 'Free shipping coupon', 'woocommerce' );
@@ -419,6 +427,8 @@ function wc_cart_round_discount( $value, $precision ) {
 /**
  * Gets chosen shipping method IDs from chosen_shipping_methods session, without instance IDs.
  *
+ * Only choices whose rate was listed for the cart are returned, see ShippingUtil::filter_chosen_shipping_methods().
+ *
  * @since  2.6.2
  * @return string[]
  */
@@ -427,7 +437,7 @@ function wc_get_chosen_shipping_method_ids() {
 		return array();
 	}
 
-	$chosen_methods = WC()->session->get( 'chosen_shipping_methods', array() );
+	$chosen_methods = ShippingUtil::filter_chosen_shipping_methods( WC()->session->get( 'chosen_shipping_methods', array() ) );
 	$method_ids     = array();
 
 	foreach ( $chosen_methods as $chosen_method ) {
